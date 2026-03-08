@@ -14,7 +14,7 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0",
+    "@prisma/client": "^7.4.2",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -31,7 +31,7 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.7",
-    "prisma": "^5.22.0",
+    "prisma": "^7.4.2",
     "vitest": "^2.1.4"
   }
 }
