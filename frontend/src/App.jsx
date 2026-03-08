@@ -22,6 +22,13 @@ const api = {
   },
   get: p => api.req(p), post: (p, b) => api.req(p, { method: "POST", body: JSON.stringify(b) }),
   put: (p, b) => api.req(p, { method: "PUT", body: JSON.stringify(b) }), del: p => api.req(p, { method: "DELETE" }),
+  async upload(path, formData) {
+    const headers = {};
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    const res = await fetch(`${API}${path}`, { method: "POST", headers, body: formData });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || res.statusText); }
+    return res.json();
+  },
 };
 function unwrap(d, ...k) { for (const key of k) { if (d?.[key]&&Array.isArray(d[key])) return d[key]; if (d?.data?.[key]&&Array.isArray(d.data[key])) return d.data[key]; } if (Array.isArray(d)) return d; if (Array.isArray(d?.data)) return d.data; return []; }
 const ls = { get(k, f=null) { try { return JSON.parse(localStorage.getItem(`cm_${k}`)) || f; } catch { return f; } }, set(k, v) { localStorage.setItem(`cm_${k}`, JSON.stringify(v)); } };
@@ -64,7 +71,157 @@ function AuthScreen(){const{login,register}=useAuth();const[mode,setMode]=useSta
 function DashboardPage(){const{user}=useAuth();const[stats,setStats]=useState({});const[up,setUp]=useState([]);const[loading,setLoading]=useState(true);useEffect(()=>{Promise.all([api.get("/reports/coach/dashboard").catch(()=>({})),api.get("/bookings").catch(()=>({}))]).then(([s,b])=>{setStats(s?.data||s||{});const bk=unwrap(b,"bookings","sessions");setUp(bk.filter(x=>new Date(x.date||x.startTime||x.scheduledAt)>=new Date()).slice(0,3));}).finally(()=>setLoading(false));},[]);if(loading)return<Spin/>;const g=new Date().getHours()<12?"Good morning":new Date().getHours()<17?"Good afternoon":"Good evening";return<div><div style={{marginBottom:20}}><div style={{fontSize:14,color:C.mt}}>{g},</div><h2 style={{color:C.tx,fontSize:22,margin:"4px 0 0",fontWeight:700}}>{user?.name||"Coach"} 👋</h2></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><SC label="Active Clients" value={stats.activeClients??stats.totalClients??0} icon="👥" color={C.ac}/><SC label="Monthly Revenue" value={`₹${(stats.monthlyRevenue??stats.totalRevenue??0).toLocaleString()}`} icon="📈" color={C.ok}/><SC label="Upcoming" value={stats.upcomingBookings??up.length} icon="📅" color={C.a2}/><SC label="Leads" value={stats.totalLeads??0} icon="🎯" color={C.wn}/></div><Card style={{marginTop:16}}><div style={{fontSize:15,fontWeight:600,color:C.tx,marginBottom:12}}>Upcoming Sessions</div>{up.length===0?<div style={{color:C.mt,fontSize:13}}>No upcoming sessions</div>:up.map(s=><div key={s.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.bd}`}}><div style={{width:40,height:40,borderRadius:10,background:C.ac+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>📅</div><div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{s.client?.name||s.client?.user?.name||s.type||"Session"}</div><div style={{fontSize:12,color:C.mt}}>{new Date(s.date||s.startTime||s.scheduledAt).toLocaleDateString()} · {s.duration||60}min</div></div><Badge color={s.status==="confirmed"?C.ok:C.wn}>{s.status||"pending"}</Badge></div>)}</Card></div>;}
 
 // ─── CLIENTS ──────────────────────────────────────────────────────────────────
-function ClientsPage({onOpenChat}){const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);const[search,setSearch]=useState("");const[sel,setSel]=useState(null);const[tab,setTab]=useState("overview");useEffect(()=>{api.get("/clients").then(d=>setClients(unwrap(d,"clients"))).catch(()=>{}).finally(()=>setLoading(false));},[]);const filtered=clients.filter(c=>(c.name||c.user?.name||"").toLowerCase().includes(search.toLowerCase()));if(loading)return<Spin/>;if(sel){const nm=sel.name||sel.user?.name||"Client";return<div><button onClick={()=>setSel(null)} style={{background:"none",border:"none",color:C.ac,cursor:"pointer",fontSize:14,fontWeight:600,marginBottom:12,padding:0,fontFamily:"inherit"}}>← Back</button><Card style={{display:"flex",alignItems:"center",gap:14,marginBottom:16}}><div style={{width:56,height:56,borderRadius:16,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff"}}>{nm[0].toUpperCase()}</div><div style={{flex:1}}><div style={{fontSize:18,fontWeight:700,color:C.tx}}>{nm}</div><div style={{fontSize:13,color:C.mt}}>{sel.email||sel.user?.email}</div></div><button onClick={()=>onOpenChat?.(sel)} style={{width:38,height:38,borderRadius:10,border:"none",cursor:"pointer",background:C.a2+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>💬</button></Card><Tabs tabs={[{id:"overview",label:"Overview"},{id:"progress",label:"Progress"},{id:"habits",label:"Habits"},{id:"nutrition",label:"Nutrition"},{id:"checkins",label:"Check-ins"}]} active={tab} onChange={setTab}/>{tab==="overview"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><SC label="Sessions" value={sel.totalSessions??0} icon="📅" color={C.ac}/><SC label="Streak" value={`${sel.streak??0}d`} icon="🔥" color={C.or}/><SC label="Compliance" value={`${sel.compliance??0}%`} icon="✅" color={C.ok}/><SC label="Goal Progress" value={`${sel.goalProgress??0}%`} icon="🎯" color={C.a2}/></div>}{tab==="progress"&&<ProgressTracker cid={sel.id}/>}{tab==="habits"&&<HabitTracker cid={sel.id}/>}{tab==="nutrition"&&<NutritionTracker cid={sel.id}/>}{tab==="checkins"&&<CheckInsPage/>}</div>;}return<div><ST right={<Badge>{clients.length}</Badge>}>Clients</ST><Input placeholder="Search clients…" value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:14}}/>{filtered.length===0?<Empty icon="👥" text="No clients found"/>:<div style={{display:"flex",flexDirection:"column",gap:8}}>{filtered.map(c=><Card key={c.id} onClick={()=>setSel(c)} style={{padding:14,display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}><div style={{width:42,height:42,borderRadius:12,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:"#fff",flexShrink:0}}>{(c.name||c.user?.name||"?")[0].toUpperCase()}</div><div style={{flex:1,minWidth:0}}><div style={{color:C.tx,fontSize:14,fontWeight:600}}>{c.name||c.user?.name}</div><div style={{color:C.mt,fontSize:12}}>{c.email||c.user?.email}</div></div><Badge color={c.status==="active"?C.ok:C.mt}>{c.status||"active"}</Badge></Card>)}</div>}</div>;}
+function ClientsPage({onOpenChat}){
+  const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
+  const[search,setSearch]=useState("");const[sel,setSel]=useState(null);const[tab,setTab]=useState("overview");
+  const[showAdd,setShowAdd]=useState(false);const[showEdit,setShowEdit]=useState(false);
+  const[showBulk,setShowBulk]=useState(false);const[csvText,setCsvText]=useState("");
+  const[form,setForm]=useState({name:"",email:"",phone:"",sessionType:"offline",goals:"",notes:"",emergencyContact:"",address:"",dob:"",gender:"",injuries:""});
+  const emptyForm={name:"",email:"",phone:"",sessionType:"offline",goals:"",notes:"",emergencyContact:"",address:"",dob:"",gender:"",injuries:""};
+  const load=()=>api.get("/clients").then(d=>setClients(unwrap(d,"clients"))).catch(()=>{}).finally(()=>setLoading(false));
+  useEffect(()=>{load();},[]);
+  const filtered=clients.filter(c=>(c.name||c.user?.name||"").toLowerCase().includes(search.toLowerCase())||(c.email||c.user?.email||"").toLowerCase().includes(search.toLowerCase())||(c.phone||"").includes(search));
+
+  const addClient=async()=>{try{await api.post("/clients",form);setForm(emptyForm);setShowAdd(false);load();}catch(e){alert(e.message);}};
+  const editClient=async()=>{try{await api.put(`/clients/${sel.id}`,form);setShowEdit(false);load();const updated={...sel,...form};setSel(updated);}catch(e){alert(e.message);}};
+  const deleteClient=async(id)=>{if(!confirm("Delete this client? This cannot be undone."))return;try{await api.del(`/clients/${id}`);setSel(null);load();}catch(e){alert(e.message);}};
+
+  const bulkUpload=async()=>{
+    try{
+      const rows=csvText.trim().split("\n").filter(r=>r.trim());
+      if(rows.length<2){alert("Need header row + data rows");return;}
+      const headers=rows[0].split(",").map(h=>h.trim().toLowerCase());
+      const data=rows.slice(1).map(r=>{const vals=r.split(",");const obj={};headers.forEach((h,i)=>{const key=h==="mobile"||h==="phone number"?"phone":h==="full name"?"name":h;obj[key]=vals[i]?.trim()||"";});return obj;});
+      try{await api.post("/clients/bulk",{clients:data});}catch{for(const c of data){try{await api.post("/clients",c);}catch{}}}
+      setCsvText("");setShowBulk(false);load();
+    }catch(e){alert("Upload error: "+e.message);}
+  };
+
+  const handlePhotoUpload=async(e,type)=>{
+    const file=e.target.files?.[0];if(!file)return;
+    const fd=new FormData();fd.append("file",file);fd.append("type",type);fd.append("clientId",sel.id);
+    try{await api.upload(`/clients/${sel.id}/photo`,fd);load();}catch{
+      const reader=new FileReader();reader.onload=ev=>{
+        const photos=ls.get(`photos_${sel.id}`,{});photos[type]=ev.target.result;
+        ls.set(`photos_${sel.id}`,photos);setSel({...sel,_photos:photos});
+      };reader.readAsDataURL(file);
+    }
+  };
+
+  if(loading)return<Spin/>;
+
+  // Client detail view
+  if(sel){const nm=sel.name||sel.user?.name||"Client";const photos=ls.get(`photos_${sel.id}`,{});
+  return<div>
+    <button onClick={()=>setSel(null)} style={{background:"none",border:"none",color:C.ac,cursor:"pointer",fontSize:14,fontWeight:600,marginBottom:12,padding:0,fontFamily:"inherit"}}>← Back</button>
+    <Card style={{display:"flex",alignItems:"center",gap:14,marginBottom:16}}>
+      <div style={{position:"relative"}}>
+        {photos.profile?<img src={photos.profile} style={{width:56,height:56,borderRadius:16,objectFit:"cover"}}/>:
+        <div style={{width:56,height:56,borderRadius:16,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff"}}>{nm[0].toUpperCase()}</div>}
+        <label style={{position:"absolute",bottom:-4,right:-4,width:22,height:22,borderRadius:11,background:C.ac,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:10,color:"#fff",border:`2px solid ${C.sf}`}}>📷<input type="file" accept="image/*" onChange={e=>handlePhotoUpload(e,"profile")} style={{display:"none"}}/></label>
+      </div>
+      <div style={{flex:1}}>
+        <div style={{fontSize:18,fontWeight:700,color:C.tx}}>{nm}</div>
+        <div style={{fontSize:13,color:C.mt}}>{sel.email||sel.user?.email}</div>
+        {sel.phone&&<div style={{fontSize:12,color:C.mt}}>📱 {sel.phone}</div>}
+        <Badge color={sel.sessionType==="online"?C.a2:C.ac} style={{marginTop:4}}>{sel.sessionType||"offline"}</Badge>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:4}}>
+        <button onClick={()=>onOpenChat?.(sel)} style={{width:34,height:34,borderRadius:8,border:"none",cursor:"pointer",background:C.a2+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>💬</button>
+        <button onClick={()=>{setForm({name:sel.name||sel.user?.name||"",email:sel.email||sel.user?.email||"",phone:sel.phone||"",sessionType:sel.sessionType||"offline",goals:sel.goals||"",notes:sel.notes||"",emergencyContact:sel.emergencyContact||"",address:sel.address||"",dob:sel.dob||"",gender:sel.gender||"",injuries:sel.injuries||""});setShowEdit(true);}} style={{width:34,height:34,borderRadius:8,border:"none",cursor:"pointer",background:C.wn+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>✏️</button>
+        <button onClick={()=>deleteClient(sel.id)} style={{width:34,height:34,borderRadius:8,border:"none",cursor:"pointer",background:C.dg+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🗑️</button>
+      </div>
+    </Card>
+
+    {/* Client details card */}
+    <Card style={{marginBottom:12,padding:14}}>
+      <div style={{fontSize:13,fontWeight:600,color:C.tx,marginBottom:8}}>Details</div>
+      {[{l:"Goals",v:sel.goals},{l:"Gender",v:sel.gender},{l:"DOB",v:sel.dob},{l:"Address",v:sel.address},{l:"Emergency Contact",v:sel.emergencyContact},{l:"Injuries/Notes",v:sel.injuries||sel.notes}].filter(x=>x.v).map(x=>
+        <div key={x.l} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"6px 0",borderBottom:`1px solid ${C.bd}`}}>
+          <span style={{color:C.mt}}>{x.l}</span><span style={{color:C.tx,fontWeight:500,maxWidth:"60%",textAlign:"right"}}>{x.v}</span>
+        </div>
+      )}
+    </Card>
+
+    <Tabs tabs={[{id:"overview",label:"Overview"},{id:"progress",label:"Progress"},{id:"habits",label:"Habits"},{id:"nutrition",label:"Nutrition"},{id:"checkins",label:"Check-ins"},{id:"media",label:"Media"}]} active={tab} onChange={setTab}/>
+    {tab==="overview"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><SC label="Sessions" value={sel.totalSessions??0} icon="📅" color={C.ac}/><SC label="Streak" value={`${sel.streak??0}d`} icon="🔥" color={C.or}/><SC label="Compliance" value={`${sel.compliance??0}%`} icon="✅" color={C.ok}/><SC label="Goal Progress" value={`${sel.goalProgress??0}%`} icon="🎯" color={C.a2}/></div>}
+    {tab==="progress"&&<ProgressTracker cid={sel.id}/>}
+    {tab==="habits"&&<HabitTracker cid={sel.id}/>}
+    {tab==="nutrition"&&<NutritionTracker cid={sel.id}/>}
+    {tab==="checkins"&&<CheckInsPage/>}
+    {tab==="media"&&<MediaLibrary clientId={sel.id} clientName={nm}/>}
+
+    {/* Edit Modal */}
+    <Modal open={showEdit} onClose={()=>setShowEdit(false)} title="Edit Client" wide>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Name *" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/><Input label="Email *" type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Mobile *" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="+91 98765 43210"/><Sel label="Session Type" value={form.sessionType} onChange={e=>setForm({...form,sessionType:e.target.value})} options={[{value:"offline",label:"Offline (In-person)"},{value:"online",label:"Online (Virtual)"},{value:"hybrid",label:"Hybrid"}]}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Date of Birth" type="date" value={form.dob} onChange={e=>setForm({...form,dob:e.target.value})}/><Sel label="Gender" value={form.gender||""} onChange={e=>setForm({...form,gender:e.target.value})} options={[{value:"",label:"— Select —"},{value:"male",label:"Male"},{value:"female",label:"Female"},{value:"other",label:"Other"}]}/></div>
+        <Input label="Address" value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/>
+        <TextArea label="Goals" value={form.goals} onChange={e=>setForm({...form,goals:e.target.value})} placeholder="e.g. Lose 10kg, Build muscle"/>
+        <Input label="Emergency Contact" value={form.emergencyContact} onChange={e=>setForm({...form,emergencyContact:e.target.value})} placeholder="Name - Phone"/>
+        <TextArea label="Injuries / Medical Notes" value={form.injuries} onChange={e=>setForm({...form,injuries:e.target.value})} placeholder="Any injuries or medical conditions"/>
+        <Btn onClick={editClient} style={{width:"100%"}}>Save Changes</Btn>
+      </div>
+    </Modal>
+  </div>;}
+
+  // Client list view
+  return<div>
+    <ST right={<div style={{display:"flex",gap:6}}>
+      <Btn variant="secondary" onClick={()=>setShowBulk(true)} style={{padding:"8px 12px",fontSize:12}}>📤 Import</Btn>
+      <Btn onClick={()=>{setForm(emptyForm);setShowAdd(true);}} style={{padding:"8px 14px",fontSize:13}}>+ Add Client</Btn>
+    </div>}>Clients</ST>
+    <Input placeholder="Search by name, email, or phone…" value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:14}}/>
+    {filtered.length===0?<Empty icon="👥" text="No clients found"/>:
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {filtered.map(c=><Card key={c.id} onClick={()=>setSel(c)} style={{padding:14,display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}>
+        <div style={{width:42,height:42,borderRadius:12,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:"#fff",flexShrink:0}}>{(c.name||c.user?.name||"?")[0].toUpperCase()}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{color:C.tx,fontSize:14,fontWeight:600}}>{c.name||c.user?.name}</div>
+          <div style={{color:C.mt,fontSize:12}}>{c.email||c.user?.email}{c.phone?` · ${c.phone}`:""}</div>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+          <Badge color={c.sessionType==="online"?C.a2:C.ac} style={{fontSize:10}}>{c.sessionType||"offline"}</Badge>
+          <Badge color={c.status==="active"?C.ok:C.mt} style={{fontSize:10}}>{c.status||"active"}</Badge>
+        </div>
+      </Card>)}
+    </div>}
+
+    {/* Add Client Modal */}
+    <Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Add New Client" wide>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Full Name *" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="John Doe"/><Input label="Email *" type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="john@email.com"/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Mobile *" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="+91 98765 43210"/><Sel label="Session Type *" value={form.sessionType} onChange={e=>setForm({...form,sessionType:e.target.value})} options={[{value:"offline",label:"Offline (In-person)"},{value:"online",label:"Online (Virtual)"},{value:"hybrid",label:"Hybrid"}]}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Date of Birth" type="date" value={form.dob} onChange={e=>setForm({...form,dob:e.target.value})}/><Sel label="Gender" value={form.gender||""} onChange={e=>setForm({...form,gender:e.target.value})} options={[{value:"",label:"— Select —"},{value:"male",label:"Male"},{value:"female",label:"Female"},{value:"other",label:"Other"}]}/></div>
+        <Input label="Address" value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/>
+        <TextArea label="Goals" value={form.goals} onChange={e=>setForm({...form,goals:e.target.value})} placeholder="e.g. Lose 10kg in 3 months"/>
+        <Input label="Emergency Contact" value={form.emergencyContact} onChange={e=>setForm({...form,emergencyContact:e.target.value})} placeholder="Name - Phone"/>
+        <TextArea label="Injuries / Medical Notes" value={form.injuries} onChange={e=>setForm({...form,injuries:e.target.value})}/>
+        <Btn onClick={addClient} disabled={!form.name||!form.email||!form.phone} style={{width:"100%"}}>Add Client</Btn>
+      </div>
+    </Modal>
+
+    {/* Bulk Upload Modal */}
+    <Modal open={showBulk} onClose={()=>setShowBulk(false)} title="Import Clients (CSV)" wide>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{padding:12,background:C.s2,borderRadius:10,fontSize:12,color:C.mt,lineHeight:1.6}}>
+          <strong style={{color:C.tx}}>CSV Format:</strong><br/>
+          name, email, phone, sessionType<br/>
+          John Doe, john@email.com, 9876543210, offline<br/>
+          Jane Smith, jane@email.com, 9876543211, online
+        </div>
+        <div>
+          <label style={{fontSize:13,color:C.mt,fontWeight:500,marginBottom:6,display:"block"}}>Upload CSV File</label>
+          <input type="file" accept=".csv,.txt" onChange={e=>{const f=e.target.files?.[0];if(f){const r=new FileReader();r.onload=ev=>setCsvText(ev.target.result);r.readAsText(f);}}} style={{fontSize:13,color:C.tx}}/>
+        </div>
+        <div style={{fontSize:13,color:C.mt,fontWeight:500}}>Or paste CSV data:</div>
+        <TextArea value={csvText} onChange={e=>setCsvText(e.target.value)} placeholder="name, email, phone, sessionType&#10;John Doe, john@email.com, 9876543210, offline" style={{minHeight:120,fontFamily:"monospace",fontSize:12}}/>
+        <Btn onClick={bulkUpload} disabled={!csvText.trim()} style={{width:"100%"}}>📤 Import {csvText.trim()?csvText.trim().split("\\n").length-1:0} Clients</Btn>
+      </div>
+    </Modal>
+  </div>;
+}
 
 // ─── PROGRESS TRACKER ─────────────────────────────────────────────────────────
 function ProgressTracker({cid}){const[entries,setEntries]=useState(ls.get(`prog_${cid}`,[]));const[showAdd,setShowAdd]=useState(false);const[form,setForm]=useState({date:new Date().toISOString().slice(0,10),weight:"",bodyFat:"",chest:"",waist:"",hips:"",notes:""});const save=()=>{const u=[...entries,{...form,id:Date.now(),weight:+form.weight||0,bodyFat:+form.bodyFat||0}];setEntries(u);ls.set(`prog_${cid}`,u);setShowAdd(false);setForm({date:new Date().toISOString().slice(0,10),weight:"",bodyFat:"",chest:"",waist:"",hips:"",notes:""});};const lat=entries[entries.length-1];const prev=entries[entries.length-2];const diff=lat&&prev?(lat.weight-prev.weight).toFixed(1):0;return<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontSize:15,fontWeight:600,color:C.tx}}>Body Metrics</span><Btn onClick={()=>setShowAdd(true)} style={{padding:"6px 14px",fontSize:12}}>+ Log</Btn></div>{lat&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}><Card style={{padding:12,textAlign:"center"}}><div style={{fontSize:20,fontWeight:700,color:C.tx}}>{lat.weight}kg</div><div style={{fontSize:11,color:diff>0?C.dg:C.ok}}>{diff>0?"+":""}{diff}kg</div><div style={{fontSize:11,color:C.mt}}>Weight</div></Card><Card style={{padding:12,textAlign:"center"}}><div style={{fontSize:20,fontWeight:700,color:C.tx}}>{lat.bodyFat}%</div><div style={{fontSize:11,color:C.mt}}>Body Fat</div></Card><Card style={{padding:12,textAlign:"center"}}><div style={{fontSize:20,fontWeight:700,color:C.tx}}>{lat.waist||"—"}</div><div style={{fontSize:11,color:C.mt}}>Waist</div></Card></div>}{entries.length>1&&<Card style={{padding:14,marginBottom:12}}><div style={{fontSize:13,fontWeight:600,color:C.tx,marginBottom:8}}>Weight Trend</div><div style={{display:"flex",alignItems:"flex-end",gap:3,height:60}}>{entries.slice(-14).map((e,i,a)=>{const mn=Math.min(...a.map(x=>x.weight));const mx=Math.max(...a.map(x=>x.weight));const h=((e.weight-mn)/(mx-mn||1))*50+10;return<div key={i} style={{flex:1,height:h,borderRadius:3,background:C.gr,opacity:.5+(i/a.length)*.5}} title={`${e.weight}kg`}/>;})}</div></Card>}{entries.length===0&&<Empty icon="📏" text="No progress entries yet"/>}<Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Log Progress"><div style={{display:"flex",flexDirection:"column",gap:12}}><Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Weight (kg)" type="number" value={form.weight} onChange={e=>setForm({...form,weight:e.target.value})}/><Input label="Body Fat (%)" type="number" value={form.bodyFat} onChange={e=>setForm({...form,bodyFat:e.target.value})}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><Input label="Chest" value={form.chest} onChange={e=>setForm({...form,chest:e.target.value})}/><Input label="Waist" value={form.waist} onChange={e=>setForm({...form,waist:e.target.value})}/><Input label="Hips" value={form.hips} onChange={e=>setForm({...form,hips:e.target.value})}/></div><TextArea label="Notes" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/><Btn onClick={save} style={{width:"100%"}}>Save Entry</Btn></div></Modal></div>;}
@@ -83,7 +240,150 @@ const EXDB=[{name:"Barbell Squat",muscle:"Legs",eq:"Barbell"},{name:"Bench Press
 function WorkoutsPage(){const[tab,setTab]=useState("plans");const[plans,setPlans]=useState([]);const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);const[showB,setShowB]=useState(false);const[exS,setExS]=useState("");const[exF,setExF]=useState("all");const[form,setForm]=useState({title:"",description:"",clientId:"",exercises:[{name:"",sets:3,reps:12,rest:60}]});useEffect(()=>{Promise.all([api.get("/workouts").catch(()=>({})),api.get("/clients").catch(()=>({}))]).then(([w,c])=>{setPlans(unwrap(w,"workouts","plans"));setClients(unwrap(c,"clients"));}).finally(()=>setLoading(false));},[]);const addEx=()=>setForm({...form,exercises:[...form.exercises,{name:"",sets:3,reps:12,rest:60}]});const rmEx=i=>setForm({...form,exercises:form.exercises.filter((_,j)=>j!==i)});const upEx=(i,f,v)=>{const e=[...form.exercises];e[i]={...e[i],[f]:v};setForm({...form,exercises:e});};const save=async()=>{await api.post("/workouts",form).catch(()=>{});setShowB(false);};const fe=EXDB.filter(e=>{if(exS&&!e.name.toLowerCase().includes(exS.toLowerCase()))return false;if(exF!=="all"&&e.muscle!==exF)return false;return true;});const muscles=[...new Set(EXDB.map(e=>e.muscle))];if(loading)return<Spin/>;return<div><ST right={<Btn onClick={()=>setShowB(true)} style={{padding:"8px 16px",fontSize:13}}>+ Create</Btn>}>Workouts</ST><Tabs tabs={[{id:"plans",label:"My Plans"},{id:"library",label:"Exercise Library"},{id:"templates",label:"Templates"}]} active={tab} onChange={setTab}/>{tab==="plans"&&(plans.length===0?<Empty icon="💪" text="No workout plans yet"/>:<div style={{display:"flex",flexDirection:"column",gap:10}}>{plans.map(p=><Card key={p.id} style={{padding:16}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"start"}}><div><div style={{color:C.tx,fontWeight:600,fontSize:15}}>{p.title}</div>{p.description&&<div style={{color:C.mt,fontSize:12,marginTop:4}}>{p.description}</div>}</div><Badge color={p.status==="active"?C.ok:C.mt}>{p.status||"draft"}</Badge></div>{p.exercises&&Array.isArray(p.exercises)&&<div style={{marginTop:10,display:"flex",flexWrap:"wrap",gap:4}}>{p.exercises.slice(0,4).map((ex,i)=><span key={i} style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:500,background:C.ac+"15",color:C.ac}}>{ex.name||ex}</span>)}</div>}</Card>)}</div>)}{tab==="library"&&<div><Input placeholder="Search exercises…" value={exS} onChange={e=>setExS(e.target.value)} style={{marginBottom:10}}/><div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:12}}><button onClick={()=>setExF("all")} style={{padding:"4px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:exF==="all"?C.ac:C.s2,color:exF==="all"?"#fff":C.mt}}>All</button>{muscles.map(m=><button key={m} onClick={()=>setExF(m)} style={{padding:"4px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:exF===m?C.ac:C.s2,color:exF===m?"#fff":C.mt}}>{m}</button>)}</div>{fe.map((e,i)=><Card key={i} style={{padding:12,marginBottom:6,display:"flex",alignItems:"center",gap:12}}><div style={{width:36,height:36,borderRadius:10,background:C.ac+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🏋️</div><div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:C.tx}}>{e.name}</div><div style={{fontSize:11,color:C.mt}}>{e.muscle} · {e.eq}</div></div></Card>)}</div>}{tab==="templates"&&<div style={{display:"flex",flexDirection:"column",gap:10}}>{[{n:"PPL - Push",ex:6,lv:"Intermediate"},{n:"PPL - Pull",ex:6,lv:"Intermediate"},{n:"PPL - Legs",ex:6,lv:"Intermediate"},{n:"Full Body Beginner",ex:8,lv:"Beginner"},{n:"Upper/Lower A",ex:6,lv:"Advanced"}].map((t,i)=><Card key={i} style={{padding:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{t.n}</div><div style={{fontSize:12,color:C.mt}}>{t.ex} exercises · {t.lv}</div></div><Btn variant="secondary" style={{padding:"6px 12px",fontSize:12}}>Use</Btn></Card>)}</div>}<Modal open={showB} onClose={()=>setShowB(false)} title="Create Workout" wide><div style={{display:"flex",flexDirection:"column",gap:12}}><Input label="Title" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. PPL Week 1"/><Input label="Description" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/>{clients.length>0&&<Sel label="Assign" value={form.clientId} onChange={e=>setForm({...form,clientId:e.target.value})} options={[{value:"",label:"— Select —"},...clients.map(c=>({value:c.id,label:c.name||c.user?.name}))]}/>}<div style={{fontSize:14,fontWeight:600,color:C.tx,marginTop:8}}>Exercises</div>{form.exercises.map((ex,i)=><Card key={i} style={{padding:12,background:C.s2}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:12,color:C.mt,fontWeight:600}}>#{i+1}</span>{form.exercises.length>1&&<button onClick={()=>rmEx(i)} style={{background:"none",border:"none",cursor:"pointer",color:C.dg,fontSize:18}}>✕</button>}</div><Sel value={ex.name} onChange={e=>upEx(i,"name",e.target.value)} options={[{value:"",label:"— Pick —"},...EXDB.map(e=>({value:e.name,label:`${e.name} (${e.muscle})`}))]} style={{marginBottom:8}}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><Input label="Sets" type="number" value={ex.sets} onChange={e=>upEx(i,"sets",+e.target.value)}/><Input label="Reps" type="number" value={ex.reps} onChange={e=>upEx(i,"reps",+e.target.value)}/><Input label="Rest(s)" type="number" value={ex.rest} onChange={e=>upEx(i,"rest",+e.target.value)}/></div></Card>)}<Btn variant="secondary" onClick={addEx} style={{width:"100%"}}>+ Exercise</Btn><Btn onClick={save} style={{width:"100%"}}>Save Plan</Btn></div></Modal></div>;}
 
 // ─── BOOKINGS ─────────────────────────────────────────────────────────────────
-function BookingsPage(){const[bookings,setBookings]=useState([]);const[loading,setLoading]=useState(true);const[showAdd,setShowAdd]=useState(false);const[clients,setClients]=useState([]);const[selDate,setSelDate]=useState(new Date().toISOString().slice(0,10));const[form,setForm]=useState({clientId:"",date:new Date().toISOString().slice(0,10),time:"09:00",duration:60,type:"training",notes:""});const load=()=>{Promise.all([api.get("/bookings").catch(()=>({})),api.get("/clients").catch(()=>({}))]).then(([b,c])=>{setBookings(unwrap(b,"bookings","sessions"));setClients(unwrap(c,"clients"));}).finally(()=>setLoading(false));};useEffect(()=>{load();},[]);const save=async()=>{await api.post("/bookings",{...form,date:form.date+"T"+form.time+":00"});setShowAdd(false);load();};const gw=()=>{const b=new Date(selDate);const s=new Date(b);s.setDate(b.getDate()-b.getDay());return Array.from({length:7},(_,i)=>{const d=new Date(s);d.setDate(s.getDate()+i);return d;});};const wd=gw();const dn=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];const db=bookings.filter(b=>new Date(b.date||b.startTime||b.scheduledAt).toISOString().slice(0,10)===selDate);if(loading)return<Spin/>;return<div><ST right={<Btn onClick={()=>setShowAdd(true)} style={{padding:"8px 16px",fontSize:13}}>+ Book</Btn>}>Schedule</ST><div style={{display:"flex",gap:4,marginBottom:16}}>{wd.map((d,i)=>{const iso=d.toISOString().slice(0,10);const sel=iso===selDate;const has=bookings.some(b=>new Date(b.date||b.startTime||b.scheduledAt).toISOString().slice(0,10)===iso);return<button key={i} onClick={()=>setSelDate(iso)} style={{flex:1,minWidth:42,padding:"10px 2px",borderRadius:12,border:"none",cursor:"pointer",background:sel?C.gr:C.s2,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}><span style={{fontSize:10,fontWeight:600,color:sel?"#fff":C.mt,textTransform:"uppercase"}}>{dn[d.getDay()]}</span><span style={{fontSize:16,fontWeight:700,color:sel?"#fff":C.tx}}>{d.getDate()}</span>{has&&<div style={{width:5,height:5,borderRadius:"50%",background:sel?"#fff":C.ac}}/>}</button>;})}</div>{db.length===0?<Empty icon="📅" text="No sessions"/>:<div style={{display:"flex",flexDirection:"column",gap:8}}>{db.map(b=>{const t=new Date(b.date||b.startTime||b.scheduledAt);return<Card key={b.id} style={{padding:14,display:"flex",gap:12,alignItems:"center"}}><div style={{width:50,padding:"6px 0",borderRadius:8,background:C.ac+"15",textAlign:"center"}}><span style={{fontSize:13,fontWeight:700,color:C.ac}}>{t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</span></div><div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{b.client?.name||b.client?.user?.name||b.type||"Session"}</div><div style={{fontSize:12,color:C.mt}}>{b.duration||60}min · {b.type||"training"}</div></div><Badge color={b.status==="confirmed"?C.ok:C.wn}>{b.status||"pending"}</Badge></Card>;})}</div>}<Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Book Session"><div style={{display:"flex",flexDirection:"column",gap:12}}>{clients.length>0&&<Sel label="Client" value={form.clientId} onChange={e=>setForm({...form,clientId:e.target.value})} options={[{value:"",label:"— Select —"},...clients.map(c=>({value:c.id,label:c.name||c.user?.name}))]}/>}<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/><Input label="Time" type="time" value={form.time} onChange={e=>setForm({...form,time:e.target.value})}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Duration" type="number" value={form.duration} onChange={e=>setForm({...form,duration:+e.target.value})}/><Sel label="Type" value={form.type} onChange={e=>setForm({...form,type:e.target.value})} options={[{value:"training",label:"Training"},{value:"assessment",label:"Assessment"},{value:"consultation",label:"Consultation"},{value:"group",label:"Group"}]}/></div><TextArea label="Notes" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/><Btn onClick={save} style={{width:"100%"}}>Confirm</Btn></div></Modal></div>;}
+function BookingsPage(){
+  const[bookings,setBookings]=useState([]);const[loading,setLoading]=useState(true);
+  const[showAdd,setShowAdd]=useState(false);const[showRepeat,setShowRepeat]=useState(false);
+  const[clients,setClients]=useState([]);
+  const[selDate,setSelDate]=useState(new Date().toISOString().slice(0,10));
+  const[holidays,setHolidays]=useState(ls.get("holidays",[]));
+  const[form,setForm]=useState({clientId:"",date:new Date().toISOString().slice(0,10),time:"09:00",duration:60,type:"training",notes:""});
+  const[repeatForm,setRepeatForm]=useState({endDate:"",mode:"until_date",daysOfWeek:[1,2,3,4,5]});
+
+  const load=()=>{Promise.all([api.get("/bookings").catch(()=>({})),api.get("/clients").catch(()=>({}))]).then(([b,c])=>{setBookings(unwrap(b,"bookings","sessions"));setClients(unwrap(c,"clients"));}).finally(()=>setLoading(false));};
+  useEffect(()=>{load();},[]);
+
+  const save=async()=>{await api.post("/bookings",{...form,date:form.date+"T"+form.time+":00"}).catch(e=>alert(e.message));setShowAdd(false);load();};
+
+  // Mark attendance
+  const markAttendance=async(bookingId,status)=>{
+    try{await api.put(`/bookings/${bookingId}`,{status});}catch{
+      const updated=bookings.map(b=>b.id===bookingId?{...b,status}:b);setBookings(updated);
+    }load();
+  };
+
+  // Replicate day's schedule
+  const replicateSchedule=async()=>{
+    const dayBookings=bookings.filter(b=>new Date(b.date||b.startTime||b.scheduledAt).toISOString().slice(0,10)===selDate);
+    if(dayBookings.length===0){alert("No sessions on selected day to replicate");return;}
+    const end=new Date(repeatForm.endDate);const start=new Date(selDate);start.setDate(start.getDate()+1);
+    let created=0;
+    for(let d=new Date(start);d<=end;d.setDate(d.getDate()+1)){
+      const dow=d.getDay();
+      if(repeatForm.mode==="week_days"&&!repeatForm.daysOfWeek.includes(dow))continue;
+      const iso=d.toISOString().slice(0,10);
+      if(holidays.includes(iso))continue;
+      for(const bk of dayBookings){
+        const origTime=new Date(bk.date||bk.startTime||bk.scheduledAt);
+        const timeStr=origTime.toTimeString().slice(0,5);
+        try{await api.post("/bookings",{clientId:bk.clientId||bk.client?.id,date:iso+"T"+timeStr+":00",duration:bk.duration||60,type:bk.type||"training",notes:bk.notes||""});created++;}catch{}
+      }
+    }
+    alert(`Created ${created} sessions!`);setShowRepeat(false);load();
+  };
+
+  // Mark holiday
+  const toggleHoliday=(date)=>{
+    const updated=holidays.includes(date)?holidays.filter(h=>h!==date):[...holidays,date];
+    setHolidays(updated);ls.set("holidays",updated);
+  };
+
+  // Cancel day & notify
+  const cancelDay=async()=>{
+    const dayBk=bookings.filter(b=>new Date(b.date||b.startTime||b.scheduledAt).toISOString().slice(0,10)===selDate);
+    if(dayBk.length===0){alert("No sessions to cancel");return;}
+    if(!confirm(`Cancel ${dayBk.length} session(s) on ${selDate} and notify clients?`))return;
+    for(const bk of dayBk){try{await api.put(`/bookings/${bk.id}`,{status:"cancelled"});}catch{}}
+    toggleHoliday(selDate);
+    // Send notification via AI chat
+    try{await api.post("/ai/chat",{message:`Please draft a brief, professional cancellation message for clients: Sessions on ${selDate} are cancelled due to a holiday. Will reschedule soon.`});}catch{}
+    load();alert(`${dayBk.length} session(s) cancelled. Clients will be notified.`);
+  };
+
+  const gw=()=>{const b=new Date(selDate);const s=new Date(b);s.setDate(b.getDate()-b.getDay());return Array.from({length:7},(_,i)=>{const d=new Date(s);d.setDate(s.getDate()+i);return d;});};
+  const wd=gw();const dn=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  const db=bookings.filter(b=>new Date(b.date||b.startTime||b.scheduledAt).toISOString().slice(0,10)===selDate);
+  const isHoliday=holidays.includes(selDate);
+
+  if(loading)return<Spin/>;
+
+  return<div>
+    <ST right={<div style={{display:"flex",gap:6}}>
+      <Btn variant="secondary" onClick={()=>setShowRepeat(true)} style={{padding:"8px 10px",fontSize:12}}>🔁</Btn>
+      <Btn variant={isHoliday?"danger":"secondary"} onClick={()=>isHoliday?toggleHoliday(selDate):cancelDay()} style={{padding:"8px 10px",fontSize:12}}>{isHoliday?"✓ Holiday":"🏖️ Holiday"}</Btn>
+      <Btn onClick={()=>setShowAdd(true)} style={{padding:"8px 14px",fontSize:13}}>+ Book</Btn>
+    </div>}>Schedule</ST>
+
+    {/* Week strip */}
+    <div style={{display:"flex",gap:4,marginBottom:16}}>{wd.map((d,i)=>{
+      const iso=d.toISOString().slice(0,10);const isSel=iso===selDate;
+      const has=bookings.some(b=>new Date(b.date||b.startTime||b.scheduledAt).toISOString().slice(0,10)===iso);
+      const isH=holidays.includes(iso);
+      return<button key={i} onClick={()=>setSelDate(iso)} style={{flex:1,minWidth:42,padding:"10px 2px",borderRadius:12,border:"none",cursor:"pointer",background:isSel?C.gr:isH?C.dg+"20":C.s2,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+        <span style={{fontSize:10,fontWeight:600,color:isSel?"#fff":isH?C.dg:C.mt,textTransform:"uppercase"}}>{dn[d.getDay()]}</span>
+        <span style={{fontSize:16,fontWeight:700,color:isSel?"#fff":C.tx}}>{d.getDate()}</span>
+        {has&&<div style={{width:5,height:5,borderRadius:"50%",background:isSel?"#fff":C.ac}}/>}
+        {isH&&!isSel&&<span style={{fontSize:8,color:C.dg}}>OFF</span>}
+      </button>;
+    })}</div>
+
+    {isHoliday&&<Card style={{padding:12,marginBottom:12,background:C.dg+"10",border:`1px solid ${C.dg}30`}}>
+      <div style={{fontSize:13,fontWeight:600,color:C.dg}}>🏖️ This day is marked as a holiday</div>
+    </Card>}
+
+    {/* Day's bookings with attendance */}
+    {db.length===0?<Empty icon="📅" text={isHoliday?"Holiday — No sessions":"No sessions on this day"}/>:
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {db.map(b=>{const t=new Date(b.date||b.startTime||b.scheduledAt);const clientName=b.client?.name||b.client?.user?.name||b.type||"Session";
+      return<Card key={b.id} style={{padding:14}}>
+        <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:8}}>
+          <div style={{width:50,padding:"6px 0",borderRadius:8,background:C.ac+"15",textAlign:"center"}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.ac}}>{t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</span>
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:600,color:C.tx}}>{clientName}</div>
+            <div style={{fontSize:12,color:C.mt}}>{b.duration||60}min · {b.type||"training"}</div>
+          </div>
+          <Badge color={b.status==="confirmed"||b.status==="present"?C.ok:b.status==="absent"?C.dg:b.status==="cancelled"?C.mt:C.wn}>{b.status||"pending"}</Badge>
+        </div>
+        {/* Attendance buttons */}
+        <div style={{display:"flex",gap:6}}>
+          {[{s:"present",l:"✅ Present",c:C.ok},{s:"absent",l:"❌ Absent",c:C.dg},{s:"late",l:"⏰ Late",c:C.wn},{s:"cancelled",l:"🚫 Cancel",c:C.mt}].map(a=>
+            <button key={a.s} onClick={()=>markAttendance(b.id,a.s)} style={{flex:1,padding:"6px 4px",borderRadius:8,border:"none",cursor:"pointer",fontSize:10,fontWeight:600,background:b.status===a.s?a.c+"30":C.s2,color:b.status===a.s?a.c:C.mt,transition:"all .2s"}}>{a.l}</button>
+          )}
+        </div>
+      </Card>;})}
+    </div>}
+
+    {/* Book Session Modal */}
+    <Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Book Session">
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {clients.length>0&&<Sel label="Client" value={form.clientId} onChange={e=>setForm({...form,clientId:e.target.value})} options={[{value:"",label:"— Select —"},...clients.map(c=>({value:c.id,label:c.name||c.user?.name}))]}/>}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/><Input label="Time" type="time" value={form.time} onChange={e=>setForm({...form,time:e.target.value})}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Duration" type="number" value={form.duration} onChange={e=>setForm({...form,duration:+e.target.value})}/><Sel label="Type" value={form.type} onChange={e=>setForm({...form,type:e.target.value})} options={[{value:"training",label:"Training"},{value:"assessment",label:"Assessment"},{value:"consultation",label:"Consultation"},{value:"group",label:"Group"}]}/></div>
+        <TextArea label="Notes" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/>
+        <Btn onClick={save} style={{width:"100%"}}>Confirm</Btn>
+      </div>
+    </Modal>
+
+    {/* Replicate Schedule Modal */}
+    <Modal open={showRepeat} onClose={()=>setShowRepeat(false)} title="Replicate Schedule">
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{padding:12,background:C.s2,borderRadius:10,fontSize:12,color:C.mt}}>
+          Copy all {db.length} session(s) from <strong style={{color:C.tx}}>{selDate}</strong> to multiple dates
+        </div>
+        <Sel label="Repeat Mode" value={repeatForm.mode} onChange={e=>setRepeatForm({...repeatForm,mode:e.target.value})} options={[{value:"until_date",label:"Every day until end date"},{value:"week_days",label:"Specific days of the week"}]}/>
+        {repeatForm.mode==="week_days"&&<div>
+          <label style={{fontSize:13,color:C.mt,fontWeight:500,marginBottom:6,display:"block"}}>Days</label>
+          <div style={{display:"flex",gap:4}}>{["S","M","T","W","T","F","S"].map((d,i)=>
+            <button key={i} onClick={()=>{const dw=repeatForm.daysOfWeek.includes(i)?repeatForm.daysOfWeek.filter(x=>x!==i):[...repeatForm.daysOfWeek,i];setRepeatForm({...repeatForm,daysOfWeek:dw});}} style={{width:36,height:36,borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:repeatForm.daysOfWeek.includes(i)?C.ac:C.s2,color:repeatForm.daysOfWeek.includes(i)?"#fff":C.mt}}>{d}</button>
+          )}</div>
+        </div>}
+        <Input label="End Date" type="date" value={repeatForm.endDate} onChange={e=>setRepeatForm({...repeatForm,endDate:e.target.value})}/>
+        <Btn onClick={replicateSchedule} disabled={!repeatForm.endDate} style={{width:"100%"}}>🔁 Replicate {db.length} Session(s)</Btn>
+      </div>
+    </Modal>
+  </div>;
+}
 
 // ─── AI MEAL PLANNER ──────────────────────────────────────────────────────────
 function MealPlannerPage(){const[plan,setPlan]=useState(null);const[loading,setLoading]=useState(false);const[form,setForm]=useState({goal:"muscle_gain",calories:"2200",restrictions:"",preferences:""});const gen=async()=>{setLoading(true);try{const r=await api.post("/ai/chat",{message:`Generate a detailed daily meal plan: Goal: ${form.goal.replace("_"," ")}, Calories: ${form.calories}kcal, Restrictions: ${form.restrictions||"none"}, Preferences: ${form.preferences||"none"}. Include breakfast, lunch, dinner, 2 snacks with calories, protein, carbs, fat for each.`});setPlan(r.reply||r.message||r.response||"Could not generate");}catch(e){setPlan("Error: "+e.message);}setLoading(false);};return<div><ST>AI Meal Planner</ST><Card style={{marginBottom:16}}><div style={{display:"flex",flexDirection:"column",gap:12}}><Sel label="Goal" value={form.goal} onChange={e=>setForm({...form,goal:e.target.value})} options={[{value:"muscle_gain",label:"Muscle Gain"},{value:"fat_loss",label:"Fat Loss"},{value:"maintenance",label:"Maintenance"},{value:"performance",label:"Athletic Performance"}]}/><Input label="Target Calories" type="number" value={form.calories} onChange={e=>setForm({...form,calories:e.target.value})}/><Input label="Restrictions" value={form.restrictions} onChange={e=>setForm({...form,restrictions:e.target.value})} placeholder="e.g. vegetarian, no dairy"/><Input label="Preferences" value={form.preferences} onChange={e=>setForm({...form,preferences:e.target.value})} placeholder="e.g. Indian cuisine"/><Btn onClick={gen} disabled={loading} style={{width:"100%"}}>{loading?"Generating…":"🤖 Generate Meal Plan"}</Btn></div></Card>{plan&&<Card><div style={{fontSize:15,fontWeight:600,color:C.tx,marginBottom:12}}>Your Meal Plan</div><div style={{fontSize:13,color:C.tx,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{plan}</div></Card>}</div>;}
@@ -95,7 +395,87 @@ function CheckInsPage(){const[cks,setCks]=useState(ls.get("checkins",[]));const[
 function ReportsPage(){const[data,setData]=useState({});const[loading,setLoading]=useState(true);const[tab,setTab]=useState("dashboard");useEffect(()=>{setLoading(true);const ep={dashboard:"/reports/coach/dashboard",revenue:"/reports/coach/revenue",clients:"/reports/coach/clients",workouts:"/reports/coach/workouts"}[tab]||"/reports/coach/dashboard";api.get(ep).then(d=>setData(d?.data||d||{})).catch(()=>setData({})).finally(()=>setLoading(false));},[tab]);if(loading)return<Spin/>;return<div><ST>Analytics</ST><Tabs tabs={[{id:"dashboard",label:"Overview"},{id:"revenue",label:"Revenue"},{id:"clients",label:"Clients"},{id:"workouts",label:"Workouts"}]} active={tab} onChange={setTab}/><Card style={{marginBottom:12}}><div style={{fontSize:14,fontWeight:600,color:C.tx,marginBottom:4}}>Revenue</div><div style={{fontSize:26,fontWeight:700,color:C.ok}}>₹{(data.totalRevenue??data.revenue??0).toLocaleString()}</div></Card><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><SC label="Sessions" value={data.sessionsCompleted??data.totalBookings??0} icon="📅" color={C.ac}/><SC label="Retention" value={`${data.retentionRate??0}%`} icon="🔄" color={C.a2}/><SC label="Avg/Client" value={data.avgSessionsPerClient??0} icon="📊" color={C.wn}/><SC label="Conversion" value={`${data.conversionRate??0}%`} icon="🎯" color={C.ok}/></div></div>;}
 
 // ─── AI CHAT ──────────────────────────────────────────────────────────────────
-function AIChatPage(){const[msgs,setMsgs]=useState([{role:"assistant",content:"Hey! I'm your AI coaching assistant. Ask me about workouts, nutrition, or anything fitness-related."}]);const[input,setInput]=useState("");const[loading,setLoading]=useState(false);const br=useRef(null);useEffect(()=>{br.current?.scrollIntoView({behavior:"smooth"});},[msgs]);const send=async()=>{if(!input.trim()||loading)return;const m=input.trim();setInput("");setMsgs(p=>[...p,{role:"user",content:m}]);setLoading(true);try{const r=await api.post("/ai/chat",{message:m,history:msgs.slice(-10)});setMsgs(p=>[...p,{role:"assistant",content:r.reply||r.message||r.response||"Let me think…"}]);}catch{setMsgs(p=>[...p,{role:"assistant",content:"Sorry, couldn't process that."}]);}setLoading(false);};return<div style={{display:"flex",flexDirection:"column",height:"calc(100dvh - 160px)"}}><ST>AI Coach</ST><div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:10,paddingBottom:12}}>{msgs.map((m,i)=><div key={i} style={{maxWidth:"82%",alignSelf:m.role==="user"?"flex-end":"flex-start",padding:"12px 16px",borderRadius:16,borderBottomRightRadius:m.role==="user"?4:16,borderBottomLeftRadius:m.role==="user"?16:4,background:m.role==="user"?C.ac:C.s2,color:m.role==="user"?"#fff":C.tx,fontSize:14,lineHeight:1.5,whiteSpace:"pre-wrap"}}>{m.content}</div>)}{loading&&<div style={{alignSelf:"flex-start",padding:"12px 20px",borderRadius:16,background:C.s2}}><div style={{display:"flex",gap:4}}>{[0,1,2].map(i=><div key={i} style={{width:8,height:8,borderRadius:"50%",background:C.mt,animation:`pulse 1.2s ease-in-out ${i*.2}s infinite`}}/>)}</div></div>}<div ref={br}/></div><div style={{display:"flex",gap:8,flexShrink:0,paddingTop:8}}><input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} placeholder="Ask your AI coach…" style={{flex:1,background:C.s2,border:`1px solid ${C.bd}`,borderRadius:14,padding:"12px 16px",color:C.tx,fontSize:14,outline:"none",fontFamily:"inherit"}}/><button onClick={send} disabled={loading} style={{width:48,height:48,borderRadius:14,border:"none",cursor:"pointer",background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff"}}>➤</button></div></div>;}
+function AIChatPage(){
+  const{user}=useAuth();
+  const[msgs,setMsgs]=useState([{role:"assistant",content:"Hey! I'm your AI coaching assistant with full access to your CoachMe data. I can:\n\n• Add/edit/find clients\n• Book/cancel sessions\n• Create workout plans\n• Generate meal plans\n• Check schedules & stats\n• Mark attendance\n\nTry: \"Show my schedule for today\" or \"Add a new client named Ravi\""}]);
+  const[input,setInput]=useState("");const[loading,setLoading]=useState(false);
+  const[voiceEnabled,setVoiceEnabled]=useState(false);
+  const br=useRef(null);
+
+  useEffect(()=>{br.current?.scrollIntoView({behavior:"smooth"});},[msgs]);
+
+  // Gather RAG context from app data
+  const gatherContext=async()=>{
+    let ctx="";
+    try{const c=await api.get("/clients");const cl=unwrap(c,"clients");ctx+=`\nACTIVE CLIENTS (${cl.length}): ${cl.map(x=>`${x.name||x.user?.name} (${x.email||x.user?.email}, ${x.phone||"no phone"}, ${x.sessionType||"offline"})`).join("; ")}`;}catch{}
+    try{const b=await api.get("/bookings");const bk=unwrap(b,"bookings","sessions");const today=new Date().toISOString().slice(0,10);const todayBk=bk.filter(x=>new Date(x.date||x.startTime||x.scheduledAt).toISOString().slice(0,10)===today);ctx+=`\nTODAY'S BOOKINGS (${todayBk.length}): ${todayBk.map(x=>`${x.client?.name||x.client?.user?.name||"Unknown"} at ${new Date(x.date||x.startTime||x.scheduledAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} (${x.status||"pending"})`).join("; ")}`;}catch{}
+    try{const r=await api.get("/reports/coach/dashboard");const d=r?.data||r||{};ctx+=`\nSTATS: ${d.activeClients||0} active clients, ₹${d.totalRevenue||0} revenue, ${d.upcomingBookings||0} upcoming sessions`;}catch{}
+    const holidays=ls.get("holidays",[]);if(holidays.length>0)ctx+=`\nHOLIDAYS: ${holidays.join(", ")}`;
+    return ctx;
+  };
+
+  const send=async(text)=>{
+    const msg=text||input.trim();if(!msg||loading)return;
+    if(!text)setInput("");
+    setMsgs(p=>[...p,{role:"user",content:msg}]);setLoading(true);
+
+    try{
+      const context=await gatherContext();
+      const systemPrompt=`You are an AI assistant for CoachMe.life fitness coaching platform. You have access to the coach's real data below. Answer questions about their business, clients, schedule, etc. using this context. If the user asks to perform an action (add client, book session, etc.), describe exactly what you would do and provide the relevant details. Be concise and helpful.
+
+COACH: ${user?.name||"Coach"} (${user?.email||""})
+APP DATA:${context}
+
+Current date: ${new Date().toLocaleDateString()}`;
+
+      const r=await api.post("/ai/chat",{message:msg,history:msgs.slice(-10),systemPrompt});
+      const reply=r.reply||r.message||r.response||"Let me think…";
+      setMsgs(p=>[...p,{role:"assistant",content:reply}]);
+
+      // Voice output if enabled
+      if(voiceEnabled&&"speechSynthesis" in window){const u=new SpeechSynthesisUtterance(reply.slice(0,500));u.rate=1.05;speechSynthesis.speak(u);}
+    }catch{setMsgs(p=>[...p,{role:"assistant",content:"Sorry, couldn't process that. Try again."}]);}
+    setLoading(false);
+  };
+
+  // Voice input
+  const startVoice=()=>{
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR)return;
+    const r=new SR();r.continuous=false;r.lang="en-US";
+    r.onresult=e=>{const t=e.results[0][0].transcript;setInput(t);send(t);};
+    r.start();
+  };
+
+  // Quick action suggestions
+  const suggestions=["Show today's schedule","How many clients do I have?","Generate a meal plan","Who are my active clients?","Create a Push day workout"];
+
+  return<div style={{display:"flex",flexDirection:"column",height:"calc(100dvh - 160px)"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+      <ST>AI Coach</ST>
+      <div style={{display:"flex",gap:6}}>
+        <button onClick={()=>setVoiceEnabled(!voiceEnabled)} style={{padding:"6px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:voiceEnabled?C.ok+"30":C.s2,color:voiceEnabled?C.ok:C.mt}}>{voiceEnabled?"🔊 Voice On":"🔇 Voice Off"}</button>
+      </div>
+    </div>
+
+    <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:10,paddingBottom:12}}>
+      {msgs.map((m,i)=><div key={i} style={{maxWidth:"85%",alignSelf:m.role==="user"?"flex-end":"flex-start",padding:"12px 16px",borderRadius:16,borderBottomRightRadius:m.role==="user"?4:16,borderBottomLeftRadius:m.role==="user"?16:4,background:m.role==="user"?C.ac:C.s2,color:m.role==="user"?"#fff":C.tx,fontSize:14,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{m.content}</div>)}
+      {loading&&<div style={{alignSelf:"flex-start",padding:"12px 20px",borderRadius:16,background:C.s2}}><div style={{display:"flex",gap:4}}>{[0,1,2].map(i=><div key={i} style={{width:8,height:8,borderRadius:"50%",background:C.mt,animation:`pulse 1.2s ease-in-out ${i*.2}s infinite`}}/>)}</div></div>}
+      <div ref={br}/>
+    </div>
+
+    {/* Quick suggestions */}
+    {msgs.length<=2&&<div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,flexShrink:0}}>
+      {suggestions.map(s=><button key={s} onClick={()=>send(s)} style={{padding:"8px 14px",borderRadius:20,border:`1px solid ${C.bd}`,background:C.s2,color:C.tx,fontSize:12,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit"}}>{s}</button>)}
+    </div>}
+
+    <div style={{display:"flex",gap:8,flexShrink:0,paddingTop:8}}>
+      <button onClick={startVoice} style={{width:48,height:48,borderRadius:14,border:"none",cursor:"pointer",background:C.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🎙️</button>
+      <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} placeholder="Ask anything about your business…" style={{flex:1,background:C.s2,border:`1px solid ${C.bd}`,borderRadius:14,padding:"12px 16px",color:C.tx,fontSize:14,outline:"none",fontFamily:"inherit"}}/>
+      <button onClick={()=>send()} disabled={loading} style={{width:48,height:48,borderRadius:14,border:"none",cursor:"pointer",background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff"}}>➤</button>
+    </div>
+  </div>;
+}
 
 // ─── MESSAGING ────────────────────────────────────────────────────────────────
 function MessagingPage({initialClient,onBack}){const{user}=useAuth();const[convos,setConvos]=useState([]);const[active,setActive]=useState(initialClient||null);const[msgs,setMsgs]=useState([]);const[input,setInput]=useState("");const br=useRef(null);const pr=useRef(null);useEffect(()=>{api.get("/clients").then(d=>setConvos(unwrap(d,"clients"))).catch(()=>{});},[]);useEffect(()=>{if(!active)return;const ld=()=>api.get(`/messages/${active.id||active.userId}`).then(d=>setMsgs(unwrap(d,"messages"))).catch(()=>{});ld();pr.current=setInterval(ld,5000);return()=>clearInterval(pr.current);},[active]);useEffect(()=>{br.current?.scrollIntoView({behavior:"smooth"});},[msgs]);const sendMsg=async()=>{if(!input.trim())return;const t=input.trim();setInput("");setMsgs(m=>[...m,{id:Date.now(),senderId:user?.id,content:t,createdAt:new Date().toISOString()}]);try{await api.post("/messages",{recipientId:active.id||active.userId,content:t});}catch{}};if(!active)return<div><ST>Messages</ST>{convos.length===0?<Empty icon="💬" text="No conversations"/>:convos.map(c=><Card key={c.id} onClick={()=>setActive(c)} style={{padding:14,display:"flex",alignItems:"center",gap:12,cursor:"pointer",marginBottom:6}}><div style={{width:44,height:44,borderRadius:22,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:700,color:"#fff"}}>{(c.name||c.user?.name||"?")[0].toUpperCase()}</div><div style={{flex:1}}><div style={{color:C.tx,fontSize:14,fontWeight:600}}>{c.name||c.user?.name}</div><div style={{color:C.mt,fontSize:12}}>Tap to chat</div></div></Card>)}</div>;return<div style={{display:"flex",flexDirection:"column",height:"calc(100dvh - 160px)"}}><div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}><button onClick={()=>{setActive(null);onBack?.();}} style={{background:"none",border:"none",cursor:"pointer",color:C.tx,fontSize:20,padding:0}}>←</button><div style={{width:36,height:36,borderRadius:18,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:"#fff"}}>{(active.name||active.user?.name||"?")[0].toUpperCase()}</div><div><div style={{color:C.tx,fontSize:15,fontWeight:600}}>{active.name||active.user?.name}</div><div style={{color:C.ok,fontSize:11}}>● online</div></div></div><div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:6,paddingBottom:8}}>{msgs.length===0&&<Empty icon="💬" text="Start chatting"/>}{msgs.map(m=>{const me=m.senderId===user?.id;return<div key={m.id} style={{maxWidth:"78%",alignSelf:me?"flex-end":"flex-start",padding:"10px 14px",borderRadius:14,borderBottomRightRadius:me?4:14,borderBottomLeftRadius:me?14:4,background:me?C.ac:C.s2,color:me?"#fff":C.tx,fontSize:14,lineHeight:1.45}}>{m.content}<div style={{fontSize:10,opacity:.6,marginTop:4,textAlign:"right"}}>{new Date(m.createdAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div></div>;})}<div ref={br}/></div><div style={{display:"flex",gap:8,flexShrink:0,paddingTop:8}}><input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendMsg()} placeholder="Type a message…" style={{flex:1,background:C.s2,border:`1px solid ${C.bd}`,borderRadius:24,padding:"12px 18px",color:C.tx,fontSize:14,outline:"none",fontFamily:"inherit"}}/><button onClick={sendMsg} style={{width:48,height:48,borderRadius:24,border:"none",cursor:"pointer",background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff"}}>➤</button></div></div>;}
@@ -109,10 +489,95 @@ function SettingsPage(){const{user,logout}=useAuth();const[profile,setProfile]=u
 // ─── NAV + ROUTING ────────────────────────────────────────────────────────────
 const TABS=[{id:"dashboard",icon:"🏠",label:"Home"},{id:"workouts",icon:"💪",label:"Workouts"},{id:"bookings",icon:"📅",label:"Schedule"},{id:"chat",icon:"💬",label:"Chat"},{id:"more",icon:"⚙️",label:"More"}];
 function BNav({active,onChange}){return<nav style={{position:"fixed",bottom:0,left:0,right:0,zIndex:100,background:C.sf,borderTop:`1px solid ${C.bd}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>{TABS.map(t=>{const a=active===t.id;return<button key={t.id} onClick={()=>onChange(t.id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"10px 0 8px",border:"none",cursor:"pointer",background:"transparent"}}><div style={{padding:"4px 16px",borderRadius:12,background:a?C.ac+"20":"transparent",fontSize:18}}>{t.icon}</div><span style={{fontSize:10,fontWeight:a?700:500,color:a?C.ac:C.mt}}>{t.label}</span></button>;})}</nav>;}
-function MoreMenu({onNav}){const items=[{id:"clients",icon:"👥",label:"Clients",desc:"Manage clients"},{id:"leads",icon:"🎯",label:"Leads Pipeline",desc:"Kanban board"},{id:"mealplan",icon:"🍎",label:"AI Meal Planner",desc:"AI-generated plans"},{id:"nutrition",icon:"🥗",label:"Nutrition Tracker",desc:"Log food & macros"},{id:"habits",icon:"✅",label:"Habit Tracker",desc:"Daily habits & streaks"},{id:"checkins",icon:"📋",label:"Check-ins",desc:"Weekly questionnaires"},{id:"reports",icon:"📊",label:"Analytics",desc:"Revenue & reports"},{id:"invoices",icon:"🧾",label:"Invoices",desc:"Billing & payments"},{id:"ai",icon:"🤖",label:"AI Coach",desc:"AI assistant"},{id:"settings",icon:"⚙️",label:"Settings",desc:"Profile & prefs"}];return<div><ST>More</ST><div style={{display:"flex",flexDirection:"column",gap:6}}>{items.map(i=><Card key={i.id} onClick={()=>onNav(i.id)} style={{padding:14,display:"flex",alignItems:"center",gap:14,cursor:"pointer"}}><div style={{width:42,height:42,borderRadius:12,background:C.ac+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>{i.icon}</div><div style={{flex:1}}><div style={{color:C.tx,fontSize:14,fontWeight:600}}>{i.label}</div><div style={{color:C.mt,fontSize:12}}>{i.desc}</div></div><span style={{color:C.mt,fontSize:18}}>›</span></Card>)}</div></div>;}
+function MediaLibrary({clientId,clientName}){
+  const key=`media_${clientId||"all"}`;
+  const[items,setItems]=useState(ls.get(key,[]));
+  const[showAdd,setShowAdd]=useState(false);
+  const[tab,setTab]=useState("videos");
+  const[form,setForm]=useState({title:"",description:"",type:"video",url:""});
+
+  const handleUpload=(e)=>{
+    const file=e.target.files?.[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      const entry={id:Date.now(),title:form.title||file.name,description:form.description,type:file.type.startsWith("video")?"video":"photo",url:ev.target.result,fileName:file.name,fileSize:file.size,date:new Date().toISOString().slice(0,10),shared:false,clientId};
+      const updated=[...items,entry];setItems(updated);ls.set(key,updated);
+      setForm({title:"",description:"",type:"video",url:""});setShowAdd(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const toggleShare=(id)=>{
+    const updated=items.map(i=>i.id===id?{...i,shared:!i.shared}:i);
+    setItems(updated);ls.set(key,updated);
+  };
+
+  const deleteItem=(id)=>{
+    const updated=items.filter(i=>i.id!==id);
+    setItems(updated);ls.set(key,updated);
+  };
+
+  const videos=items.filter(i=>i.type==="video");
+  const photos=items.filter(i=>i.type==="photo");
+
+  return<div>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+      <span style={{fontSize:15,fontWeight:600,color:C.tx}}>{clientName?"Media for "+clientName:"Media Library"}</span>
+      <Btn onClick={()=>setShowAdd(true)} style={{padding:"6px 14px",fontSize:12}}>+ Upload</Btn>
+    </div>
+
+    <Tabs tabs={[{id:"videos",label:`Videos (${videos.length})`},{id:"photos",label:`Progress Photos (${photos.length})`}]} active={tab} onChange={setTab}/>
+
+    {tab==="videos"&&(videos.length===0?<Empty icon="🎥" text="No workout videos yet"/>:
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {videos.map(v=><Card key={v.id} style={{padding:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"start"}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:14,fontWeight:600,color:C.tx}}>{v.title}</div>
+              {v.description&&<div style={{fontSize:12,color:C.mt,marginTop:2}}>{v.description}</div>}
+              <div style={{fontSize:11,color:C.mt,marginTop:4}}>{v.date} · {(v.fileSize/1024/1024).toFixed(1)}MB</div>
+            </div>
+            <div style={{display:"flex",gap:4}}>
+              <button onClick={()=>toggleShare(v.id)} style={{padding:"4px 10px",borderRadius:6,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:v.shared?C.ok+"20":C.s2,color:v.shared?C.ok:C.mt}}>{v.shared?"✅ Shared":"📤 Share"}</button>
+              <button onClick={()=>deleteItem(v.id)} style={{padding:"4px 8px",borderRadius:6,border:"none",fontSize:11,cursor:"pointer",background:C.dg+"15",color:C.dg}}>🗑️</button>
+            </div>
+          </div>
+          {v.url&&v.url.startsWith("data:video")&&<video src={v.url} controls style={{width:"100%",borderRadius:8,marginTop:10,maxHeight:200}}/>}
+        </Card>)}
+      </div>
+    )}
+
+    {tab==="photos"&&(photos.length===0?<Empty icon="📸" text="No progress photos yet"/>:
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        {photos.map(p=><Card key={p.id} style={{padding:8,position:"relative"}}>
+          <img src={p.url} style={{width:"100%",borderRadius:8,aspectRatio:"3/4",objectFit:"cover"}}/>
+          <div style={{fontSize:11,color:C.mt,marginTop:4,textAlign:"center"}}>{p.date}</div>
+          <div style={{display:"flex",gap:4,marginTop:4}}>
+            <button onClick={()=>toggleShare(p.id)} style={{flex:1,padding:"3px",borderRadius:4,border:"none",fontSize:10,cursor:"pointer",background:p.shared?C.ok+"20":C.s2,color:p.shared?C.ok:C.mt}}>{p.shared?"Shared":"Share"}</button>
+            <button onClick={()=>deleteItem(p.id)} style={{padding:"3px 6px",borderRadius:4,border:"none",fontSize:10,cursor:"pointer",background:C.dg+"15",color:C.dg}}>✕</button>
+          </div>
+        </Card>)}
+      </div>
+    )}
+
+    <Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Upload Media">
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <Input label="Title" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Squat Form Tutorial"/>
+        <TextArea label="Description" value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="Brief description"/>
+        <div>
+          <label style={{fontSize:13,color:C.mt,fontWeight:500,marginBottom:6,display:"block"}}>Select File</label>
+          <input type="file" accept="video/*,image/*" onChange={handleUpload} style={{fontSize:13,color:C.tx}}/>
+          <div style={{fontSize:11,color:C.mt,marginTop:4}}>Accepts videos (MP4, MOV) and images (JPG, PNG)</div>
+        </div>
+      </div>
+    </Modal>
+  </div>;
+}
+
+function MoreMenu({onNav}){const items=[{id:"clients",icon:"👥",label:"Clients",desc:"Manage clients"},{id:"leads",icon:"🎯",label:"Leads Pipeline",desc:"Kanban board"},{id:"mealplan",icon:"🍎",label:"AI Meal Planner",desc:"AI-generated plans"},{id:"nutrition",icon:"🥗",label:"Nutrition Tracker",desc:"Log food & macros"},{id:"habits",icon:"✅",label:"Habit Tracker",desc:"Daily habits & streaks"},{id:"checkins",icon:"📋",label:"Check-ins",desc:"Weekly questionnaires"},{id:"reports",icon:"📊",label:"Analytics",desc:"Revenue & reports"},{id:"invoices",icon:"🧾",label:"Invoices",desc:"Billing & payments"},{id:"ai",icon:"🤖",label:"AI Coach",desc:"RAG-powered assistant"},{id:"media",icon:"🎥",label:"Media Library",desc:"Videos & progress photos"},{id:"settings",icon:"⚙️",label:"Settings",desc:"Profile & prefs"}];return<div><ST>More</ST><div style={{display:"flex",flexDirection:"column",gap:6}}>{items.map(i=><Card key={i.id} onClick={()=>onNav(i.id)} style={{padding:14,display:"flex",alignItems:"center",gap:14,cursor:"pointer"}}><div style={{width:42,height:42,borderRadius:12,background:C.ac+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>{i.icon}</div><div style={{flex:1}}><div style={{color:C.tx,fontSize:14,fontWeight:600}}>{i.label}</div><div style={{color:C.mt,fontSize:12}}>{i.desc}</div></div><span style={{color:C.mt,fontSize:18}}>›</span></Card>)}</div></div>;}
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
-function MainApp(){const[tab,setTab]=useState("dashboard");const[sub,setSub]=useState(null);const[chatCl,setChatCl]=useState(null);const handleV=useCallback((cmd,speak)=>{const r={dashboard:["home","dashboard"],workouts:["workout","exercise"],bookings:["schedule","booking","calendar"],chat:["message","chat"],clients:["client"],leads:["lead","pipeline"],reports:["report","analytics"],ai:["ai","assistant"],mealplan:["meal","diet","nutrition plan"],habits:["habit"],checkins:["checkin","check-in"],invoices:["invoice","payment","billing"],settings:["setting","profile"]};for(const[rt,kw] of Object.entries(r)){if(kw.some(k=>cmd.includes(k))){if(["dashboard","workouts","bookings","chat"].includes(rt)){setTab(rt);setSub(null);}else{setTab("more");setSub(rt);}speak(`Opening ${rt}`);return;}}speak("Try saying a page name.");},[]);const{listening,toggle}=useVoice(handleV);const nav=id=>{if(["dashboard","workouts","bookings","chat"].includes(id)){setTab(id);setSub(null);}else if(id==="more"){setTab("more");setSub(null);}else{setTab("more");setSub(id);}};const render=()=>{if(tab==="more"&&sub){const p={clients:<ClientsPage onOpenChat={c=>{setChatCl(c);setTab("chat");}}/>,leads:<LeadsPage/>,reports:<ReportsPage/>,ai:<AIChatPage/>,settings:<SettingsPage/>,mealplan:<MealPlannerPage/>,nutrition:<NutritionTracker/>,habits:<HabitTracker/>,checkins:<CheckInsPage/>,invoices:<InvoicesPage/>};return p[sub]||<MoreMenu onNav={setSub}/>;}const p={dashboard:<DashboardPage/>,workouts:<WorkoutsPage/>,bookings:<BookingsPage/>,chat:<MessagingPage initialClient={chatCl} onBack={()=>setChatCl(null)}/>,more:<MoreMenu onNav={setSub}/>};return p[tab]||<DashboardPage/>;};return<div style={{minHeight:"100dvh",background:C.bg,color:C.tx,fontFamily:"'DM Sans','SF Pro Display',-apple-system,system-ui,sans-serif"}}><style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{background:${C.bg};overflow-x:hidden}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:${C.bd};border-radius:4px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}input::placeholder,textarea::placeholder{color:${C.mt}}select option{background:${C.sf};color:${C.tx}}`}</style><button onClick={toggle} style={{position:"fixed",right:16,bottom:80,zIndex:200,width:48,height:48,borderRadius:24,border:"none",cursor:"pointer",background:listening?C.dg:C.gr,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 4px 20px ${listening?C.dg+"60":C.ac+"40"}`,animation:listening?"pulse 1.5s ease infinite":"none",fontSize:20}} title="Voice">🎙️</button><div style={{padding:"16px 16px 90px",maxWidth:600,margin:"0 auto"}}>{tab==="more"&&sub&&<button onClick={()=>setSub(null)} style={{background:"none",border:"none",color:C.ac,cursor:"pointer",fontSize:14,fontWeight:600,marginBottom:12,padding:0,fontFamily:"inherit"}}>← Back</button>}{render()}</div><BNav active={tab} onChange={nav}/></div>;}
+function MainApp(){const[tab,setTab]=useState("dashboard");const[sub,setSub]=useState(null);const[chatCl,setChatCl]=useState(null);const handleV=useCallback((cmd,speak)=>{const r={dashboard:["home","dashboard"],workouts:["workout","exercise"],bookings:["schedule","booking","calendar"],chat:["message","chat"],clients:["client"],leads:["lead","pipeline"],reports:["report","analytics"],ai:["ai","assistant"],mealplan:["meal","diet","nutrition plan"],habits:["habit"],checkins:["checkin","check-in"],invoices:["invoice","payment","billing"],settings:["setting","profile"]};for(const[rt,kw] of Object.entries(r)){if(kw.some(k=>cmd.includes(k))){if(["dashboard","workouts","bookings","chat"].includes(rt)){setTab(rt);setSub(null);}else{setTab("more");setSub(rt);}speak(`Opening ${rt}`);return;}}speak("Try saying a page name.");},[]);const{listening,toggle}=useVoice(handleV);const nav=id=>{if(["dashboard","workouts","bookings","chat"].includes(id)){setTab(id);setSub(null);}else if(id==="more"){setTab("more");setSub(null);}else{setTab("more");setSub(id);}};const render=()=>{if(tab==="more"&&sub){const p={clients:<ClientsPage onOpenChat={c=>{setChatCl(c);setTab("chat");}}/>,leads:<LeadsPage/>,reports:<ReportsPage/>,ai:<AIChatPage/>,settings:<SettingsPage/>,mealplan:<MealPlannerPage/>,nutrition:<NutritionTracker/>,habits:<HabitTracker/>,checkins:<CheckInsPage/>,invoices:<InvoicesPage/>,media:<MediaLibrary/>};return p[sub]||<MoreMenu onNav={setSub}/>;}const p={dashboard:<DashboardPage/>,workouts:<WorkoutsPage/>,bookings:<BookingsPage/>,chat:<MessagingPage initialClient={chatCl} onBack={()=>setChatCl(null)}/>,more:<MoreMenu onNav={setSub}/>};return p[tab]||<DashboardPage/>;};return<div style={{minHeight:"100dvh",background:C.bg,color:C.tx,fontFamily:"'DM Sans','SF Pro Display',-apple-system,system-ui,sans-serif"}}><style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{background:${C.bg};overflow-x:hidden}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:${C.bd};border-radius:4px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}input::placeholder,textarea::placeholder{color:${C.mt}}select option{background:${C.sf};color:${C.tx}}`}</style><button onClick={toggle} style={{position:"fixed",right:16,bottom:80,zIndex:200,width:48,height:48,borderRadius:24,border:"none",cursor:"pointer",background:listening?C.dg:C.gr,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 4px 20px ${listening?C.dg+"60":C.ac+"40"}`,animation:listening?"pulse 1.5s ease infinite":"none",fontSize:20}} title="Voice">🎙️</button><div style={{padding:"16px 16px 90px",maxWidth:600,margin:"0 auto"}}>{tab==="more"&&sub&&<button onClick={()=>setSub(null)} style={{background:"none",border:"none",color:C.ac,cursor:"pointer",fontSize:14,fontWeight:600,marginBottom:12,padding:0,fontFamily:"inherit"}}>← Back</button>}{render()}</div><BNav active={tab} onChange={nav}/></div>;}
 
 function useVoice(onCmd){const[listening,setListening]=useState(false);const speak=useCallback(t=>{if("speechSynthesis"in window){const u=new SpeechSynthesisUtterance(t);u.rate=1.05;speechSynthesis.speak(u);}},[]);const toggle=useCallback(()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return speak("Voice not supported");if(listening)return setListening(false);const r=new SR();r.continuous=false;r.lang="en-US";r.onresult=e=>{onCmd(e.results[0][0].transcript.toLowerCase().trim(),speak);setListening(false);};r.onerror=()=>setListening(false);r.onend=()=>setListening(false);r.start();setListening(true);},[listening,onCmd,speak]);return{listening,toggle,speak};}
 
