@@ -620,14 +620,21 @@ function WorkoutsPage(){const[tab,setTab]=useState("plans");const[plans,setPlans
 function BookingsPage(){
   const[bookings,setBookings]=useState([]);const[loading,setLoading]=useState(true);
   const[showAdd,setShowAdd]=useState(false);const[showRepeat,setShowRepeat]=useState(false);
-  const[clients,setClients]=useState([]);const[viewMode,setViewMode]=useState("month");
+  const[clients,setClients]=useState([]);const[viewMode,setViewMode]=useState("week");
   const[currentMonth,setCurrentMonth]=useState(new Date());
   const[selDate,setSelDate]=useState(new Date().toISOString().slice(0,10));
   const[holidays,setHolidays]=useState(ls.get("holidays",[]));
   const[form,setForm]=useState({clientId:"",date:new Date().toISOString().slice(0,10),time:"09:00",duration:60,type:"training",notes:""});
   const[repeatForm,setRepeatForm]=useState({endDate:"",mode:"until_date",daysOfWeek:[1,2,3,4,5]});
 
-  const load=()=>{Promise.all([api.get("/bookings").catch(()=>({})),api.get("/clients").catch(()=>({}))]).then(([b,c])=>{setBookings(unwrap(b,"bookings","sessions"));setClients(unwrap(c,"clients"));}).finally(()=>setLoading(false));};
+  const load=()=>{Promise.all([api.get("/bookings").catch(()=>({})),api.get("/clients").catch(()=>({}))]).then(([b,c])=>{
+    const apiBk=unwrap(b,"bookings","sessions");
+    const localBk=ls.get("local_bookings",[]);
+    // Merge: API bookings + local bookings (deduped)
+    const merged=[...apiBk,...localBk.filter(lb=>!apiBk.some(ab=>ab.id===lb.id))];
+    setBookings(merged);
+    setClients(unwrap(c,"clients"));
+  }).finally(()=>setLoading(false));};
   useEffect(()=>{load();},[]);
 
   // Smart booking creator — handles role errors by trying multiple approaches
@@ -650,11 +657,7 @@ function BookingsPage(){
     }catch(e){alert("Booking error: "+e.message);}
   };
 
-  // Load local bookings too
-  useEffect(()=>{
-    const local=ls.get("local_bookings",[]);
-    if(local.length>0)setBookings(prev=>[...prev,...local.filter(lb=>!prev.some(b=>b.id===lb.id))]);
-  },[loading]);
+
 
   // Attendance
   const markAttendance=async(bid,status)=>{
@@ -703,45 +706,78 @@ function BookingsPage(){
     window.open(`https://wa.me/${intlPhone}?text=${encodeURIComponent(message)}`,"_blank");
   };
 
+  // Resolve client phone — look up from full clients list by ID
+  const resolveClientPhone=(booking)=>{
+    // Try the embedded client object first
+    let phone=booking.client?.phone||cPhone(booking.client);
+    if(phone)return phone;
+    // Look up from the full clients list by clientId
+    const fullClient=clients.find(c=>c.id===booking.clientId||c.id===booking.client?.id||c.userId===booking.client?.userId);
+    if(fullClient){
+      phone=fullClient.phone||fullClient.user?.phone||cPhone(fullClient);
+      if(phone)return phone;
+    }
+    // Check localStorage for client edits that might have phone
+    const edits=ls.get("client_edits",{});
+    const editId=booking.clientId||booking.client?.id;
+    if(editId&&edits[editId]?.phone)return edits[editId].phone;
+    return"";
+  };
+
+  const resolveClientName=(booking)=>{
+    const fullClient=clients.find(c=>c.id===booking.clientId||c.id===booking.client?.id);
+    return cName(fullClient)||cName(booking.client)||booking.type||"Client";
+  };
+
+  const[showCallSelect,setShowCallSelect]=useState(false);
+  const[callSelections,setCallSelections]=useState({});
+
   const whatsAppGroupCall=()=>{
     const dayBk=getDateBookings(selDate);
     if(dayBk.length===0){alert("No sessions on this day");return;}
-    // Collect all client phones
-    const clientPhones=dayBk.map(b=>{
-      const client=b.client||clients.find(c=>c.id===b.clientId);
-      const phone=client?.phone||cPhone(client)||"";
-      const name=cName(client)||b.type||"Client";
-      return{name,phone};
-    }).filter(c=>c.phone);
 
-    if(clientPhones.length===0){
-      alert("No client phone numbers found for this day's sessions.\nAdd phone numbers to clients first.");
+    // Build client list with resolved phones
+    const clientList=dayBk.map(b=>({
+      id:b.id,
+      name:resolveClientName(b),
+      phone:resolveClientPhone(b),
+      time:new Date(b.date||b.startTime||b.scheduledAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),
+      duration:b.duration||60,
+      type:b.type||"training",
+    }));
+
+    const withPhone=clientList.filter(c=>c.phone);
+    if(withPhone.length===0){
+      alert("No client phone numbers found.\n\nTo fix: Go to Clients → tap a client → ✏️ Edit → add their mobile number.");
       return;
     }
 
-    // Create WhatsApp group call message
-    const timeSlots=dayBk.map(b=>{
+    // Show selection modal
+    const selections={};
+    withPhone.forEach(c=>{selections[c.id]=true;});
+    setCallSelections(selections);
+    setShowCallSelect(true);
+  };
+
+  const sendGroupCall=()=>{
+    const dayBk=getDateBookings(selDate);
+    const selected=dayBk.filter(b=>callSelections[b.id]);
+    if(selected.length===0){alert("Select at least one client");return;}
+
+    const timeSlots=selected.map(b=>{
       const t=new Date(b.date||b.startTime||b.scheduledAt);
-      return`${t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} — ${cName(b.client)||b.type||"Session"} (${b.duration||60}min)`;
+      return`${t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} — ${resolveClientName(b)} (${b.duration||60}min)`;
     }).join("\n");
 
-    const msg=`🏋️ *CoachMe Session — ${new Date(selDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}*\n\n📅 Today's Schedule:\n${timeSlots}\n\n📞 Join the group video call:\n(Coach will start the call at session time)\n\nSee you! 💪`;
+    const msg=`🏋️ *CoachMe Session — ${new Date(selDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}*\n\n📅 Schedule:\n${timeSlots}\n\n📞 Join the group video call:\n(Coach will start the call at session time)\n\nSee you! 💪`;
 
-    // Open WhatsApp for each client (or show the list to call)
-    if(clientPhones.length===1){
-      sendWhatsAppToClient(clientPhones[0].phone,msg);
-    }else{
-      // Show selection
-      const choice=confirm(`Send call invite to ${clientPhones.length} clients?\n\n${clientPhones.map(c=>`• ${c.name} (${c.phone})`).join("\n")}\n\nOK = Open WhatsApp for each\nCancel = Copy message only`);
-      if(choice){
-        clientPhones.forEach((c,i)=>{
-          setTimeout(()=>sendWhatsAppToClient(c.phone,msg),i*1000);
-        });
-      }else{
-        navigator.clipboard?.writeText(msg);
-        alert("Message copied to clipboard! Paste it in your WhatsApp group.");
-      }
-    }
+    selected.forEach((b,i)=>{
+      const phone=resolveClientPhone(b);
+      if(phone)setTimeout(()=>sendWhatsAppToClient(phone,msg),i*1000);
+    });
+
+    setShowCallSelect(false);
+    alert(`Opening WhatsApp for ${selected.length} client(s)…`);
   };
 
   const cancelDayAndNotify=async()=>{
@@ -754,7 +790,7 @@ function BookingsPage(){
     const msg=`❌ *Session Cancelled*\n\nHi! Your session on ${new Date(selDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})} has been cancelled.\n\nWe'll reschedule soon. Sorry for the inconvenience!\n\n— Your Coach via CoachMe.life`;
     dayBk.forEach((bk,i)=>{
       const client=bk.client||clients.find(c=>c.id===bk.clientId);
-      const phone=client?.phone||cPhone(client);
+      const phone=resolveClientPhone(bk);
       if(phone)setTimeout(()=>sendWhatsAppToClient(phone,msg),i*800);
     });
     alert(`${dayBk.length} session(s) cancelled. WhatsApp notifications sent.`);
@@ -918,6 +954,40 @@ function BookingsPage(){
         </div>}
         <Input label="End Date" type="date" value={repeatForm.endDate} onChange={e=>setRepeatForm({...repeatForm,endDate:e.target.value})}/>
         <Btn onClick={replicateSchedule} disabled={!repeatForm.endDate||db.length===0} style={{width:"100%"}}>🔁 Replicate {db.length} Session(s)</Btn>
+      </div>
+    </Modal>
+
+    {/* ── GROUP CALL SELECTION MODAL ── */}
+    <Modal open={showCallSelect} onClose={()=>setShowCallSelect(false)} title="📞 WhatsApp Group Call">
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        <div style={{fontSize:13,color:C.mt,marginBottom:4}}>
+          Select clients to include in the group call for <strong style={{color:C.tx}}>{new Date(selDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}</strong>:
+        </div>
+        {getDateBookings(selDate).map(b=>{
+          const name=resolveClientName(b);
+          const phone=resolveClientPhone(b);
+          const time=new Date(b.date||b.startTime||b.scheduledAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+          const hasPhone=!!phone;
+          return<div key={b.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,background:callSelections[b.id]?C.ok+"12":C.s2,border:`1px solid ${callSelections[b.id]?C.ok+"30":C.bd}`,cursor:hasPhone?"pointer":"default",opacity:hasPhone?1:0.5}} onClick={()=>{if(!hasPhone)return;setCallSelections(s=>({...s,[b.id]:!s[b.id]}));}}>
+            <div style={{width:24,height:24,borderRadius:6,border:`2px solid ${callSelections[b.id]?C.ok:C.bd}`,background:callSelections[b.id]?C.ok:"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:"#fff",flexShrink:0}}>
+              {callSelections[b.id]?"✓":""}
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:14,fontWeight:600,color:C.tx}}>{name}</div>
+              <div style={{fontSize:11,color:C.mt}}>{time} · {b.duration||60}min · {b.type||"training"}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              {hasPhone?<div style={{fontSize:12,color:C.ok}}>📱 {phone}</div>:<div style={{fontSize:11,color:C.dg}}>No phone</div>}
+            </div>
+          </div>;
+        })}
+        <div style={{display:"flex",gap:8,marginTop:8}}>
+          <button onClick={()=>{const all={};getDateBookings(selDate).forEach(b=>{if(resolveClientPhone(b))all[b.id]=true;});setCallSelections(all);}} style={{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:C.s2,color:C.mt}}>Select All</button>
+          <button onClick={()=>setCallSelections({})} style={{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:C.s2,color:C.mt}}>Deselect All</button>
+        </div>
+        <Btn onClick={sendGroupCall} disabled={Object.values(callSelections).filter(Boolean).length===0} style={{width:"100%",marginTop:4}}>
+          📞 Call {Object.values(callSelections).filter(Boolean).length} Client(s) via WhatsApp
+        </Btn>
       </div>
     </Modal>
   </div>;
@@ -1098,11 +1168,75 @@ function MessagingPage({initialClient,onBack}){const{user}=useAuth();const[convo
 function InvoicesPage(){const[inv,setInv]=useState(ls.get("invoices",[]));const[showAdd,setShowAdd]=useState(false);const[clients,setClients]=useState([]);const[form,setForm]=useState({clientId:"",amount:"",description:"",dueDate:""});useEffect(()=>{api.get("/clients").then(d=>setClients(unwrap(d,"clients"))).catch(()=>{});},[]);const save=()=>{const cl=clients.find(c=>c.id===form.clientId);const e={...form,id:Date.now(),clientName:cl?.name||cl?.user?.name||"Client",date:new Date().toISOString().slice(0,10),amount:+form.amount,status:"pending"};const u=[...inv,e];setInv(u);ls.set("invoices",u);setShowAdd(false);setForm({clientId:"",amount:"",description:"",dueDate:""});};const markPaid=id=>{const u=inv.map(i=>i.id===id?{...i,status:"paid"}:i);setInv(u);ls.set("invoices",u);};const tp=inv.filter(i=>i.status==="pending").reduce((s,i)=>s+i.amount,0);const tc=inv.filter(i=>i.status==="paid").reduce((s,i)=>s+i.amount,0);return<div><ST right={<Btn onClick={()=>setShowAdd(true)} style={{padding:"8px 16px",fontSize:13}}>+ Invoice</Btn>}>Invoices</ST><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}><SC label="Pending" value={`₹${tp.toLocaleString()}`} icon="⏳" color={C.wn}/><SC label="Collected" value={`₹${tc.toLocaleString()}`} icon="✅" color={C.ok}/></div>{inv.length===0?<Empty icon="🧾" text="No invoices"/>:inv.slice().reverse().map(i=><Card key={i.id} style={{padding:14,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{i.clientName}</div><div style={{fontSize:12,color:C.mt}}>{i.description} · {i.date}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:16,fontWeight:700,color:C.tx}}>₹{i.amount.toLocaleString()}</div>{i.status==="pending"?<button onClick={()=>markPaid(i.id)} style={{padding:"3px 10px",borderRadius:6,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:C.ok+"20",color:C.ok,marginTop:4}}>Mark Paid</button>:<Badge color={C.ok}>Paid</Badge>}</div></Card>)}<Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Create Invoice"><div style={{display:"flex",flexDirection:"column",gap:12}}>{clients.length>0&&<Sel label="Client" value={form.clientId} onChange={e=>setForm({...form,clientId:e.target.value})} options={[{value:"",label:"— Select —"},...clients.map(c=>({value:c.id,label:cName(c)}))]}/>}<Input label="Amount (₹)" type="number" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/><Input label="Description" value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="Monthly coaching - March"/><Input label="Due Date" type="date" value={form.dueDate} onChange={e=>setForm({...form,dueDate:e.target.value})}/><Btn onClick={save} style={{width:"100%"}}>Create</Btn></div></Modal></div>;}
 
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
-function SettingsPage(){const{user,logout}=useAuth();const[profile,setProfile]=useState({name:user?.name||"",email:user?.email||""});const[saved,setSaved]=useState(false);const save=async()=>{try{await api.put("/auth/profile",profile);setSaved(true);setTimeout(()=>setSaved(false),2000);}catch{}};return<div><ST>Settings</ST><Card style={{marginBottom:12}}><div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20}}><div style={{width:56,height:56,borderRadius:16,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff"}}>{(user?.name||"U")[0].toUpperCase()}</div><div><div style={{color:C.tx,fontSize:16,fontWeight:600}}>{user?.name}</div><Badge>{user?.role||"coach"}</Badge></div></div><div style={{display:"flex",flexDirection:"column",gap:12}}><Input label="Name" value={profile.name} onChange={e=>setProfile({...profile,name:e.target.value})}/><Input label="Email" value={profile.email} onChange={e=>setProfile({...profile,email:e.target.value})}/><Btn onClick={save} style={{width:"100%"}}>{saved?"✓ Saved!":"Update Profile"}</Btn></div></Card><Card><Btn variant="danger" onClick={logout} style={{width:"100%"}}>🚪 Sign Out</Btn></Card></div>;}
+function SettingsPage(){const{user,logout}=useAuth();const[profile,setProfile]=useState({name:user?.name||"",email:user?.email||""});const[saved,setSaved]=useState(false);
+  const[bottomTabs,setBottomTabs]=useState(getBottomTabs());
+  const[showTabEdit,setShowTabEdit]=useState(false);
+
+  const save=async()=>{try{await api.put("/auth/profile",profile);setSaved(true);setTimeout(()=>setSaved(false),2000);}catch{}};
+
+  const moveTab=(idx,dir)=>{
+    const arr=[...bottomTabs];const newIdx=idx+dir;
+    if(newIdx<0||newIdx>=arr.length)return;
+    [arr[idx],arr[newIdx]]=[arr[newIdx],arr[idx]];
+    setBottomTabs(arr);ls.set("bottom_tabs",arr);
+  };
+
+  const swapTab=(idx,newId)=>{
+    const arr=[...bottomTabs];arr[idx]=newId;
+    setBottomTabs(arr);ls.set("bottom_tabs",arr);
+  };
+
+  const resetTabs=()=>{setBottomTabs([...DEFAULT_BOTTOM]);ls.set("bottom_tabs",DEFAULT_BOTTOM);};
+
+  return<div><ST>Settings</ST><Card style={{marginBottom:12}}><div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20}}><div style={{width:56,height:56,borderRadius:16,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff"}}>{(user?.name||"U")[0].toUpperCase()}</div><div><div style={{color:C.tx,fontSize:16,fontWeight:600}}>{user?.name}</div><Badge>{user?.role||"coach"}</Badge></div></div><div style={{display:"flex",flexDirection:"column",gap:12}}><Input label="Name" value={profile.name} onChange={e=>setProfile({...profile,name:e.target.value})}/><Input label="Email" value={profile.email} onChange={e=>setProfile({...profile,email:e.target.value})}/><Btn onClick={save} style={{width:"100%"}}>{saved?"✓ Saved!":"Update Profile"}</Btn></div></Card>
+    {/* Tab customization */}
+    <Card style={{marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style={{fontSize:14,fontWeight:600,color:C.tx}}>Bottom Navigation</div>
+        <div style={{display:"flex",gap:4}}>
+          <button onClick={resetTabs} style={{padding:"4px 10px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:C.s2,color:C.mt}}>Reset</button>
+        </div>
+      </div>
+      <div style={{fontSize:12,color:C.mt,marginBottom:10}}>Drag to reorder. Tap a slot to change which tab appears there.</div>
+      {bottomTabs.map((tabId,i)=>{
+        const tabDef=ALL_TABS.find(t=>t.id===tabId);
+        const available=ALL_TABS.filter(t=>!bottomTabs.includes(t.id)||t.id===tabId);
+        return<div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.bd}`}}>
+          <div style={{display:"flex",flexDirection:"column",gap:2}}>
+            <button onClick={()=>moveTab(i,-1)} disabled={i===0} style={{background:"none",border:"none",cursor:i>0?"pointer":"default",fontSize:14,color:i>0?C.tx:C.bd,padding:0}}>▲</button>
+            <button onClick={()=>moveTab(i,1)} disabled={i===bottomTabs.length-1} style={{background:"none",border:"none",cursor:i<bottomTabs.length-1?"pointer":"default",fontSize:14,color:i<bottomTabs.length-1?C.tx:C.bd,padding:0}}>▼</button>
+          </div>
+          <span style={{fontSize:18,width:28,textAlign:"center"}}>{tabDef?.icon||"?"}</span>
+          <select value={tabId} onChange={e=>swapTab(i,e.target.value)} style={{flex:1,background:C.s2,border:`1px solid ${C.bd}`,borderRadius:8,padding:"6px 10px",color:C.tx,fontSize:13,fontFamily:"inherit"}}>
+            {available.map(t=><option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+          </select>
+          <span style={{fontSize:12,color:C.mt,fontWeight:600}}>Slot {i+1}</span>
+        </div>;
+      })}
+    </Card>
+
+    <Card><Btn variant="danger" onClick={logout} style={{width:"100%"}}>🚪 Sign Out</Btn></Card></div>;}
 
 // ─── NAV + ROUTING ────────────────────────────────────────────────────────────
-const TABS=[{id:"dashboard",icon:"🏠",label:"Home"},{id:"workouts",icon:"💪",label:"Workouts"},{id:"bookings",icon:"📅",label:"Schedule"},{id:"chat",icon:"💬",label:"Chat"},{id:"more",icon:"⚙️",label:"More"}];
-function BNav({active,onChange}){return<nav style={{position:"fixed",bottom:0,left:0,right:0,zIndex:100,background:C.sf,borderTop:`1px solid ${C.bd}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>{TABS.map(t=>{const a=active===t.id;return<button key={t.id} onClick={()=>onChange(t.id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"10px 0 8px",border:"none",cursor:"pointer",background:"transparent"}}><div style={{padding:"4px 16px",borderRadius:12,background:a?C.ac+"20":"transparent",fontSize:18}}>{t.icon}</div><span style={{fontSize:10,fontWeight:a?700:500,color:a?C.ac:C.mt}}>{t.label}</span></button>;})}</nav>;}
+const ALL_TABS=[
+  {id:"dashboard",icon:"🏠",label:"Home"},
+  {id:"workouts",icon:"💪",label:"Workouts"},
+  {id:"bookings",icon:"📅",label:"Schedule"},
+  {id:"chat",icon:"💬",label:"Chat"},
+  {id:"clients",icon:"👥",label:"Clients"},
+  {id:"leads",icon:"🎯",label:"Leads"},
+  {id:"ai",icon:"🤖",label:"AI Coach"},
+  {id:"reports",icon:"📊",label:"Analytics"},
+  {id:"more",icon:"⚙️",label:"More"},
+];
+const DEFAULT_BOTTOM=["dashboard","workouts","bookings","chat","more"];
+function getBottomTabs(){
+  const saved=ls.get("bottom_tabs",null);
+  if(saved&&Array.isArray(saved)&&saved.length===5)return saved;
+  return DEFAULT_BOTTOM;
+}
+function TABS(){return getBottomTabs().map(id=>ALL_TABS.find(t=>t.id===id)).filter(Boolean);}
+function BNav({active,onChange}){const tabs=TABS();return<nav style={{position:"fixed",bottom:0,left:0,right:0,zIndex:100,background:C.sf,borderTop:`1px solid ${C.bd}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>{tabs.map(t=>{const a=active===t.id;return<button key={t.id} onClick={()=>onChange(t.id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"10px 0 8px",border:"none",cursor:"pointer",background:"transparent"}}><div style={{padding:"4px 16px",borderRadius:12,background:a?C.ac+"20":"transparent",fontSize:18}}>{t.icon}</div><span style={{fontSize:10,fontWeight:a?700:500,color:a?C.ac:C.mt}}>{t.label}</span></button>;})}</nav>;}
 function MediaLibrary({clientId,clientName}){
   const key=`media_${clientId||"all"}`;
   const[items,setItems]=useState(ls.get(key,[]));
@@ -1731,10 +1865,12 @@ function FitnessDevicesPage(){
 }
 
 
-function MoreMenu({onNav}){const items=[{id:"clients",icon:"👥",label:"Clients",desc:"Manage clients"},{id:"leads",icon:"🎯",label:"Leads Pipeline",desc:"Kanban board"},{id:"mealplan",icon:"🍎",label:"AI Meal Planner",desc:"AI-generated plans"},{id:"nutrition",icon:"🥗",label:"Nutrition Tracker",desc:"Log food & macros"},{id:"habits",icon:"✅",label:"Habit Tracker",desc:"Daily habits & streaks"},{id:"checkins",icon:"📋",label:"Check-ins",desc:"Weekly questionnaires"},{id:"reports",icon:"📊",label:"Analytics",desc:"Revenue & reports"},{id:"invoices",icon:"🧾",label:"Invoices",desc:"Billing & payments"},{id:"ai",icon:"🤖",label:"AI Coach",desc:"RAG-powered assistant"},{id:"media",icon:"🎥",label:"Media Library",desc:"Videos & progress photos"},{id:"devices",icon:"⌚",label:"Fitness Devices",desc:"Fitbit, Garmin, Apple Health"},{id:"settings",icon:"⚙️",label:"Settings",desc:"Profile & prefs"},{id:"tests",icon:"🧪",label:"Test Suite",desc:"Run automated tests"}];return<div><ST>More</ST><div style={{display:"flex",flexDirection:"column",gap:6}}>{items.map(i=><Card key={i.id} onClick={()=>onNav(i.id)} style={{padding:14,display:"flex",alignItems:"center",gap:14,cursor:"pointer"}}><div style={{width:42,height:42,borderRadius:12,background:C.ac+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>{i.icon}</div><div style={{flex:1}}><div style={{color:C.tx,fontSize:14,fontWeight:600}}>{i.label}</div><div style={{color:C.mt,fontSize:12}}>{i.desc}</div></div><span style={{color:C.mt,fontSize:18}}>›</span></Card>)}</div></div>;}
+function MoreMenu({onNav}){const btm=getBottomTabs();const items=[{id:"clients",icon:"👥",label:"Clients",desc:"Manage clients"},{id:"leads",icon:"🎯",label:"Leads Pipeline",desc:"Kanban board"},{id:"mealplan",icon:"🍎",label:"AI Meal Planner",desc:"AI-generated plans"},{id:"nutrition",icon:"🥗",label:"Nutrition Tracker",desc:"Log food & macros"},{id:"habits",icon:"✅",label:"Habit Tracker",desc:"Daily habits & streaks"},{id:"checkins",icon:"📋",label:"Check-ins",desc:"Weekly questionnaires"},{id:"reports",icon:"📊",label:"Analytics",desc:"Revenue & reports"},{id:"invoices",icon:"🧾",label:"Invoices",desc:"Billing & payments"},{id:"ai",icon:"🤖",label:"AI Coach",desc:"RAG-powered assistant"},{id:"media",icon:"🎥",label:"Media Library",desc:"Videos & progress photos"},{id:"devices",icon:"⌚",label:"Fitness Devices",desc:"Fitbit, Garmin, Apple Health"},{id:"settings",icon:"⚙️",label:"Settings",desc:"Profile & prefs"},{id:"tests",icon:"🧪",label:"Test Suite",desc:"Run automated tests"}];return<div><ST>More</ST><div style={{display:"flex",flexDirection:"column",gap:6}}>{items.filter(i=>!btm.includes(i.id)||i.id==="settings"||i.id==="tests").map(i=><Card key={i.id} onClick={()=>onNav(i.id)} style={{padding:14,display:"flex",alignItems:"center",gap:14,cursor:"pointer"}}><div style={{width:42,height:42,borderRadius:12,background:C.ac+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>{i.icon}</div><div style={{flex:1}}><div style={{color:C.tx,fontSize:14,fontWeight:600}}>{i.label}</div><div style={{color:C.mt,fontSize:12}}>{i.desc}</div></div><span style={{color:C.mt,fontSize:18}}>›</span></Card>)}</div></div>;}
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
-function MainApp(){const[tab,setTab]=useState("dashboard");const[sub,setSub]=useState(null);const[chatCl,setChatCl]=useState(null);const[rk,setRk]=useState(0);const handleV=useCallback((cmd,speak)=>{const r={dashboard:["home","dashboard"],workouts:["workout","exercise"],bookings:["schedule","booking","calendar"],chat:["message","chat"],clients:["client"],leads:["lead","pipeline"],reports:["report","analytics"],ai:["ai","assistant"],mealplan:["meal","diet","nutrition plan"],habits:["habit"],checkins:["checkin","check-in"],invoices:["invoice","payment","billing"],settings:["setting","profile"],tests:["test","testing","suite"],devices:["device","fitbit","garmin","watch","health","wearable"]};for(const[rt,kw] of Object.entries(r)){if(kw.some(k=>cmd.includes(k))){if(["dashboard","workouts","bookings","chat"].includes(rt)){setTab(rt);setSub(null);}else{setTab("more");setSub(rt);}setRk(k=>k+1);speak(`Opening ${rt}`);return;}}speak("Try saying a page name.");},[]);const{listening,toggle}=useVoice(handleV);const nav=id=>{setRk(k=>k+1);if(["dashboard","workouts","bookings","chat"].includes(id)){setTab(id);setSub(null);}else if(id==="more"){setTab("more");setSub(null);}else{setTab("more");setSub(id);}};const render=()=>{const K=`${tab}_${sub||""}_${rk}`;if(tab==="more"&&sub){const p={clients:<ClientsPage key={K} onOpenChat={c=>{setChatCl(c);setTab("chat");}}/>,leads:<LeadsPage key={K}/>,reports:<ReportsPage key={K}/>,ai:<AIChatPage key={K}/>,settings:<SettingsPage key={K}/>,mealplan:<MealPlannerPage key={K}/>,nutrition:<NutritionTracker key={K}/>,habits:<HabitTracker key={K}/>,checkins:<CheckInsPage key={K}/>,invoices:<InvoicesPage key={K}/>,media:<MediaLibrary key={K}/>,devices:<FitnessDevicesPage key={K}/>,tests:<TestSuitePage key={K}/>};return p[sub]||<MoreMenu onNav={setSub}/>;}const p={dashboard:<DashboardPage key={K}/>,workouts:<WorkoutsPage key={K}/>,bookings:<BookingsPage key={K}/>,chat:<MessagingPage key={K} initialClient={chatCl} onBack={()=>setChatCl(null)}/>,more:<MoreMenu onNav={setSub}/>};return p[tab]||<DashboardPage key={K}/>;};return<div style={{minHeight:"100dvh",background:C.bg,color:C.tx,fontFamily:"'DM Sans','SF Pro Display',-apple-system,system-ui,sans-serif"}}><style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{background:${C.bg};overflow-x:hidden}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:${C.bd};border-radius:4px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}input::placeholder,textarea::placeholder{color:${C.mt}}select option{background:${C.sf};color:${C.tx}}`}</style><button onClick={toggle} style={{position:"fixed",right:16,bottom:80,zIndex:200,width:48,height:48,borderRadius:24,border:"none",cursor:"pointer",background:listening?C.dg:C.gr,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 4px 20px ${listening?C.dg+"60":C.ac+"40"}`,animation:listening?"pulse 1.5s ease infinite":"none",fontSize:20}} title="Voice">🎙️</button><div style={{padding:"16px 16px 90px",maxWidth:600,margin:"0 auto"}}>{tab==="more"&&sub&&<button onClick={()=>setSub(null)} style={{background:"none",border:"none",color:C.ac,cursor:"pointer",fontSize:14,fontWeight:600,marginBottom:12,padding:0,fontFamily:"inherit"}}>← Back</button>}{render()}</div><BNav active={tab} onChange={nav}/></div>;}
+function MainApp(){const[tab,setTab]=useState("dashboard");const[sub,setSub]=useState(null);const[chatCl,setChatCl]=useState(null);const[rk,setRk]=useState(0);const handleV=useCallback((cmd,speak)=>{const r={dashboard:["home","dashboard"],workouts:["workout","exercise"],bookings:["schedule","booking","calendar"],chat:["message","chat"],clients:["client"],leads:["lead","pipeline"],reports:["report","analytics"],ai:["ai","assistant"],mealplan:["meal","diet","nutrition plan"],habits:["habit"],checkins:["checkin","check-in"],invoices:["invoice","payment","billing"],settings:["setting","profile"],tests:["test","testing","suite"],devices:["device","fitbit","garmin","watch","health","wearable"]};for(const[rt,kw] of Object.entries(r)){if(kw.some(k=>cmd.includes(k))){if(["dashboard","workouts","bookings","chat"].includes(rt)){setTab(rt);setSub(null);}else{setTab("more");setSub(rt);}setRk(k=>k+1);speak(`Opening ${rt}`);return;}}speak("Try saying a page name.");},[]);const{listening,toggle}=useVoice(handleV);const bottomIds=getBottomTabs();
+  const nav=id=>{setRk(k=>k+1);if(bottomIds.includes(id)){setTab(id);setSub(null);}else{setTab("more");setSub(id);}};const render=()=>{const K=`${tab}_${sub||""}_${rk}`;const btmIds=getBottomTabs();
+    if((tab==="more"&&sub)||(!btmIds.includes(tab)&&tab!=="more")){const subKey=sub||tab;const p={clients:<ClientsPage key={K} onOpenChat={c=>{setChatCl(c);nav("chat");}}/>,leads:<LeadsPage key={K}/>,reports:<ReportsPage key={K}/>,ai:<AIChatPage key={K}/>,settings:<SettingsPage key={K}/>,mealplan:<MealPlannerPage key={K}/>,nutrition:<NutritionTracker key={K}/>,habits:<HabitTracker key={K}/>,checkins:<CheckInsPage key={K}/>,invoices:<InvoicesPage key={K}/>,media:<MediaLibrary key={K}/>,devices:<FitnessDevicesPage key={K}/>,tests:<TestSuitePage key={K}/>};return p[subKey]||<MoreMenu onNav={setSub}/>;}const p={dashboard:<DashboardPage key={K}/>,workouts:<WorkoutsPage key={K}/>,bookings:<BookingsPage key={K}/>,chat:<MessagingPage key={K} initialClient={chatCl} onBack={()=>setChatCl(null)}/>,clients:<ClientsPage key={K} onOpenChat={c=>{setChatCl(c);nav("chat");}}/>,leads:<LeadsPage key={K}/>,ai:<AIChatPage key={K}/>,reports:<ReportsPage key={K}/>,more:<MoreMenu onNav={setSub}/>};return p[tab]||<DashboardPage key={K}/>;};return<div style={{minHeight:"100dvh",background:C.bg,color:C.tx,fontFamily:"'DM Sans','SF Pro Display',-apple-system,system-ui,sans-serif"}}><style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{background:${C.bg};overflow-x:hidden}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:${C.bd};border-radius:4px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}input::placeholder,textarea::placeholder{color:${C.mt}}select option{background:${C.sf};color:${C.tx}}`}</style><button onClick={toggle} style={{position:"fixed",right:16,bottom:80,zIndex:200,width:48,height:48,borderRadius:24,border:"none",cursor:"pointer",background:listening?C.dg:C.gr,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 4px 20px ${listening?C.dg+"60":C.ac+"40"}`,animation:listening?"pulse 1.5s ease infinite":"none",fontSize:20}} title="Voice">🎙️</button><div style={{padding:"16px 16px 90px",maxWidth:600,margin:"0 auto"}}>{(tab==="more"&&sub)&&<button onClick={()=>{setSub(null);if(tab!=="more")setTab("more");}} style={{background:"none",border:"none",color:C.ac,cursor:"pointer",fontSize:14,fontWeight:600,marginBottom:12,padding:0,fontFamily:"inherit"}}>← Back</button>}{render()}</div><BNav active={tab} onChange={nav}/></div>;}
 
 function useVoice(onCmd){const[listening,setListening]=useState(false);const speak=useCallback(t=>{if("speechSynthesis"in window){const u=new SpeechSynthesisUtterance(t);u.rate=1.05;speechSynthesis.speak(u);}},[]);const toggle=useCallback(()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return speak("Voice not supported");if(listening)return setListening(false);const r=new SR();r.continuous=false;r.lang="en-US";r.onresult=e=>{onCmd(e.results[0][0].transcript.toLowerCase().trim(),speak);setListening(false);};r.onerror=()=>setListening(false);r.onend=()=>setListening(false);r.start();setListening(true);},[listening,onCmd,speak]);return{listening,toggle,speak};}
 
