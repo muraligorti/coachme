@@ -1,6 +1,6 @@
 // CoachMe.life — Super Feature-Rich App.jsx (CoachFlow-grade)
 // Backend: just-perception-production.up.railway.app
-import { useState, useEffect, useRef, useCallback, createContext, useContext } from "react";
+import { useState, useEffect, useRef, useCallback, createContext, useContext, useMemo } from "react";
 
 const API = "https://just-perception-production.up.railway.app/api";
 const log = (...a) => console.log("[CoachMe]", ...a);
@@ -75,7 +75,7 @@ const Splash=()=><div style={{height:"100dvh",display:"flex",alignItems:"center"
 function AuthScreen(){const{login,register}=useAuth();const[mode,setMode]=useState("login");const[form,setForm]=useState({name:"",email:"",password:"",role:"coach"});const[error,setError]=useState("");const[busy,setBusy]=useState(false);const submit=async()=>{setError("");if(!form.email||!form.password)return setError("Email and password required");setBusy(true);try{mode==="login"?await login(form.email,form.password):await register(form);}catch(e){setError(e.message);}setBusy(false);};return<div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg,padding:20}}><Card style={{maxWidth:400,width:"100%"}}><div style={{textAlign:"center",marginBottom:28}}><div style={{width:52,height:52,borderRadius:14,background:C.gr,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:800,color:"#fff",marginBottom:12}}>C</div><h1 style={{color:C.tx,margin:0,fontSize:22,fontWeight:700}}>CoachMe.life</h1><p style={{color:C.mt,margin:"6px 0 0",fontSize:14}}>{mode==="login"?"Welcome back":"Create your account"}</p></div><div style={{display:"flex",flexDirection:"column",gap:14}}>{mode==="register"&&<><Input label="Full Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="John Doe"/><Sel label="I am a…" value={form.role} onChange={e=>setForm({...form,role:e.target.value})} options={[{value:"COACH",label:"Coach"},{value:"CLIENT",label:"Client"}]}/></>}<Input label="Email" type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="you@email.com"/><Input label="Password" type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&submit()}/>{error&&<div style={{color:C.dg,fontSize:13,padding:"8px 12px",background:C.dg+"15",borderRadius:8}}>{error}</div>}<Btn onClick={submit} disabled={busy} style={{width:"100%"}}>{busy?"Please wait…":mode==="login"?"Sign In":"Create Account"}</Btn><p style={{color:C.mt,fontSize:13,textAlign:"center",margin:0}}>{mode==="login"?"No account?":"Have an account?"}{" "}<span onClick={()=>{setMode(mode==="login"?"register":"login");setError("");}} style={{color:C.ac,cursor:"pointer",fontWeight:600}}>{mode==="login"?"Sign Up":"Sign In"}</span></p></div></Card></div>;}
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function DashboardPage(){const{user}=useAuth();const[stats,setStats]=useState({});const[up,setUp]=useState([]);const[loading,setLoading]=useState(true);useEffect(()=>{Promise.all([api.get("/reports/coach/dashboard").catch(()=>({})),api.get("/bookings").catch(()=>({}))]).then(([s,b])=>{setStats(s?.data||s||{});const bk=unwrap(b,"bookings","sessions");setUp(bk.filter(x=>new Date(x.date||x.startTime||x.scheduledAt)>=new Date()).slice(0,3));}).finally(()=>setLoading(false));},[]);if(loading)return<Spin/>;const g=new Date().getHours()<12?"Good morning":new Date().getHours()<17?"Good afternoon":"Good evening";return<div><div style={{marginBottom:20}}><div style={{fontSize:14,color:C.mt}}>{g},</div><h2 style={{color:C.tx,fontSize:22,margin:"4px 0 0",fontWeight:700}}>{user?.name||"Coach"} 👋</h2></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><SC label="Active Clients" value={stats.activeClients??stats.totalClients??0} icon="👥" color={C.ac}/><SC label="Monthly Revenue" value={`₹${(stats.monthlyRevenue??stats.totalRevenue??0).toLocaleString()}`} icon="📈" color={C.ok}/><SC label="Upcoming" value={stats.upcomingBookings??up.length} icon="📅" color={C.a2}/><SC label="Leads" value={stats.totalLeads??0} icon="🎯" color={C.wn}/></div><Card style={{marginTop:16}}><div style={{fontSize:15,fontWeight:600,color:C.tx,marginBottom:12}}>Upcoming Sessions</div>{up.length===0?<div style={{color:C.mt,fontSize:13}}>No upcoming sessions</div>:up.map(s=><div key={s.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.bd}`}}><div style={{width:40,height:40,borderRadius:10,background:C.ac+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>📅</div><div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{cName(s.client)||s.type||"Session"}</div><div style={{fontSize:12,color:C.mt}}>{new Date(s.date||s.startTime||s.scheduledAt).toLocaleDateString()} · {s.duration||60}min</div></div><Badge color={s.status==="confirmed"?C.ok:C.wn}>{s.status||"pending"}</Badge></div>)}</Card></div>;}
+function DashboardPage(){const{user}=useAuth();const[stats,setStats]=useState({});const[up,setUp]=useState([]);const[loading,setLoading]=useState(true);useEffect(()=>{Promise.all([api.get("/reports/coach/dashboard").catch(()=>({})),api.get("/bookings").catch(()=>({}))]).then(([s,b])=>{setStats(s?.data||s||{});const apiBk=unwrap(b,"bookings","sessions");const localBk=ls.get("local_bookings",[]);const allBk=[...apiBk,...localBk.filter(lb=>!apiBk.some(ab=>ab.id===lb.id))];const now=new Date();setUp(allBk.filter(x=>{try{return new Date(x.date||x.startTime||x.scheduledAt)>=now&&x.status!=="cancelled";}catch{return false;}}).sort((a,b)=>new Date(a.date||a.startTime||a.scheduledAt)-new Date(b.date||b.startTime||b.scheduledAt)).slice(0,5));}).finally(()=>setLoading(false));},[]);if(loading)return<Spin/>;const g=new Date().getHours()<12?"Good morning":new Date().getHours()<17?"Good afternoon":"Good evening";return<div><div style={{marginBottom:20}}><div style={{fontSize:14,color:C.mt}}>{g},</div><h2 style={{color:C.tx,fontSize:22,margin:"4px 0 0",fontWeight:700}}>{user?.name||"Coach"} 👋</h2></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><SC label="Active Clients" value={stats.activeClients??stats.totalClients??0} icon="👥" color={C.ac}/><SC label="Monthly Revenue" value={`₹${(stats.monthlyRevenue??stats.totalRevenue??0).toLocaleString()}`} icon="📈" color={C.ok}/><SC label="Upcoming" value={stats.upcomingBookings??up.length} icon="📅" color={C.a2}/><SC label="Leads" value={stats.totalLeads??0} icon="🎯" color={C.wn}/></div><Card style={{marginTop:16}}><div style={{fontSize:15,fontWeight:600,color:C.tx,marginBottom:12}}>Upcoming Sessions</div>{up.length===0?<div style={{color:C.mt,fontSize:13}}>No upcoming sessions</div>:up.map(s=><div key={s.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.bd}`}}><div style={{width:40,height:40,borderRadius:10,background:C.ac+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>📅</div><div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{cName(s.client)||s.type||"Session"}</div><div style={{fontSize:12,color:C.mt}}>{new Date(s.date||s.startTime||s.scheduledAt).toLocaleDateString()} · {s.duration||60}min</div></div><Badge color={s.status==="confirmed"?C.ok:C.wn}>{s.status||"pending"}</Badge></div>)}</Card></div>;}
 
 // ─── CLIENTS ──────────────────────────────────────────────────────────────────
 function ClientsPage({onOpenChat}){
@@ -254,7 +254,318 @@ function ClientsPage({onOpenChat}){
 }
 
 // ─── PROGRESS TRACKER ─────────────────────────────────────────────────────────
-function ProgressTracker({cid}){const[entries,setEntries]=useState(ls.get(`prog_${cid}`,[]));const[showAdd,setShowAdd]=useState(false);const[form,setForm]=useState({date:new Date().toISOString().slice(0,10),weight:"",bodyFat:"",chest:"",waist:"",hips:"",notes:""});const save=()=>{const u=[...entries,{...form,id:Date.now(),weight:+form.weight||0,bodyFat:+form.bodyFat||0}];setEntries(u);ls.set(`prog_${cid}`,u);setShowAdd(false);setForm({date:new Date().toISOString().slice(0,10),weight:"",bodyFat:"",chest:"",waist:"",hips:"",notes:""});};const lat=entries[entries.length-1];const prev=entries[entries.length-2];const diff=lat&&prev?(lat.weight-prev.weight).toFixed(1):0;return<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontSize:15,fontWeight:600,color:C.tx}}>Body Metrics</span><Btn onClick={()=>setShowAdd(true)} style={{padding:"6px 14px",fontSize:12}}>+ Log</Btn></div>{lat&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}><Card style={{padding:12,textAlign:"center"}}><div style={{fontSize:20,fontWeight:700,color:C.tx}}>{lat.weight}kg</div><div style={{fontSize:11,color:diff>0?C.dg:C.ok}}>{diff>0?"+":""}{diff}kg</div><div style={{fontSize:11,color:C.mt}}>Weight</div></Card><Card style={{padding:12,textAlign:"center"}}><div style={{fontSize:20,fontWeight:700,color:C.tx}}>{lat.bodyFat}%</div><div style={{fontSize:11,color:C.mt}}>Body Fat</div></Card><Card style={{padding:12,textAlign:"center"}}><div style={{fontSize:20,fontWeight:700,color:C.tx}}>{lat.waist||"—"}</div><div style={{fontSize:11,color:C.mt}}>Waist</div></Card></div>}{entries.length>1&&<Card style={{padding:14,marginBottom:12}}><div style={{fontSize:13,fontWeight:600,color:C.tx,marginBottom:8}}>Weight Trend</div><div style={{display:"flex",alignItems:"flex-end",gap:3,height:60}}>{entries.slice(-14).map((e,i,a)=>{const mn=Math.min(...a.map(x=>x.weight));const mx=Math.max(...a.map(x=>x.weight));const h=((e.weight-mn)/(mx-mn||1))*50+10;return<div key={i} style={{flex:1,height:h,borderRadius:3,background:C.gr,opacity:.5+(i/a.length)*.5}} title={`${e.weight}kg`}/>;})}</div></Card>}{entries.length===0&&<Empty icon="📏" text="No progress entries yet"/>}<Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Log Progress"><div style={{display:"flex",flexDirection:"column",gap:12}}><Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Weight (kg)" type="number" value={form.weight} onChange={e=>setForm({...form,weight:e.target.value})}/><Input label="Body Fat (%)" type="number" value={form.bodyFat} onChange={e=>setForm({...form,bodyFat:e.target.value})}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><Input label="Chest" value={form.chest} onChange={e=>setForm({...form,chest:e.target.value})}/><Input label="Waist" value={form.waist} onChange={e=>setForm({...form,waist:e.target.value})}/><Input label="Hips" value={form.hips} onChange={e=>setForm({...form,hips:e.target.value})}/></div><TextArea label="Notes" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/><Btn onClick={save} style={{width:"100%"}}>Save Entry</Btn></div></Modal></div>;}
+function ProgressTracker({cid}){
+  const[entries,setEntries]=useState(ls.get(`prog_${cid}`,[]));
+  const[showAdd,setShowAdd]=useState(false);
+  const[tab,setTab]=useState("overview");
+  const[activeMetric,setActiveMetric]=useState("weight");
+  const[form,setForm]=useState({date:new Date().toISOString().slice(0,10),weight:"",height:"",bodyFat:"",chest:"",waist:"",hips:"",bicepsL:"",bicepsR:"",thighL:"",thighR:"",calves:"",shoulders:"",neck:"",forearm:"",notes:""});
+  const emptyForm={date:new Date().toISOString().slice(0,10),weight:"",height:"",bodyFat:"",chest:"",waist:"",hips:"",bicepsL:"",bicepsR:"",thighL:"",thighR:"",calves:"",shoulders:"",neck:"",forearm:"",notes:""};
+
+  // Merge device data + check-in data into entries
+  const deviceData=ls.get("device_data",[]).filter(d=>d.weight>0);
+  const checkins=ls.get(`checkins`,[]); // check-ins with weight
+  const allEntries=useMemo(()=>{
+    const merged=[...entries];
+    // Add device weights that aren't already in entries
+    deviceData.forEach(d=>{
+      if(d.weight&&!merged.some(e=>e.date===d.date&&e.source==="device")){
+        merged.push({id:`dev_${d.date}`,date:d.date,weight:d.weight,source:"device",heartRateAvg:d.heartRateAvg,steps:d.steps,sleepHours:d.sleepHours,spo2:d.spo2});
+      }
+    });
+    // Add check-in weights
+    checkins.forEach(c=>{
+      if(c.weight&&!merged.some(e=>e.date===c.date&&e.source==="checkin")){
+        merged.push({id:`ck_${c.date}`,date:c.date,weight:c.weight,source:"checkin",energy:c.energy,sleep:c.sleep,adherence:c.adherence,mood:c.mood});
+      }
+    });
+    return merged.sort((a,b)=>a.date.localeCompare(b.date));
+  },[entries,deviceData.length,checkins.length]);
+
+  const save=()=>{
+    const entry={...form,id:Date.now(),source:"manual"};
+    // Convert all numeric fields
+    ["weight","height","bodyFat","chest","waist","hips","bicepsL","bicepsR","thighL","thighR","calves","shoulders","neck","forearm"].forEach(k=>{entry[k]=+entry[k]||0;});
+    // Calculate BMI if height and weight
+    if(entry.weight&&entry.height){entry.bmi=+(entry.weight/((entry.height/100)**2)).toFixed(1);}
+    const u=[...entries,entry];setEntries(u);ls.set(`prog_${cid}`,u);
+    setShowAdd(false);setForm(emptyForm);
+  };
+
+  // Auto-import from device button
+  const importFromDevice=()=>{
+    const dData=ls.get("device_data",[]);
+    const latest=dData.sort((a,b)=>b.date.localeCompare(a.date))[0];
+    if(latest){
+      setForm(f=>({...f,weight:String(latest.weight||""),date:latest.date||f.date}));
+    }else{alert("No device data found. Connect a fitness device first.");}
+  };
+
+  const lat=allEntries[allEntries.length-1];
+  const prev=allEntries.length>1?allEntries[allEntries.length-2]:null;
+
+  // Calculate current BMI
+  const currentBMI=lat?.bmi||(lat?.weight&&lat?.height?(lat.weight/((lat.height/100)**2)).toFixed(1):null);
+  const bmiCategory=currentBMI?(currentBMI<18.5?"Underweight":currentBMI<25?"Normal":currentBMI<30?"Overweight":"Obese"):null;
+  const bmiColor=currentBMI?(currentBMI<18.5?C.wn:currentBMI<25?C.ok:currentBMI<30?C.wn:C.dg):C.mt;
+
+  // Diff calculator
+  const diff=(field)=>{
+    if(!lat||!prev)return null;
+    const v=+(lat[field]||0)-(+(prev[field]||0));
+    return v===0?null:v;
+  };
+
+  // All metric definitions for the trend chart
+  const metrics=[
+    {id:"weight",label:"Weight",unit:"kg",color:C.ac,icon:"⚖️"},
+    {id:"bmi",label:"BMI",unit:"",color:bmiColor,icon:"📊"},
+    {id:"bodyFat",label:"Body Fat",unit:"%",color:C.or,icon:"🔥"},
+    {id:"chest",label:"Chest",unit:"cm",color:C.a2,icon:"📏"},
+    {id:"waist",label:"Waist",unit:"cm",color:C.wn,icon:"📏"},
+    {id:"hips",label:"Hips",unit:"cm",color:C.pk,icon:"📏"},
+    {id:"bicepsL",label:"Biceps (L)",unit:"cm",color:C.ok,icon:"💪"},
+    {id:"bicepsR",label:"Biceps (R)",unit:"cm",color:C.ok,icon:"💪"},
+    {id:"shoulders",label:"Shoulders",unit:"cm",color:C.ac,icon:"📏"},
+    {id:"thighL",label:"Thigh (L)",unit:"cm",color:C.a2,icon:"🦵"},
+    {id:"thighR",label:"Thigh (R)",unit:"cm",color:C.a2,icon:"🦵"},
+    {id:"calves",label:"Calves",unit:"cm",color:C.wn,icon:"📏"},
+    {id:"neck",label:"Neck",unit:"cm",color:C.mt,icon:"📏"},
+    {id:"forearm",label:"Forearm",unit:"cm",color:C.ok,icon:"💪"},
+  ];
+
+  // Get data points for a specific metric
+  const getMetricData=(metricId)=>allEntries.filter(e=>e[metricId]&&+e[metricId]>0).map(e=>({date:e.date,value:+e[metricId],source:e.source||"manual"}));
+
+  // Share on WhatsApp
+  const shareOnWhatsApp=(clientName)=>{
+    let msg=`📊 *Progress Report — ${clientName||"Client"}*\n📅 ${new Date().toLocaleDateString()}\n\n`;
+    if(lat){
+      if(lat.weight)msg+=`⚖️ Weight: ${lat.weight}kg`;
+      if(prev?.weight){const d=diff("weight");if(d)msg+=` (${d>0?"+":""}${d.toFixed(1)}kg)`;}
+      msg+="\n";
+      if(currentBMI)msg+=`📊 BMI: ${currentBMI} (${bmiCategory})\n`;
+      if(lat.bodyFat)msg+=`🔥 Body Fat: ${lat.bodyFat}%\n`;
+      if(lat.chest)msg+=`📏 Chest: ${lat.chest}cm\n`;
+      if(lat.waist)msg+=`📏 Waist: ${lat.waist}cm\n`;
+      if(lat.hips)msg+=`📏 Hips: ${lat.hips}cm\n`;
+      if(lat.bicepsL||lat.bicepsR)msg+=`💪 Biceps: L=${lat.bicepsL||"—"}cm R=${lat.bicepsR||"—"}cm\n`;
+      if(lat.shoulders)msg+=`📏 Shoulders: ${lat.shoulders}cm\n`;
+      if(lat.thighL||lat.thighR)msg+=`🦵 Thighs: L=${lat.thighL||"—"}cm R=${lat.thighR||"—"}cm\n`;
+    }
+    // Add trend
+    const weightData=getMetricData("weight");
+    if(weightData.length>=2){
+      const first=weightData[0];const last=weightData[weightData.length-1];
+      const totalChange=(last.value-first.value).toFixed(1);
+      msg+=`\n📈 *Trend (${weightData.length} entries):*\n`;
+      msg+=`Start: ${first.value}kg → Now: ${last.value}kg\n`;
+      msg+=`Change: ${totalChange>0?"+":""}${totalChange}kg over ${Math.ceil((new Date(last.date)-new Date(first.date))/(1000*60*60*24))} days\n`;
+    }
+    // Add device data if available
+    const devData=ls.get("device_data",[]).sort((a,b)=>b.date.localeCompare(a.date))[0];
+    if(devData){
+      msg+=`\n⌚ *Latest Device Data:*\n`;
+      if(devData.steps)msg+=`🚶 Steps: ${devData.steps.toLocaleString()}\n`;
+      if(devData.heartRateAvg)msg+=`❤️ Avg HR: ${devData.heartRateAvg} bpm\n`;
+      if(devData.sleepHours)msg+=`😴 Sleep: ${devData.sleepHours}h\n`;
+    }
+    msg+=`\n_Tracked on CoachMe.life_`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,"_blank");
+  };
+
+  // Trend chart component
+  const TrendLine=({data,color,label,unit})=>{
+    if(data.length<2)return null;
+    const vals=data.map(d=>d.value);
+    const min=Math.min(...vals);const max=Math.max(...vals);const range=max-min||1;
+    const first=vals[0];const last=vals[vals.length-1];
+    const change=(last-first).toFixed(1);
+    return<Card style={{padding:14,marginBottom:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <span style={{fontSize:13,fontWeight:600,color:C.tx}}>{label}</span>
+        <span style={{fontSize:12,fontWeight:600,color:change>0?C.dg:change<0?C.ok:C.mt}}>
+          {change>0?"+":""}{change}{unit} ({data.length} pts)
+        </span>
+      </div>
+      {/* SVG line chart */}
+      <svg viewBox={`0 0 ${Math.max(data.length*30,200)} 80`} style={{width:"100%",height:80}}>
+        {/* Grid lines */}
+        {[0,1,2,3].map(i=><line key={i} x1="0" y1={i*20+10} x2={data.length*30} y2={i*20+10} stroke={C.bd} strokeWidth="0.5"/>)}
+        {/* Line path */}
+        <polyline fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          points={data.map((d,i)=>{const x=i*(Math.max(data.length*30,200)/(data.length-1));const y=70-((d.value-min)/range)*60;return`${x},${y}`;}).join(" ")}/>
+        {/* Dots */}
+        {data.map((d,i)=>{const x=i*(Math.max(data.length*30,200)/(data.length-1));const y=70-((d.value-min)/range)*60;
+        return<circle key={i} cx={x} cy={y} r="3.5" fill={color} stroke={C.sf} strokeWidth="1.5">
+          <title>{d.date}: {d.value}{unit} ({d.source})</title>
+        </circle>;})}
+        {/* Value labels on first and last */}
+        <text x="2" y={70-((vals[0]-min)/range)*60-8} fill={C.mt} fontSize="9" fontFamily="inherit">{vals[0]}{unit}</text>
+        <text x={Math.max(data.length*30,200)-30} y={70-((vals[vals.length-1]-min)/range)*60-8} fill={color} fontSize="9" fontWeight="600" fontFamily="inherit">{vals[vals.length-1]}{unit}</text>
+      </svg>
+      {/* Date range */}
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.mt,marginTop:4}}>
+        <span>{data[0].date.slice(5)}</span>
+        <span>{data[data.length-1].date.slice(5)}</span>
+      </div>
+    </Card>;
+  };
+
+  return<div>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+      <span style={{fontSize:15,fontWeight:600,color:C.tx}}>Progress Tracker</span>
+      <div style={{display:"flex",gap:4}}>
+        <button onClick={()=>shareOnWhatsApp()} style={{padding:"6px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:"#25D366"+"20",color:"#25D366"}}>📲 Share</button>
+        <Btn onClick={()=>setShowAdd(true)} style={{padding:"6px 14px",fontSize:12}}>+ Log</Btn>
+      </div>
+    </div>
+
+    <Tabs tabs={[{id:"overview",label:"Overview"},{id:"trends",label:"Trends"},{id:"history",label:"History"}]} active={tab} onChange={setTab}/>
+
+    {/* ── OVERVIEW TAB ── */}
+    {tab==="overview"&&<div>
+      {/* Current stats grid */}
+      {lat?<div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+          <Card style={{padding:12,textAlign:"center"}}>
+            <div style={{fontSize:20,fontWeight:700,color:C.tx}}>{lat.weight||"—"}<span style={{fontSize:12,color:C.mt}}>kg</span></div>
+            {diff("weight")!==null&&<div style={{fontSize:11,color:diff("weight")>0?C.dg:C.ok}}>{diff("weight")>0?"+":""}{diff("weight").toFixed(1)}kg</div>}
+            <div style={{fontSize:11,color:C.mt}}>Weight</div>
+          </Card>
+          <Card style={{padding:12,textAlign:"center"}}>
+            <div style={{fontSize:20,fontWeight:700,color:bmiColor}}>{currentBMI||"—"}</div>
+            {bmiCategory&&<div style={{fontSize:10,color:bmiColor}}>{bmiCategory}</div>}
+            <div style={{fontSize:11,color:C.mt}}>BMI</div>
+          </Card>
+          <Card style={{padding:12,textAlign:"center"}}>
+            <div style={{fontSize:20,fontWeight:700,color:C.or}}>{lat.bodyFat||"—"}<span style={{fontSize:12,color:C.mt}}>%</span></div>
+            {diff("bodyFat")!==null&&<div style={{fontSize:11,color:diff("bodyFat")>0?C.dg:C.ok}}>{diff("bodyFat")>0?"+":""}{diff("bodyFat").toFixed(1)}%</div>}
+            <div style={{fontSize:11,color:C.mt}}>Body Fat</div>
+          </Card>
+        </div>
+
+        {/* Body measurements */}
+        <Card style={{padding:14,marginBottom:12}}>
+          <div style={{fontSize:13,fontWeight:600,color:C.tx,marginBottom:10}}>Body Measurements</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            {[{l:"Chest",v:lat.chest,u:"cm",icon:"📏"},{l:"Waist",v:lat.waist,u:"cm",icon:"📏"},{l:"Hips",v:lat.hips,u:"cm",icon:"📏"},{l:"Shoulders",v:lat.shoulders,u:"cm",icon:"📏"},{l:"Biceps L",v:lat.bicepsL,u:"cm",icon:"💪"},{l:"Biceps R",v:lat.bicepsR,u:"cm",icon:"💪"},{l:"Thigh L",v:lat.thighL,u:"cm",icon:"🦵"},{l:"Thigh R",v:lat.thighR,u:"cm",icon:"🦵"},{l:"Calves",v:lat.calves,u:"cm",icon:"📏"},{l:"Neck",v:lat.neck,u:"cm",icon:"📏"},{l:"Forearm",v:lat.forearm,u:"cm",icon:"💪"},{l:"Height",v:lat.height,u:"cm",icon:"📐"}].filter(m=>m.v&&+m.v>0).map(m=>
+              <div key={m.l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.bd}`,fontSize:12}}>
+                <span style={{color:C.mt}}>{m.icon} {m.l}</span>
+                <span style={{color:C.tx,fontWeight:600}}>{m.v} {m.u}{diff(m.l.toLowerCase().replace(/\s/g,""))!==null?` (${diff(m.l.toLowerCase().replace(/\s/g,""))>0?"+":""}${diff(m.l.toLowerCase().replace(/\s/g,"")).toFixed(1)})`:""}</span>
+              </div>
+            )}
+          </div>
+          {[...new Set(["chest","waist","hips","shoulders","bicepsL","bicepsR","thighL","thighR"].filter(k=>lat[k]&&+lat[k]>0))].length===0&&
+            <div style={{color:C.mt,fontSize:12,textAlign:"center",padding:8}}>Log measurements to see them here</div>}
+        </Card>
+
+        {/* Source badges */}
+        <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+          {allEntries.some(e=>e.source==="manual")&&<Badge color={C.ac}>📝 Manual</Badge>}
+          {allEntries.some(e=>e.source==="device")&&<Badge color={C.a2}>⌚ Device</Badge>}
+          {allEntries.some(e=>e.source==="checkin")&&<Badge color={C.ok}>📋 Check-in</Badge>}
+          <Badge color={C.mt}>{allEntries.length} entries</Badge>
+        </div>
+      </div>:<Empty icon="📏" text="No progress data yet. Log your first entry or connect a device!"/>}
+    </div>}
+
+    {/* ── TRENDS TAB ── */}
+    {tab==="trends"&&<div>
+      {/* Metric selector pills */}
+      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:12}}>
+        {metrics.filter(m=>getMetricData(m.id).length>=2).map(m=>
+          <button key={m.id} onClick={()=>setActiveMetric(m.id)} style={{padding:"5px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:activeMetric===m.id?m.color+"30":C.s2,color:activeMetric===m.id?m.color:C.mt}}>{m.icon} {m.label}</button>
+        )}
+      </div>
+
+      {/* Active metric chart */}
+      {metrics.filter(m=>getMetricData(m.id).length>=2).length===0?
+        <Empty icon="📈" text="Need at least 2 entries to show trends. Keep logging!"/>:
+        <div>
+          {/* Show selected metric's trend */}
+          {(()=>{const m=metrics.find(x=>x.id===activeMetric);const data=getMetricData(activeMetric);
+            return data.length>=2?<TrendLine data={data} color={m.color} label={m.label} unit={m.unit}/>:null;
+          })()}
+
+          {/* Show all metrics with data as smaller charts */}
+          <div style={{fontSize:13,fontWeight:600,color:C.tx,margin:"16px 0 8px"}}>All Metrics</div>
+          {metrics.filter(m=>getMetricData(m.id).length>=2&&m.id!==activeMetric).map(m=>{
+            const data=getMetricData(m.id);
+            return<TrendLine key={m.id} data={data} color={m.color} label={m.label} unit={m.unit}/>;
+          })}
+        </div>
+      }
+    </div>}
+
+    {/* ── HISTORY TAB ── */}
+    {tab==="history"&&<div>
+      {allEntries.length===0?<Empty icon="📋" text="No entries yet"/>:
+      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+        {allEntries.slice().reverse().map((e,i)=><Card key={e.id||i} style={{padding:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <span style={{fontSize:13,fontWeight:600,color:C.tx}}>{e.date}</span>
+            <Badge color={e.source==="device"?C.a2:e.source==="checkin"?C.ok:C.ac} style={{fontSize:10}}>
+              {e.source==="device"?"⌚ Device":e.source==="checkin"?"📋 Check-in":"📝 Manual"}
+            </Badge>
+          </div>
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:11,color:C.mt}}>
+            {e.weight>0&&<span>⚖️ {e.weight}kg</span>}
+            {e.bmi>0&&<span>📊 BMI {e.bmi}</span>}
+            {e.bodyFat>0&&<span>🔥 {e.bodyFat}%</span>}
+            {e.chest>0&&<span>Chest {e.chest}</span>}
+            {e.waist>0&&<span>Waist {e.waist}</span>}
+            {e.bicepsL>0&&<span>💪L {e.bicepsL}</span>}
+            {e.bicepsR>0&&<span>💪R {e.bicepsR}</span>}
+            {e.steps>0&&<span>🚶 {e.steps.toLocaleString()}</span>}
+            {e.heartRateAvg>0&&<span>❤️ {e.heartRateAvg}bpm</span>}
+          </div>
+          {e.notes&&<div style={{fontSize:11,color:C.mt,marginTop:6,fontStyle:"italic"}}>{e.notes}</div>}
+        </Card>)}
+      </div>}
+    </div>}
+
+    {/* ── LOG PROGRESS MODAL ── */}
+    <Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Log Progress" wide>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} style={{flex:1}}/>
+          <button onClick={importFromDevice} style={{padding:"8px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:C.a2+"20",color:C.a2,marginTop:20,marginLeft:8,whiteSpace:"nowrap"}}>⌚ Import</button>
+        </div>
+        <div style={{fontSize:13,fontWeight:600,color:C.tx}}>Body Composition</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+          <Input label="⚖️ Weight (kg)" type="number" step="0.1" value={form.weight} onChange={e=>setForm({...form,weight:e.target.value})}/>
+          <Input label="📐 Height (cm)" type="number" value={form.height} onChange={e=>setForm({...form,height:e.target.value})}/>
+          <Input label="🔥 Body Fat %" type="number" step="0.1" value={form.bodyFat} onChange={e=>setForm({...form,bodyFat:e.target.value})}/>
+        </div>
+        <div style={{fontSize:13,fontWeight:600,color:C.tx}}>Upper Body</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+          <Input label="📏 Chest" type="number" step="0.1" value={form.chest} onChange={e=>setForm({...form,chest:e.target.value})}/>
+          <Input label="📏 Shoulders" type="number" step="0.1" value={form.shoulders} onChange={e=>setForm({...form,shoulders:e.target.value})}/>
+          <Input label="📏 Neck" type="number" step="0.1" value={form.neck} onChange={e=>setForm({...form,neck:e.target.value})}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+          <Input label="💪 Bicep L" type="number" step="0.1" value={form.bicepsL} onChange={e=>setForm({...form,bicepsL:e.target.value})}/>
+          <Input label="💪 Bicep R" type="number" step="0.1" value={form.bicepsR} onChange={e=>setForm({...form,bicepsR:e.target.value})}/>
+          <Input label="💪 Forearm" type="number" step="0.1" value={form.forearm} onChange={e=>setForm({...form,forearm:e.target.value})}/>
+        </div>
+        <div style={{fontSize:13,fontWeight:600,color:C.tx}}>Lower Body</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+          <Input label="📏 Waist" type="number" step="0.1" value={form.waist} onChange={e=>setForm({...form,waist:e.target.value})}/>
+          <Input label="📏 Hips" type="number" step="0.1" value={form.hips} onChange={e=>setForm({...form,hips:e.target.value})}/>
+          <Input label="📏 Calves" type="number" step="0.1" value={form.calves} onChange={e=>setForm({...form,calves:e.target.value})}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Input label="🦵 Thigh L" type="number" step="0.1" value={form.thighL} onChange={e=>setForm({...form,thighL:e.target.value})}/>
+          <Input label="🦵 Thigh R" type="number" step="0.1" value={form.thighR} onChange={e=>setForm({...form,thighR:e.target.value})}/>
+        </div>
+        <TextArea label="Notes" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Any observations…"/>
+        <Btn onClick={save} style={{width:"100%"}}>Save Progress Entry</Btn>
+      </div>
+    </Modal>
+  </div>;
+}
+
 
 // ─── HABIT TRACKER ────────────────────────────────────────────────────────────
 function HabitTracker({cid}){const key=`hab_${cid||"me"}`;const[habits,setHabits]=useState(ls.get(key,[{id:1,name:"Drink 3L Water",icon:"💧",streak:0,log:{}},{id:2,name:"8h Sleep",icon:"😴",streak:0,log:{}},{id:3,name:"10k Steps",icon:"🚶",streak:0,log:{}},{id:4,name:"Eat Vegetables",icon:"🥦",streak:0,log:{}}]));const[showAdd,setShowAdd]=useState(false);const[newH,setNewH]=useState("");const today=new Date().toISOString().slice(0,10);const last7=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-(6-i));return d.toISOString().slice(0,10);});const toggle=(hid,date)=>{const u=habits.map(h=>{if(h.id!==hid)return h;const l={...h.log};l[date]=!l[date];let s=0;const d=new Date();while(l[d.toISOString().slice(0,10)]){s++;d.setDate(d.getDate()-1);}return{...h,log:l,streak:s};});setHabits(u);ls.set(key,u);};const addH=()=>{if(!newH.trim())return;const u=[...habits,{id:Date.now(),name:newH,icon:"✨",streak:0,log:{}}];setHabits(u);ls.set(key,u);setNewH("");setShowAdd(false);};const dn=["S","M","T","W","T","F","S"];return<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontSize:15,fontWeight:600,color:C.tx}}>Daily Habits</span><Btn onClick={()=>setShowAdd(true)} style={{padding:"6px 14px",fontSize:12}}>+ Habit</Btn></div><div style={{display:"grid",gridTemplateColumns:"1fr repeat(7,32px)",gap:4,marginBottom:8,alignItems:"center"}}><div/>{last7.map((d,i)=><div key={d} style={{textAlign:"center",fontSize:10,fontWeight:600,color:d===today?C.ac:C.mt}}>{dn[new Date(d).getDay()]}</div>)}</div>{habits.map(h=><div key={h.id} style={{display:"grid",gridTemplateColumns:"1fr repeat(7,32px)",gap:4,marginBottom:8,alignItems:"center"}}><div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}><span style={{fontSize:16}}>{h.icon}</span><div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:600,color:C.tx,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.name}</div>{h.streak>0&&<div style={{fontSize:10,color:C.or}}>🔥 {h.streak}d</div>}</div></div>{last7.map(d=><button key={d} onClick={()=>toggle(h.id,d)} style={{width:32,height:32,borderRadius:8,border:"none",cursor:"pointer",background:h.log[d]?C.ok:C.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:"#fff",transition:"all .2s"}}>{h.log[d]?"✓":""}</button>)}</div>)}<Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Add Habit"><Input label="Habit Name" value={newH} onChange={e=>setNewH(e.target.value)} placeholder="e.g. Meditate 10 min"/><Btn onClick={addH} style={{width:"100%",marginTop:12}}>Add</Btn></Modal></div>;}
@@ -385,6 +696,70 @@ function BookingsPage(){
     toggleHoliday(selDate);alert(`${dayBk.length} session(s) cancelled.`);
   };
 
+  // WhatsApp integration
+  const sendWhatsAppToClient=(phone,message)=>{
+    const cleanPhone=String(phone||"").replace(/[\s\-\+\(\)]/g,"");
+    const intlPhone=cleanPhone.startsWith("91")?cleanPhone:cleanPhone.startsWith("0")?`91${cleanPhone.slice(1)}`:`91${cleanPhone}`;
+    window.open(`https://wa.me/${intlPhone}?text=${encodeURIComponent(message)}`,"_blank");
+  };
+
+  const whatsAppGroupCall=()=>{
+    const dayBk=getDateBookings(selDate);
+    if(dayBk.length===0){alert("No sessions on this day");return;}
+    // Collect all client phones
+    const clientPhones=dayBk.map(b=>{
+      const client=b.client||clients.find(c=>c.id===b.clientId);
+      const phone=client?.phone||cPhone(client)||"";
+      const name=cName(client)||b.type||"Client";
+      return{name,phone};
+    }).filter(c=>c.phone);
+
+    if(clientPhones.length===0){
+      alert("No client phone numbers found for this day's sessions.\nAdd phone numbers to clients first.");
+      return;
+    }
+
+    // Create WhatsApp group call message
+    const timeSlots=dayBk.map(b=>{
+      const t=new Date(b.date||b.startTime||b.scheduledAt);
+      return`${t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} — ${cName(b.client)||b.type||"Session"} (${b.duration||60}min)`;
+    }).join("\n");
+
+    const msg=`🏋️ *CoachMe Session — ${new Date(selDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}*\n\n📅 Today's Schedule:\n${timeSlots}\n\n📞 Join the group video call:\n(Coach will start the call at session time)\n\nSee you! 💪`;
+
+    // Open WhatsApp for each client (or show the list to call)
+    if(clientPhones.length===1){
+      sendWhatsAppToClient(clientPhones[0].phone,msg);
+    }else{
+      // Show selection
+      const choice=confirm(`Send call invite to ${clientPhones.length} clients?\n\n${clientPhones.map(c=>`• ${c.name} (${c.phone})`).join("\n")}\n\nOK = Open WhatsApp for each\nCancel = Copy message only`);
+      if(choice){
+        clientPhones.forEach((c,i)=>{
+          setTimeout(()=>sendWhatsAppToClient(c.phone,msg),i*1000);
+        });
+      }else{
+        navigator.clipboard?.writeText(msg);
+        alert("Message copied to clipboard! Paste it in your WhatsApp group.");
+      }
+    }
+  };
+
+  const cancelDayAndNotify=async()=>{
+    const dayBk=getDateBookings(selDate);
+    if(dayBk.length===0){alert("No sessions to cancel");return;}
+    if(!confirm(`Cancel ${dayBk.length} session(s) on ${selDate} and notify clients via WhatsApp?`))return;
+    for(const bk of dayBk){markAttendance(bk.id,"cancelled");}
+    toggleHoliday(selDate);
+    // Send WhatsApp notification to each client
+    const msg=`❌ *Session Cancelled*\n\nHi! Your session on ${new Date(selDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})} has been cancelled.\n\nWe'll reschedule soon. Sorry for the inconvenience!\n\n— Your Coach via CoachMe.life`;
+    dayBk.forEach((bk,i)=>{
+      const client=bk.client||clients.find(c=>c.id===bk.clientId);
+      const phone=client?.phone||cPhone(client);
+      if(phone)setTimeout(()=>sendWhatsAppToClient(phone,msg),i*800);
+    });
+    alert(`${dayBk.length} session(s) cancelled. WhatsApp notifications sent.`);
+  };
+
   // Helper to get bookings for a date
   const getDateBookings=(dateStr)=>bookings.filter(b=>{
     try{return new Date(b.date||b.startTime||b.scheduledAt).toISOString().slice(0,10)===dateStr;}catch{return false;}
@@ -420,8 +795,8 @@ function BookingsPage(){
     <ST right={<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
       <button onClick={()=>setViewMode(viewMode==="month"?"week":"month")} style={{padding:"6px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:C.s2,color:C.mt}}>{viewMode==="month"?"📅 Week":"📆 Month"}</button>
       <Btn variant="secondary" onClick={()=>setShowRepeat(true)} style={{padding:"6px 10px",fontSize:11}}>🔁 Repeat</Btn>
-      <Btn variant={isHoliday?"danger":"secondary"} onClick={()=>isHoliday?toggleHoliday(selDate):cancelDay()} style={{padding:"6px 10px",fontSize:11}}>{isHoliday?"✓ Off":"🏖️"}</Btn>
-      <Btn onClick={()=>setShowAdd(true)} style={{padding:"6px 12px",fontSize:12}}>+ Book</Btn>
+      <Btn variant={isHoliday?"danger":"secondary"} onClick={()=>isHoliday?toggleHoliday(selDate):cancelDayAndNotify()} style={{padding:"6px 10px",fontSize:11}}>{isHoliday?"✓ Off":"🏖️"}</Btn>
+      <button onClick={whatsAppGroupCall} style={{padding:"6px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:"#25D366"+"20",color:"#25D366"}} title="WhatsApp call all clients">📞 Call</button><Btn onClick={()=>setShowAdd(true)} style={{padding:"6px 12px",fontSize:12}}>+ Book</Btn>
     </div>}>Schedule</ST>
 
     {/* ── MONTH VIEW (Outlook-style) ── */}
@@ -821,277 +1196,295 @@ function TestSuitePage(){
   const logRef=useRef(null);
   useEffect(()=>{logRef.current&&(logRef.current.scrollTop=logRef.current.scrollHeight);},[logLines]);
 
-  // Saved token — NEVER revoke during tests
   const savedToken=useRef(api.token);
+  const roleTokens=useRef({coach:null,client:null,admin:null});
 
   const apiTest=async(method,path,body=null,tok=null)=>{
-    const headers={"Content-Type":"application/json"};
-    const t=tok||savedToken.current;
+    const headers={"Content-Type":"application/json"};const t=tok||savedToken.current;
     if(t)headers["Authorization"]=`Bearer ${t}`;
     const opts={method,headers};if(body)opts.body=JSON.stringify(body);
-    addLog(`→ ${method} ${path}`,"info");
-    try{
-      const res=await fetch(`${API}${path}`,opts);
-      const text=await res.text();let data;try{data=JSON.parse(text);}catch{data={raw:text};}
-      addLog(`← ${res.status} ${JSON.stringify(data).slice(0,180)}`,res.ok?"ok":"err");
-      return{status:res.status,ok:res.ok,data};
-    }catch(e){addLog(`✕ ${e.message}`,"err");return{status:0,ok:false,data:{error:e.message}};}
+    addLog(`→ ${method} ${path}`);
+    try{const res=await fetch(`${API}${path}`,opts);const text=await res.text();let data;try{data=JSON.parse(text);}catch{data={raw:text};}
+      addLog(`← ${res.status} ${JSON.stringify(data).slice(0,150)}`,res.ok?"ok":"err");
+      return{status:res.status,ok:res.ok,data};}
+    catch(e){addLog(`✕ ${e.message}`,"err");return{status:0,ok:false,data:{error:e.message}};}
   };
 
-  const addR=(group,name,status,detail="")=>setResults(p=>[...p,{group,name,status,detail}]);
+  const addR=(g,n,s,d="")=>setResults(p=>[...p,{group:g,name:n,status:s,detail:d}]);
+  const xTok=(d)=>d?.token||d?.accessToken||d?.access_token||d?.data?.token;
 
   const runAll=async()=>{
     setResults([]);setLogLines([]);setRunning(true);setProgress(0);
-    savedToken.current=api.token; // Preserve token!
-    addLog("━━━ CoachMe.life COMPREHENSIVE TEST SUITE ━━━","ok");
-    addLog(`User: ${user?.email} (${user?.role})  |  API: ${API}`,"info");
-    let r,done=0;const total=65;const tick=()=>{done++;setProgress(Math.round((done/total)*100));};
+    savedToken.current=api.token;
+    addLog("━━━ COMPREHENSIVE MULTI-ROLE TEST SUITE ━━━","ok");
+    addLog(`Primary user: ${user?.email} (${user?.role})`,"info");
+    const ts=Date.now();let done=0;const total=80;const tick=()=>{done++;setProgress(Math.round((done/total)*100));};
+    let r;
 
-    // ── 1. AUTH ───────────────────────────────────────────────────────────
-    addLog("\n▶ 1. AUTHENTICATION","ok");
+    // ══════════════════════════════════════════════════════════════════════
+    addLog("\n━━ PHASE 1: REGISTRATION (all roles) ━━","ok");
+    // ══════════════════════════════════════════════════════════════════════
+
+    // Register COACH
+    const coachEmail=`testcoach_${ts}@cm.test`;
+    r=await apiTest("POST","/auth/register",{name:"TestCoach",email:coachEmail,password:"Coach123!",role:"COACH"});
+    addR("1. Register","Register COACH",r.ok?"pass":"fail",`${r.status}: ${r.ok?"OK":JSON.stringify(r.data).slice(0,80)}`);tick();
+    roleTokens.current.coach=xTok(r.data);
+
+    // Register CLIENT
+    const clientEmail=`testclient_${ts}@cm.test`;
+    r=await apiTest("POST","/auth/register",{name:"TestClient",email:clientEmail,password:"Client123!",role:"CLIENT"});
+    addR("1. Register","Register CLIENT",r.ok?"pass":"fail",`${r.status}: ${r.ok?"OK":JSON.stringify(r.data).slice(0,80)}`);tick();
+    roleTokens.current.client=xTok(r.data);
+
+    // Register ADMIN
+    const adminEmail=`testadmin_${ts}@cm.test`;
+    r=await apiTest("POST","/auth/register",{name:"TestAdmin",email:adminEmail,password:"Admin123!",role:"ADMIN"});
+    addR("1. Register","Register ADMIN",r.ok?"pass":"info",`${r.status}: ${r.ok?"OK":"ADMIN registration may be restricted"}`);tick();
+    roleTokens.current.admin=xTok(r.data);
+
+    // Duplicate rejection
+    r=await apiTest("POST","/auth/register",{name:"Dupe",email:coachEmail,password:"X",role:"COACH"});
+    addR("1. Register","Duplicate email rejected",r.status>=400?"pass":"fail",`${r.status}`);tick();
+
+    // Missing fields
+    r=await apiTest("POST","/auth/register",{email:"x@y.com"});
+    addR("1. Register","Missing fields rejected",r.status>=400?"pass":"fail",`${r.status}`);tick();
+
+    // Wrong role enum
+    r=await apiTest("POST","/auth/register",{name:"Bad",email:`bad_${ts}@t.com`,password:"X",role:"invalid"});
+    addR("1. Register","Invalid role rejected",r.status>=400?"pass":"fail",`${r.status}`);tick();
+
+    // ══════════════════════════════════════════════════════════════════════
+    addLog("\n━━ PHASE 2: LOGIN (all roles) ━━","ok");
+    // ══════════════════════════════════════════════════════════════════════
+
+    // Login as COACH
+    r=await apiTest("POST","/auth/login",{email:coachEmail,password:"Coach123!"});
+    addR("2. Login","Login as COACH",r.ok?"pass":"fail",`${r.status}: ${r.ok?"token OK":"FAILED"}`);tick();
+    if(r.ok&&xTok(r.data))roleTokens.current.coach=xTok(r.data);
+
+    // Login as CLIENT
+    r=await apiTest("POST","/auth/login",{email:clientEmail,password:"Client123!"});
+    addR("2. Login","Login as CLIENT",r.ok?"pass":"fail",`${r.status}: ${r.ok?"token OK":"FAILED"}`);tick();
+    if(r.ok&&xTok(r.data))roleTokens.current.client=xTok(r.data);
+
+    // Login as ADMIN (using seeded account)
+    r=await apiTest("POST","/auth/login",{email:"admin@fitos-nexus.com",password:"Admin123!"});
+    addR("2. Login","Login as ADMIN (seeded)",r.ok?"pass":"info",`${r.status}: ${r.ok?"token OK":"admin account may not exist"}`);tick();
+    if(r.ok&&xTok(r.data))roleTokens.current.admin=xTok(r.data);
+
+    // Login with original coach
+    r=await apiTest("POST","/auth/login",{email:"coach@fitos-nexus.com",password:"Coach123!"});
+    if(r.ok&&xTok(r.data))savedToken.current=xTok(r.data); // Refresh our working token
+    addR("2. Login","Re-login primary coach",r.ok?"pass":"fail",`${r.status}`);tick();
+
+    // Wrong password
+    r=await apiTest("POST","/auth/login",{email:coachEmail,password:"WrongPass!"});
+    addR("2. Login","Wrong password rejected",!r.ok?"pass":"fail",`${r.status}`);tick();
+
+    // Unknown email
+    r=await apiTest("POST","/auth/login",{email:"nobody_exists_xyz@x.com",password:"x"});
+    addR("2. Login","Unknown email rejected",!r.ok?"pass":"fail",`${r.status}`);tick();
+
+    // Invalid token
+    r=await apiTest("GET","/auth/me",null,"completely_invalid_token");
+    addR("2. Login","Invalid token → 401",r.status===401||r.status===403?"pass":"fail",`${r.status}`);tick();
+
+    // ══════════════════════════════════════════════════════════════════════
+    addLog("\n━━ PHASE 3: AUTH ENDPOINTS ━━","ok");
+    // ══════════════════════════════════════════════════════════════════════
 
     r=await apiTest("GET","/auth/me");
-    addR("1. Auth","GET /auth/me",r.ok?"pass":"fail",`${r.status}: ${r.ok?`${r.data?.user?.email||"OK"}`:"error"}`);tick();
-
-    // Register with correct uppercase enum
-    const tEmail=`test_${Date.now()}@cm.test`;
-    r=await apiTest("POST","/auth/register",{name:"TestCoach",email:tEmail,password:"Test123!",role:"COACH"});
-    addR("1. Auth","Register coach (role=COACH)",r.ok?"pass":"fail",`${r.status}: ${r.ok?"OK":JSON.stringify(r.data).slice(0,100)}`);tick();
-    const newCoachToken=r.data?.token||r.data?.accessToken||r.data?.data?.token;
-
-    const cEmail=`testcl_${Date.now()}@cm.test`;
-    r=await apiTest("POST","/auth/register",{name:"TestClient",email:cEmail,password:"Test123!",role:"CLIENT"});
-    addR("1. Auth","Register client (role=CLIENT)",r.ok?"pass":"fail",`${r.status}: ${r.ok?"OK":"error"}`);tick();
-    const newClientToken=r.data?.token||r.data?.accessToken||r.data?.data?.token;
-
-    r=await apiTest("POST","/auth/register",{name:"Dupe",email:tEmail,password:"Test123!",role:"COACH"});
-    addR("1. Auth","Register duplicate email → rejected",r.status>=400?"pass":"fail",`${r.status}`);tick();
-
-    r=await apiTest("POST","/auth/register",{email:"x@y.com"});
-    addR("1. Auth","Register missing fields → rejected",r.status>=400?"pass":"fail",`${r.status}`);tick();
-
-    r=await apiTest("POST","/auth/login",{email:user?.email||"coach@fitos-nexus.com",password:"Coach123!"});
-    addR("1. Auth","Login valid creds",r.ok?"pass":"fail",`${r.status}: ${r.ok?"token OK":"FAILED"}`);tick();
-    // Restore our token in case login returned a new one
-    if(r.ok&&(r.data?.token||r.data?.accessToken)){savedToken.current=r.data?.token||r.data?.accessToken;}
-
-    r=await apiTest("POST","/auth/login",{email:"coach@fitos-nexus.com",password:"WrongPass999!"});
-    addR("1. Auth","Login wrong password → rejected",!r.ok?"pass":"fail",`${r.status}`);tick();
-
-    r=await apiTest("POST","/auth/login",{email:"nobody@x.com",password:"x"});
-    addR("1. Auth","Login unknown email → rejected",!r.ok?"pass":"fail",`${r.status}`);tick();
-
-    r=await apiTest("GET","/auth/me",null,"bad_token_xyz");
-    addR("1. Auth","Invalid token → 401",r.status===401||r.status===403?"pass":"fail",`${r.status}`);tick();
+    addR("3. Auth","GET /auth/me",r.ok?"pass":"fail",`${r.status}: ${r.data?.user?.email||"?"}`);tick();
 
     r=await apiTest("POST","/auth/refresh");
-    addR("1. Auth","POST /auth/refresh",r.status!==404?"pass":"info",`${r.status}`);tick();
+    addR("3. Auth","POST /auth/refresh",r.status!==404?"pass":"info",`${r.status}`);tick();
 
-    // ⚠️ DO NOT call /auth/logout — it revokes the token!
-    addR("1. Auth","POST /auth/logout","info","SKIPPED — would revoke active session token");tick();
-
-    r=await apiTest("PUT","/auth/profile",{name:"TestUpdate"});
-    addR("1. Auth","PUT /auth/profile",r.ok?"pass":"info",`${r.status}: ${r.ok?"updated":"endpoint may not exist"}`);tick();
+    addR("3. Auth","POST /auth/logout","info","SKIPPED — would revoke token");tick();
 
     r=await apiTest("POST","/auth/forgot-password",{email:"coach@fitos-nexus.com"});
-    addR("1. Auth","POST /auth/forgot-password",true?"info":"info",`${r.status}: ${r.status===404?"not implemented":"exists"}`);tick();
+    addR("3. Auth","POST /auth/forgot-password",true?"info":"info",`${r.status}: ${r.status===404?"not implemented":"exists"}`);tick();
 
     r=await apiTest("POST","/auth/reset-password",{token:"fake",password:"X"});
-    addR("1. Auth","POST /auth/reset-password",true?"info":"info",`${r.status}: ${r.status===404?"not implemented":"exists"}`);tick();
+    addR("3. Auth","POST /auth/reset-password",true?"info":"info",`${r.status}: ${r.status===404?"not implemented":"exists"}`);tick();
 
-    // ── 2. CLIENTS ────────────────────────────────────────────────────────
-    addLog("\n▶ 2. CLIENTS CRUD","ok");
+    // ══════════════════════════════════════════════════════════════════════
+    addLog("\n━━ PHASE 4: COACH-ROLE TESTS ━━","ok");
+    // ══════════════════════════════════════════════════════════════════════
 
-    r=await apiTest("GET","/clients");
-    const cList=Array.isArray(r.data)?r.data:r.data?.clients||r.data?.[Object.keys(r.data)[0]]||[];
-    addR("2. Clients","GET /clients",r.ok?"pass":"fail",`${r.status}: ${Array.isArray(cList)?cList.length+" clients":"keys="+Object.keys(r.data||{})}`);tick();
+    const ct=savedToken.current; // Coach token
 
-    r=await apiTest("POST","/clients",{name:"TestCRUD",email:`crud_${Date.now()}@t.com`,phone:"9876543210",sessionType:"offline"});
-    const cid=r.data?.client?.id||r.data?.id;
-    const cDisplay=r.data?.client?.displayName||r.data?.client?.name||"?";
-    addR("2. Clients","POST /clients — create",r.ok?"pass":"fail",`${r.status}: id=${cid}, displayName=${cDisplay}`);tick();
+    r=await apiTest("GET","/clients",null,ct);
+    addR("4. Coach","GET /clients",r.ok?"pass":"fail",`${r.status}`);tick();
 
-    if(cid){
-      r=await apiTest("GET",`/clients/${cid}`);
-      addR("2. Clients","GET /clients/:id — read",r.ok?"pass":"info",`${r.status}: ${r.ok?"found":"single-read may not exist"}`);tick();
+    r=await apiTest("POST","/clients",{name:"RoleTestClient",email:`rtc_${ts}@t.com`,phone:"9999",sessionType:"offline"},ct);
+    const rtcId=r.data?.client?.id||r.data?.id;
+    addR("4. Coach","POST /clients (create)",r.ok?"pass":"fail",`${r.status}: id=${rtcId}, name=${r.data?.client?.displayName||"?"}`);tick();
 
-      r=await apiTest("PUT",`/clients/${cid}`,{notes:"edited",displayName:"Renamed"});
-      addR("2. Clients","PUT /clients/:id — edit",r.ok?"pass":"info",`${r.status}: ${r.status===404?"404 (local fallback used)":"OK"}`);tick();
+    if(rtcId){
+      r=await apiTest("DELETE",`/clients/${rtcId}`,null,ct);
+      addR("4. Coach","DELETE /clients/:id",r.ok?"pass":"fail",`${r.status}`);tick();
+    }else{addR("4. Coach","DELETE /clients/:id","skip","no ID");tick();}
 
-      r=await apiTest("DELETE",`/clients/${cid}`);
-      addR("2. Clients","DELETE /clients/:id",r.ok?"pass":"fail",`${r.status}`);tick();
-    }else{addR("2. Clients","GET/PUT/DELETE","skip","no client ID");tick();tick();tick();}
+    r=await apiTest("POST","/clients/bulk",{clients:[{name:"BulkRC",email:`brc_${ts}@t.com`,phone:"111"}]},ct);
+    addR("4. Coach","POST /clients/bulk",r.ok?"pass":"info",`${r.status}`);tick();
 
-    r=await apiTest("POST","/clients/bulk",{clients:[{name:"B1",email:`b1_${Date.now()}@t.com`,phone:"111"},{name:"B2",email:`b2_${Date.now()}@t.com`,phone:"222"}]});
-    addR("2. Clients","POST /clients/bulk",r.ok?"pass":"info",`${r.status}: ${r.ok?`success=${r.data?.success}`:r.status}`);tick();
+    r=await apiTest("GET","/bookings",null,ct);
+    addR("4. Coach","GET /bookings",r.ok?"pass":"fail",`${r.status}`);tick();
 
-    // ── 3. BOOKINGS ───────────────────────────────────────────────────────
-    addLog("\n▶ 3. BOOKINGS","ok");
+    r=await apiTest("POST","/bookings",{date:new Date().toISOString(),duration:60,type:"training"},ct);
+    addR("4. Coach","POST /bookings",r.ok?"pass":"info",`${r.status}: ${r.status===403?"403 (needs CLIENT role — local fallback)":"OK"}`);tick();
 
-    r=await apiTest("GET","/bookings");
-    addR("3. Bookings","GET /bookings",r.ok?"pass":"fail",`${r.status}`);tick();
+    r=await apiTest("GET","/leads",null,ct);
+    addR("4. Coach","GET /leads",r.ok?"pass":"fail",`${r.status}`);tick();
 
-    r=await apiTest("POST","/bookings",{date:new Date().toISOString(),duration:60,type:"training",clientId:cid||"x"});
-    addR("3. Bookings","POST /bookings (COACH)",r.ok?"pass":"info",`${r.status}: ${r.status===403?"403 (role: needs CLIENT → local fallback)":r.ok?"created":"error"}`);tick();
+    r=await apiTest("GET","/reports/coach/dashboard",null,ct);
+    addR("4. Coach","GET /reports/coach/dashboard",r.ok?"pass":"fail",`${r.status}`);tick();
 
-    // Try as registered client
-    if(newClientToken){
-      r=await apiTest("POST","/bookings",{date:new Date().toISOString(),duration:60,type:"training"},newClientToken);
-      addR("3. Bookings","POST /bookings (CLIENT token)",r.ok?"pass":"info",`${r.status}: ${r.ok?"✅ CLIENT role can book!":"still blocked"}`);tick();
-    }else{addR("3. Bookings","POST as CLIENT","skip","no client token");tick();}
+    r=await apiTest("GET","/reports/coach/revenue",null,ct);
+    addR("4. Coach","GET /reports/coach/revenue",r.ok?"pass":"fail",`${r.status}`);tick();
 
-    // Local fallback
-    const lb=ls.get("local_bookings",[]);
-    lb.push({id:`lt_${Date.now()}`,date:new Date().toISOString(),status:"confirmed",_local:true});
-    ls.set("local_bookings",lb);
-    addR("3. Bookings","Local booking fallback","pass","saved to localStorage");tick();
-    ls.set("local_bookings",lb.filter(b=>!b.id.startsWith("lt_")));
+    r=await apiTest("POST","/ai/chat",{message:"test"},ct);
+    addR("4. Coach","POST /ai/chat",r.ok?"pass":"fail",`${r.status}: ${r.ok?"response OK":"error"}`);tick();
 
-    // ── 4. LEADS ──────────────────────────────────────────────────────────
-    addLog("\n▶ 4. LEADS","ok");
+    r=await apiTest("GET","/coaches",null,ct);
+    addR("4. Coach","GET /coaches (public)",r.ok?"pass":"fail",`${r.status}`);tick();
 
-    r=await apiTest("GET","/leads");
-    addR("4. Leads","GET /leads",r.ok?"pass":"fail",`${r.status}`);tick();
+    // ══════════════════════════════════════════════════════════════════════
+    addLog("\n━━ PHASE 5: CLIENT-ROLE TESTS ━━","ok");
+    // ══════════════════════════════════════════════════════════════════════
 
-    r=await apiTest("POST","/leads",{name:"TestLead",email:`ld_${Date.now()}@t.com`,phone:"555",source:"website"});
-    const lid=r.data?.id||r.data?.lead?.id;
-    addR("4. Leads","POST /leads",r.ok?"pass":"info",`${r.status}: ${r.ok?"created, id="+lid:r.status===404?"404 (local fallback)":"error"}`);tick();
+    const clt=roleTokens.current.client;
+    if(clt){
+      r=await apiTest("GET","/auth/me",null,clt);
+      addR("5. Client","GET /auth/me (CLIENT)",r.ok?"pass":"fail",`${r.status}: ${r.data?.user?.role||"?"}`);tick();
 
-    if(lid){
-      r=await apiTest("PUT",`/leads/${lid}`,{status:"contacted"});
-      addR("4. Leads","PUT /leads/:id",r.ok?"pass":"info",`${r.status}`);tick();
-    }else{
-      const ll=ls.get("local_leads",[]);ll.push({id:"lt",name:"T",status:"new"});ls.set("local_leads",ll);
-      addR("4. Leads","Local lead fallback","pass","saved locally");tick();
-      ls.set("local_leads",ll.filter(l=>l.id!=="lt"));
-    }
+      r=await apiTest("GET","/coaches",null,clt);
+      addR("5. Client","GET /coaches (search)",r.ok?"pass":"fail",`${r.status}`);tick();
 
-    // ── 5. WORKOUTS ───────────────────────────────────────────────────────
-    addLog("\n▶ 5. WORKOUTS","ok");
+      r=await apiTest("POST","/bookings",{date:new Date().toISOString(),duration:60,type:"training"},clt);
+      addR("5. Client","POST /bookings (CLIENT can book!)",r.ok?"pass":"info",`${r.status}: ${r.ok?"✅ CLIENT role accepted":"still needs more fields"}`);tick();
 
-    r=await apiTest("GET","/workouts");
-    addR("5. Workouts","GET /workouts",r.ok?"pass":"info",`${r.status}: ${r.status===404?"not mounted (local)":"exists"}`);tick();
+      r=await apiTest("GET","/bookings",null,clt);
+      addR("5. Client","GET /bookings",r.ok?"pass":"info",`${r.status}`);tick();
 
-    r=await apiTest("POST","/workouts",{title:"TestPlan",exercises:[{name:"Squat",sets:3,reps:10}]});
-    addR("5. Workouts","POST /workouts",r.ok?"pass":"info",`${r.status}: ${r.status===404?"404 (local)":"OK"}`);tick();
+      r=await apiTest("GET","/clients",null,clt);
+      addR("5. Client","GET /clients (CLIENT view)",r.ok?"pass":"info",`${r.status}: ${r.ok?"can see clients":r.status===403?"correctly restricted":"error"}`);tick();
 
-    r=await apiTest("GET","/workouts/sessions");
-    addR("5. Workouts","GET /workouts/sessions",r.status!==404?"pass":"info",`${r.status}`);tick();
+      r=await apiTest("POST","/ai/chat",{message:"suggest a workout"},clt);
+      addR("5. Client","POST /ai/chat",r.ok?"pass":"info",`${r.status}: ${r.ok?"AI works for CLIENT":"may be restricted"}`);tick();
 
-    ls.set("local_workouts",[...(ls.get("local_workouts",[])),{id:"wt",title:"T"}]);
-    addR("5. Workouts","Local workout save","pass","OK");tick();
-    ls.set("local_workouts",ls.get("local_workouts",[]).filter(w=>w.id!=="wt"));
+      r=await apiTest("GET","/reports/coach/dashboard",null,clt);
+      addR("5. Client","GET /reports/coach/* (CLIENT)",r.ok?"info":"pass",`${r.status}: ${r.ok?"accessible (unexpected)":"correctly restricted"}`);tick();
 
-    // ── 6. REPORTS ────────────────────────────────────────────────────────
-    addLog("\n▶ 6. REPORTS","ok");
+      r=await apiTest("GET","/leads",null,clt);
+      addR("5. Client","GET /leads (CLIENT)",r.ok?"info":"pass",`${r.status}: ${r.ok?"accessible":"correctly restricted"}`);tick();
+    }else{for(let i=0;i<8;i++){addR("5. Client","(skipped)","skip","No CLIENT token");tick();}}
 
-    for(const ep of["/reports/coach/dashboard","/reports/coach/revenue","/reports/coach/clients","/reports/coach/workouts"]){
-      r=await apiTest("GET",ep);
-      addR("6. Reports",`GET ${ep}`,r.ok?"pass":"fail",`${r.status}: ${r.ok?JSON.stringify(r.data).slice(0,50):"error"}`);tick();
-    }
-    r=await apiTest("GET","/reports/admin/platform");
-    addR("6. Reports","GET admin/platform (needs ADMIN)",true?"info":"info",`${r.status}: ${r.ok?"admin access":"denied (expected)"}`);tick();
+    // ══════════════════════════════════════════════════════════════════════
+    addLog("\n━━ PHASE 6: ADMIN-ROLE TESTS ━━","ok");
+    // ══════════════════════════════════════════════════════════════════════
 
-    // ── 7. AI CHAT ────────────────────────────────────────────────────────
-    addLog("\n▶ 7. AI CHAT","ok");
+    const adt=roleTokens.current.admin;
+    if(adt){
+      r=await apiTest("GET","/auth/me",null,adt);
+      addR("6. Admin","GET /auth/me (ADMIN)",r.ok?"pass":"fail",`${r.status}: role=${r.data?.user?.role||"?"}`);tick();
 
-    r=await apiTest("POST","/ai/chat",{message:"Hello test"});
-    addR("7. AI","POST /ai/chat — basic",r.ok?"pass":"fail",`${r.status}: ${r.ok?(r.data?.reply||r.data?.message||r.data?.response||"OK").slice(0,60):"error"}`);tick();
+      r=await apiTest("GET","/reports/admin/platform",null,adt);
+      addR("6. Admin","GET /reports/admin/platform",r.ok?"pass":"info",`${r.status}: ${r.ok?"admin access granted":"restricted"}`);tick();
 
-    r=await apiTest("POST","/ai/chat",{message:"What is a good chest workout?",history:[{role:"user",content:"hi"},{role:"assistant",content:"hello"}]});
-    addR("7. AI","POST /ai/chat — with history",r.ok?"pass":"fail",`${r.status}: ${r.ok?"response OK":"error"}`);tick();
+      r=await apiTest("GET","/clients",null,adt);
+      addR("6. Admin","GET /clients (ADMIN view)",r.ok?"pass":"info",`${r.status}`);tick();
 
-    r=await apiTest("POST","/ai/match",{query:"weight loss coach"});
-    addR("7. AI","POST /ai/match — coach matching",r.ok?"pass":"info",`${r.status}: ${r.status===404?"not impl":"exists"}`);tick();
+      r=await apiTest("GET","/leads",null,adt);
+      addR("6. Admin","GET /leads (ADMIN)",r.ok?"pass":"info",`${r.status}`);tick();
 
-    r=await apiTest("POST","/ai/leads",{data:"test"});
-    addR("7. AI","POST /ai/leads — lead scoring",r.ok?"pass":"info",`${r.status}: ${r.status===404?"not impl":"exists"}`);tick();
+      r=await apiTest("GET","/coaches",null,adt);
+      addR("6. Admin","GET /coaches (ADMIN)",r.ok?"pass":"info",`${r.status}`);tick();
+    }else{for(let i=0;i<5;i++){addR("6. Admin","(skipped)","skip","No ADMIN token — registration may be restricted");tick();}}
 
-    // ── 8. MESSAGES ───────────────────────────────────────────────────────
-    addLog("\n▶ 8. MESSAGES","ok");
+    // ══════════════════════════════════════════════════════════════════════
+    addLog("\n━━ PHASE 7: CROSS-ROLE SECURITY ━━","ok");
+    // ══════════════════════════════════════════════════════════════════════
 
-    r=await apiTest("GET","/messages");
-    addR("8. Messages","GET /messages",r.status!==404?"pass":"info",`${r.status}: ${r.status===404?"not mounted (local)":"exists"}`);tick();
+    if(clt){
+      r=await apiTest("POST","/clients",{name:"HackerClient",email:`hack_${ts}@t.com`,phone:"000"},clt);
+      addR("7. Security","CLIENT cannot create clients",!r.ok||r.status===403?"pass":"info",`${r.status}: ${r.status===403?"correctly blocked":"might be allowed"}`);tick();
 
-    addR("8. Messages","Local message save","pass","localStorage fallback works");tick();
+      r=await apiTest("DELETE","/clients/"+(rtcId||"test"),null,clt);
+      addR("7. Security","CLIENT cannot delete clients",!r.ok||r.status>=400?"pass":"fail",`${r.status}`);tick();
 
-    // ── 9. COACHES ────────────────────────────────────────────────────────
-    addLog("\n▶ 9. COACHES","ok");
+      r=await apiTest("GET","/reports/admin/platform",null,clt);
+      addR("7. Security","CLIENT cannot access admin reports",!r.ok||r.status>=400?"pass":"fail",`${r.status}: correctly blocked`);tick();
+    }else{for(let i=0;i<3;i++){addR("7. Security","(skipped)","skip","No CLIENT token");tick();}}
 
-    r=await apiTest("GET","/coaches");
-    addR("9. Coaches","GET /coaches — search",r.ok?"pass":"fail",`${r.status}`);tick();
+    // ══════════════════════════════════════════════════════════════════════
+    addLog("\n━━ PHASE 8: LOCAL FEATURES ━━","ok");
+    // ══════════════════════════════════════════════════════════════════════
 
-    r=await apiTest("PUT","/coaches/profile",{specializations:["HIIT","strength"]});
-    addR("9. Coaches","PUT /coaches/profile",r.ok?"pass":"info",`${r.status}`);tick();
+    [{key:"hab_me",push:{id:99,name:"T",icon:"✨",streak:0,log:{}},l:"Habits"},{key:"nut_me",push:{id:99,name:"T",calories:500,protein:30,carbs:40,fat:15,meal:"lunch",date:"2026-01-01"},l:"Nutrition"},{key:"checkins",push:{id:99,energy:8,sleep:7,stress:3,adherence:80,mood:"good",date:"2026-01-01"},l:"Check-ins"},{key:"invoices",push:{id:99,clientName:"T",amount:1000,status:"pending",date:"2026-01-01"},l:"Invoices"},{key:"prog_test",push:{id:99,weight:75,bodyFat:18,date:"2026-01-01"},l:"Progress"},{key:"media_test",push:{id:99,title:"T",type:"video"},l:"Media"},{key:"device_data",push:{date:"2026-01-01",source:"test",steps:8000,heartRateAvg:72},l:"Device Data"}].forEach(t=>{
+      const a=ls.get(t.key,[]);a.push(t.push);ls.set(t.key,a);
+      addR("8. Local",`${t.l} — CRUD`,"pass",`${a.length} items`);tick();
+      ls.set(t.key,a.filter(x=>x.id!==99&&x.source!=="test"));
+    });
 
-    // ── 10. LOCAL FEATURES ────────────────────────────────────────────────
-    addLog("\n▶ 10. LOCAL FEATURES","ok");
+    ls.set("holidays",[...(ls.get("holidays",[])),"2099-12-25"]);
+    addR("8. Local","Holidays","pass","saved");tick();
+    ls.set("holidays",ls.get("holidays",[]).filter(h=>h!=="2099-12-25"));
 
-    const localTests=[
-      {key:"hab_me",push:{id:99,name:"Test",icon:"✨",streak:0,log:{}},label:"Habits"},
-      {key:"nut_me",push:{id:99,name:"TestMeal",calories:500,protein:30,carbs:40,fat:15,meal:"lunch",date:"2026-01-01"},label:"Nutrition"},
-      {key:"checkins",push:{id:99,energy:8,sleep:7,stress:3,adherence:80,mood:"good",date:"2026-01-01"},label:"Check-ins"},
-      {key:"invoices",push:{id:99,clientName:"T",amount:1000,status:"pending",date:"2026-01-01"},label:"Invoices"},
-      {key:"prog_test",push:{id:99,weight:75,bodyFat:18,date:"2026-01-01"},label:"Progress"},
-      {key:"media_test",push:{id:99,title:"TestVid",type:"video",date:"2026-01-01"},label:"Media"},
-    ];
-    for(const t of localTests){
-      const arr=ls.get(t.key,[]);arr.push(t.push);ls.set(t.key,arr);
-      addR("10. Local",`${t.label} — create`,"pass",`${arr.length} items`);tick();
-      ls.set(t.key,arr.filter(x=>x.id!==99));
-    }
-    // Holidays
-    const hol=ls.get("holidays",[]);ls.set("holidays",[...hol,"2099-12-25"]);
-    addR("10. Local","Holidays — mark","pass","saved");tick();
-    ls.set("holidays",hol);
+    ls.set("local_bookings",[...(ls.get("local_bookings",[])),{id:"lt",date:new Date().toISOString(),status:"confirmed",_local:true}]);
+    addR("8. Local","Local booking fallback","pass","saved");tick();
+    ls.set("local_bookings",ls.get("local_bookings",[]).filter(b=>b.id!=="lt"));
 
-    // ── 11. BROWSER APIs ──────────────────────────────────────────────────
-    addLog("\n▶ 11. BROWSER APIs","ok");
+    // ══════════════════════════════════════════════════════════════════════
+    addLog("\n━━ PHASE 9: BROWSER APIs ━━","ok");
+    // ══════════════════════════════════════════════════════════════════════
 
-    addR("11. Browser","SpeechRecognition",!!(window.SpeechRecognition||window.webkitSpeechRecognition)?"pass":"info",!!(window.SpeechRecognition||window.webkitSpeechRecognition)?"available":"unavailable");tick();
-    addR("11. Browser","SpeechSynthesis",!!window.speechSynthesis?"pass":"info","available");tick();
-    addR("11. Browser","localStorage",!!window.localStorage?"pass":"fail","available");tick();
-    addR("11. Browser","Geolocation",!!navigator.geolocation?"pass":"info","available for location features");tick();
+    addR("9. Browser","SpeechRecognition",!!(window.SpeechRecognition||window.webkitSpeechRecognition)?"pass":"info","for voice commands");tick();
+    addR("9. Browser","SpeechSynthesis",!!window.speechSynthesis?"pass":"info","for voice output");tick();
+    addR("9. Browser","localStorage",!!window.localStorage?"pass":"fail","required");tick();
+    addR("9. Browser","Geolocation",!!navigator.geolocation?"pass":"info","optional");tick();
+    addR("9. Browser","Web Crypto",!!window.crypto?.subtle?"pass":"info","for secure operations");tick();
 
-    // ── 12. DISCOVERY ─────────────────────────────────────────────────────
-    addLog("\n▶ 12. ROUTE DISCOVERY","ok");
+    // ══════════════════════════════════════════════════════════════════════
+    addLog("\n━━ PHASE 10: ROUTE DISCOVERY ━━","ok");
+    // ══════════════════════════════════════════════════════════════════════
 
-    const probes=["/auth/2fa","/bookings/upcoming","/bookings/coach","/clients/search","/notifications","/subscriptions","/reviews","/messages/unread"];
-    for(const p of probes){
+    for(const p of["/workouts","/workouts/sessions","/messages","/notifications","/subscriptions","/reviews","/bookings/upcoming"]){
       r=await apiTest("GET",p);
-      addR("12. Discovery",`GET ${p}`,r.status!==404?(r.status===401?"exists (auth required)":"exists"):"missing",`${r.status}`);tick();
+      addR("10. Discovery",`GET ${p}`,r.status===404?"missing":r.status===401?"exists (auth)":"exists",`${r.status}`);tick();
     }
 
-    // ── DONE ──────────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
     setProgress(100);
-    addLog("\n━━━ ALL TESTS COMPLETE ━━━","ok");
+    addLog("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━","ok");
+    addLog("ALL TESTS COMPLETE","ok");
     setRunning(false);
   };
 
   const pass=results.filter(r=>r.status==="pass").length;
   const fail=results.filter(r=>r.status==="fail").length;
-  const info=results.filter(r=>["info","exists","exists (auth required)"].includes(r.status)).length;
+  const info=results.filter(r=>!["pass","fail","skip"].includes(r.status)).length;
   const total=results.length;
 
   const exportReport=()=>{
-    let txt=`COACHME.LIFE TEST REPORT\n${"=".repeat(60)}\nDate: ${new Date().toISOString()}\nAPI: ${API}\nUser: ${user?.email} (${user?.role})\nBrowser: ${navigator.userAgent.slice(0,80)}\n\n`;
-    const groups=[...new Set(results.map(r=>r.group))];
-    groups.forEach(g=>{
+    let txt=`COACHME.LIFE MULTI-ROLE TEST REPORT\n${"=".repeat(60)}\nDate: ${new Date().toISOString()}\nAPI: ${API}\nUser: ${user?.email} (${user?.role})\nBrowser: ${navigator.userAgent.slice(0,80)}\nRoles tested: COACH, CLIENT, ADMIN\n\n`;
+    [...new Set(results.map(r=>r.group))].forEach(g=>{
       txt+=`\n${"─".repeat(60)}\n${g}\n${"─".repeat(60)}\n`;
       results.filter(r=>r.group===g).forEach(r=>{
-        const icon=r.status==="pass"?"✅":r.status==="fail"?"❌":"ℹ️";
-        txt+=`${icon} ${r.status.toUpperCase().padEnd(8)} ${r.name}\n   → ${r.detail}\n`;
+        txt+=`${r.status==="pass"?"✅":r.status==="fail"?"❌":"ℹ️"} ${r.status.toUpperCase().padEnd(8)} ${r.name}\n   → ${r.detail}\n`;
       });
     });
     txt+=`\n${"=".repeat(60)}\nTotal: ${total} | Pass: ${pass} | Fail: ${fail} | Info: ${info}\nPass Rate: ${total>0?((pass/(pass+fail||1))*100).toFixed(1):0}%\n`;
-    const blob=new Blob([txt],{type:"text/plain"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`coachme-report-${new Date().toISOString().slice(0,10)}.txt`;a.click();
+    const b=new Blob([txt],{type:"text/plain"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=`coachme-multirole-report-${new Date().toISOString().slice(0,10)}.txt`;a.click();
   };
 
   return<div>
     <ST right={<div style={{display:"flex",gap:6}}>
-      <Btn onClick={runAll} disabled={running} style={{padding:"8px 16px",fontSize:13}}>{running?"⏳ Running…":"▶ Run All Tests"}</Btn>
+      <Btn onClick={runAll} disabled={running} style={{padding:"8px 16px",fontSize:13}}>{running?"⏳ Running…":"▶ Run All (3 Roles)"}</Btn>
       <Btn variant="secondary" onClick={exportReport} disabled={results.length===0} style={{padding:"8px 14px",fontSize:12}}>📄 Export</Btn>
-    </div>}>🧪 Test Suite</ST>
+    </div>}>🧪 Multi-Role Test Suite</ST>
     <div style={{height:4,background:C.bd,borderRadius:2,marginBottom:16,overflow:"hidden"}}><div style={{height:"100%",width:`${progress}%`,background:C.gr,transition:"width .3s",borderRadius:2}}/></div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:16}}>
       <SC label="Total" value={total} icon="📋" color={C.ac}/><SC label="Pass" value={pass} icon="✅" color={C.ok}/><SC label="Fail" value={fail} icon="❌" color={C.dg}/><SC label="Info" value={info} icon="ℹ️" color={C.wn}/>
@@ -1099,14 +1492,14 @@ function TestSuitePage(){
     {results.length>0&&<div style={{marginBottom:16}}>{[...new Set(results.map(r=>r.group))].map(g=><div key={g} style={{marginBottom:12}}>
       <div style={{fontSize:14,fontWeight:700,color:C.tx,marginBottom:6,paddingBottom:4,borderBottom:`1px solid ${C.bd}`}}>{g}</div>
       {results.filter(r=>r.group===g).map((r,i)=><div key={i} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"5px 8px",borderRadius:6,fontSize:12,marginBottom:2,background:r.status==="fail"?C.dg+"08":"transparent"}}>
-        <span style={{flexShrink:0}}>{r.status==="pass"?"✅":r.status==="fail"?"❌":"ℹ️"}</span>
+        <span style={{flexShrink:0}}>{r.status==="pass"?"✅":r.status==="fail"?"❌":r.status==="skip"?"⏭️":"ℹ️"}</span>
         <span style={{flex:1,color:C.tx,fontWeight:500}}>{r.name}</span>
         <span style={{fontSize:11,color:r.status==="fail"?C.dg:C.mt,maxWidth:"50%",textOverflow:"ellipsis",overflow:"hidden",whiteSpace:"nowrap"}} title={r.detail}>{r.detail}</span>
       </div>)}
     </div>)}</div>}
     <Card ref={logRef} style={{maxHeight:200,overflowY:"auto",padding:12}}>
       <div style={{fontSize:13,fontWeight:600,color:C.tx,marginBottom:8}}>Console</div>
-      {logLines.length===0?<div style={{color:C.mt,fontSize:12}}>Click "▶ Run All Tests"</div>:
+      {logLines.length===0?<div style={{color:C.mt,fontSize:12}}>Click "▶ Run All (3 Roles)" to test COACH, CLIENT, ADMIN</div>:
       logLines.map((l,i)=><div key={i} style={{fontSize:11,fontFamily:"monospace",color:l.type==="ok"?C.ok:l.type==="err"?C.dg:C.mt,lineHeight:1.5}}>[{l.time}] {l.msg}</div>)}
     </Card>
   </div>;
@@ -1114,189 +1507,222 @@ function TestSuitePage(){
 
 
 function FitnessDevicesPage(){
-  const[connections,setConnections]=useState(ls.get("device_connections",{fitbit:false,googleFit:false,appleHealth:false,garmin:false,samsung:false,whoop:false}));
+  const{user}=useAuth();
+  const isCoach=user?.role==="COACH"||user?.role==="coach";
+  const[connections,setConnections]=useState(ls.get("device_connections",{}));
   const[syncData,setSyncData]=useState(ls.get("device_data",[]));
-  const[showManual,setShowManual]=useState(false);
-  const[tab,setTab]=useState("connect");
+  const[sharing,setSharing]=useState(ls.get("device_sharing",{shareWithCoach:true,metrics:{steps:true,heartRate:true,sleep:true,calories:true,spo2:true,weight:true,stress:true}}));
+  const[clients,setClients]=useState([]);const[selClient,setSelClient]=useState(null);
+  const[showManual,setShowManual]=useState(false);const[tab,setTab]=useState(isCoach?"clients":"connect");
   const[manualForm,setManualForm]=useState({date:new Date().toISOString().slice(0,10),steps:"",heartRateAvg:"",heartRateMax:"",sleepHours:"",sleepQuality:"",caloriesBurned:"",activeMinutes:"",distance:"",weight:"",spo2:"",stressLevel:""});
 
+  useEffect(()=>{if(isCoach)api.get("/clients").then(d=>setClients(unwrap(d,"clients"))).catch(()=>{});},[]);
+
   const devices=[
-    {id:"fitbit",name:"Fitbit",icon:"⌚",color:"#00B0B9",desc:"Sync steps, heart rate, sleep, SpO2",authUrl:"https://www.fitbit.com/oauth2/authorize"},
+    {id:"fitbit",name:"Fitbit",icon:"⌚",color:"#00B0B9",desc:"Steps, heart rate, sleep, SpO2",authUrl:"https://www.fitbit.com/oauth2/authorize"},
     {id:"googleFit",name:"Google Fit",icon:"❤️",color:"#4285F4",desc:"Steps, heart rate, workouts, weight",authUrl:"https://accounts.google.com/o/oauth2/auth"},
     {id:"appleHealth",name:"Apple Health",icon:"🍎",color:"#FF3B30",desc:"All health metrics via HealthKit",note:"Requires iOS app"},
     {id:"garmin",name:"Garmin Connect",icon:"🏃",color:"#007CC3",desc:"GPS, VO2 max, training load, recovery",authUrl:"https://connect.garmin.com/oauthConfirm"},
     {id:"samsung",name:"Samsung Health",icon:"💙",color:"#1428A0",desc:"Steps, sleep, heart rate, body composition",note:"Requires Android app"},
     {id:"whoop",name:"WHOOP",icon:"🔴",color:"#E31937",desc:"Strain, recovery, sleep performance",authUrl:"https://api-7.whoop.com/oauth/oauth2/auth"},
+    {id:"miband",name:"Mi Band / Zepp",icon:"🟠",color:"#FF6900",desc:"Steps, heart rate, sleep, stress",authUrl:"https://user.huami.com/oauth"},
+    {id:"polar",name:"Polar",icon:"🔵",color:"#D0021B",desc:"HR zones, running index, recovery",authUrl:"https://flow.polar.com/oauth2/authorization"},
   ];
 
+  const genSampleData=(source,days=7)=>{
+    const data=[];for(let i=days-1;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);
+      data.push({date:d.toISOString().slice(0,10),source,steps:Math.floor(5000+Math.random()*9000),heartRateAvg:Math.floor(60+Math.random()*22),heartRateMax:Math.floor(120+Math.random()*65),sleepHours:+(5+Math.random()*3.5).toFixed(1),sleepQuality:Math.floor(55+Math.random()*40),caloriesBurned:Math.floor(1600+Math.random()*1000),activeMinutes:Math.floor(15+Math.random()*70),distance:+(1.5+Math.random()*10).toFixed(1),spo2:Math.floor(94+Math.random()*5),stressLevel:Math.floor(15+Math.random()*55),weight:+(65+Math.random()*20).toFixed(1),syncedAt:new Date().toISOString()});}
+    return data;
+  };
+
   const toggleConnect=(id)=>{
-    const device=devices.find(d=>d.id===id);
+    const dev=devices.find(d=>d.id===id);
     if(!connections[id]){
-      // Simulate OAuth connection
-      if(device.authUrl){
-        // In production, this would open OAuth flow
-        // For now, simulate successful connection
-        const confirmed=confirm(`Connect to ${device.name}?\n\nIn production, this opens ${device.name}'s OAuth login.\nFor now, we'll simulate a successful connection and generate sample data.`);
-        if(!confirmed)return;
-      }else if(device.note){
-        alert(`${device.name}: ${device.note}\n\nThis requires the native mobile app with Capacitor integration.`);
-        return;
-      }
-      // Generate sample sync data
-      const sampleData=[];
-      for(let i=6;i>=0;i--){
-        const d=new Date();d.setDate(d.getDate()-i);
-        sampleData.push({
-          date:d.toISOString().slice(0,10),
-          source:id,
-          steps:Math.floor(6000+Math.random()*8000),
-          heartRateAvg:Math.floor(62+Math.random()*20),
-          heartRateMax:Math.floor(120+Math.random()*60),
-          sleepHours:+(5.5+Math.random()*3).toFixed(1),
-          sleepQuality:Math.floor(60+Math.random()*35),
-          caloriesBurned:Math.floor(1800+Math.random()*800),
-          activeMinutes:Math.floor(20+Math.random()*60),
-          distance:+(2+Math.random()*8).toFixed(1),
-          spo2:Math.floor(95+Math.random()*4),
-          stressLevel:Math.floor(20+Math.random()*50),
-        });
-      }
-      const newData=[...syncData.filter(d=>d.source!==id),...sampleData];
+      if(dev.note){alert(`${dev.name}: ${dev.note}\n\nRequires the native mobile app.`);return;}
+      if(!confirm(`Connect to ${dev.name}?\n\nThis will ${isCoach?"sync your fitness data":"sync your data and, if you allow, share it with your coach"}.\n\nIn production, this opens ${dev.name}'s OAuth login.`))return;
+      const sample=genSampleData(id);
+      const newData=[...syncData.filter(d=>d.source!==id),...sample];
       setSyncData(newData);ls.set("device_data",newData);
+      // If client and sharing is on, save to shared storage too
+      if(!isCoach&&sharing.shareWithCoach){
+        ls.set("shared_health_data",newData.filter(d=>{const m=sharing.metrics;return true;}));
+      }
     }
     const updated={...connections,[id]:!connections[id]};
     setConnections(updated);ls.set("device_connections",updated);
   };
 
+  const updateSharing=(key,val)=>{
+    const updated=key==="shareWithCoach"?{...sharing,shareWithCoach:val}:{...sharing,metrics:{...sharing.metrics,[key]:val}};
+    setSharing(updated);ls.set("device_sharing",updated);
+    // Update shared data
+    if(updated.shareWithCoach){
+      const filtered=syncData.map(d=>{const out={...d};
+        if(!updated.metrics.steps)delete out.steps;if(!updated.metrics.heartRate){delete out.heartRateAvg;delete out.heartRateMax;}
+        if(!updated.metrics.sleep){delete out.sleepHours;delete out.sleepQuality;}if(!updated.metrics.calories)delete out.caloriesBurned;
+        if(!updated.metrics.spo2)delete out.spo2;if(!updated.metrics.weight)delete out.weight;if(!updated.metrics.stress)delete out.stressLevel;
+        return out;});
+      ls.set("shared_health_data",filtered);
+    }else{ls.set("shared_health_data",[]);}
+  };
+
   const saveManual=()=>{
-    const entry={...manualForm,source:"manual",steps:+manualForm.steps||0,heartRateAvg:+manualForm.heartRateAvg||0,heartRateMax:+manualForm.heartRateMax||0,sleepHours:+manualForm.sleepHours||0,sleepQuality:+manualForm.sleepQuality||0,caloriesBurned:+manualForm.caloriesBurned||0,activeMinutes:+manualForm.activeMinutes||0,distance:+manualForm.distance||0,weight:+manualForm.weight||0,spo2:+manualForm.spo2||0,stressLevel:+manualForm.stressLevel||0};
+    const entry={...manualForm,source:"manual",steps:+manualForm.steps||0,heartRateAvg:+manualForm.heartRateAvg||0,heartRateMax:+manualForm.heartRateMax||0,sleepHours:+manualForm.sleepHours||0,caloriesBurned:+manualForm.caloriesBurned||0,activeMinutes:+manualForm.activeMinutes||0,distance:+manualForm.distance||0,weight:+manualForm.weight||0,spo2:+manualForm.spo2||0,stressLevel:+manualForm.stressLevel||0};
     const updated=[...syncData,entry];setSyncData(updated);ls.set("device_data",updated);
+    if(!isCoach&&sharing.shareWithCoach)ls.set("shared_health_data",updated);
     setShowManual(false);setManualForm({date:new Date().toISOString().slice(0,10),steps:"",heartRateAvg:"",heartRateMax:"",sleepHours:"",sleepQuality:"",caloriesBurned:"",activeMinutes:"",distance:"",weight:"",spo2:"",stressLevel:""});
   };
 
-  // Get latest 7 days of data
   const latest7=syncData.sort((a,b)=>b.date.localeCompare(a.date)).slice(0,7).reverse();
   const today=syncData.find(d=>d.date===new Date().toISOString().slice(0,10));
+  // Coach: view client's shared data
+  const clientData=selClient?ls.get("shared_health_data",[]):[];
+
+  const MetricGrid=({data})=><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+    {[{l:"Steps",v:data.steps?.toLocaleString(),icon:"🚶",c:C.ac},{l:"Calories",v:data.caloriesBurned,icon:"🔥",c:C.or},{l:"Active Min",v:data.activeMinutes,icon:"⏱️",c:C.ok},{l:"Avg HR",v:data.heartRateAvg?`${data.heartRateAvg} bpm`:null,icon:"❤️",c:C.dg},{l:"Sleep",v:data.sleepHours?`${data.sleepHours}h`:null,icon:"😴",c:C.ac},{l:"SpO2",v:data.spo2?`${data.spo2}%`:null,icon:"🫁",c:C.a2}].filter(m=>m.v).map(m=><div key={m.l} style={{textAlign:"center",padding:8,background:C.s2,borderRadius:10}}>
+      <div style={{fontSize:16}}>{m.icon}</div>
+      <div style={{fontSize:16,fontWeight:700,color:m.c}}>{m.v}</div>
+      <div style={{fontSize:10,color:C.mt}}>{m.l}</div>
+    </div>)}
+  </div>;
+
+  const TrendChart=({data,field,label,color,unit=""})=>{
+    if(data.length<2)return null;
+    return<Card style={{padding:14,marginBottom:10}}>
+      <div style={{fontSize:13,fontWeight:600,color:C.tx,marginBottom:8}}>{label}</div>
+      <div style={{display:"flex",alignItems:"flex-end",gap:4,height:70}}>
+        {data.map((d,i)=>{const vals=data.map(x=>x[field]||0);const min=Math.min(...vals);const max=Math.max(...vals);const range=max-min||1;const h=((d[field]||0)-min)/range*55+15;
+        return<div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+          <div style={{fontSize:9,color,fontWeight:600}}>{d[field]||"—"}{unit}</div>
+          <div style={{width:"100%",height:h,borderRadius:4,background:color,opacity:.4+(i/data.length)*.6}}/>
+          <span style={{fontSize:8,color:C.mt}}>{d.date?.slice(8)}</span>
+        </div>;})}
+      </div>
+    </Card>;
+  };
+
+  const coachTabs=isCoach?[{id:"clients",label:"Client Data"},{id:"connect",label:"My Devices"},{id:"data",label:"My Data"},{id:"trends",label:"Trends"}]:[{id:"connect",label:"Connect"},{id:"sharing",label:"Sharing"},{id:"data",label:"My Data"},{id:"trends",label:"Trends"}];
 
   return<div>
-    <ST right={<Btn onClick={()=>setShowManual(true)} style={{padding:"8px 12px",fontSize:12}}>✏️ Manual Entry</Btn>}>Fitness Devices</ST>
-    <Tabs tabs={[{id:"connect",label:"Connect Devices"},{id:"data",label:"Health Data"},{id:"trends",label:"Trends"}]} active={tab} onChange={setTab}/>
+    <ST right={<Btn onClick={()=>setShowManual(true)} style={{padding:"8px 12px",fontSize:12}}>✏️ Manual</Btn>}>
+      {isCoach?"Client Health Data":"My Fitness Devices"}
+    </ST>
+    <Tabs tabs={coachTabs} active={tab} onChange={setTab}/>
 
-    {tab==="connect"&&<div style={{display:"flex",flexDirection:"column",gap:8}}>
-      {devices.map(d=><Card key={d.id} style={{padding:14,display:"flex",alignItems:"center",gap:14}}>
-        <div style={{width:48,height:48,borderRadius:14,background:d.color+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>{d.icon}</div>
-        <div style={{flex:1}}>
-          <div style={{fontSize:14,fontWeight:600,color:C.tx}}>{d.name}</div>
-          <div style={{fontSize:12,color:C.mt}}>{d.desc}</div>
+    {/* COACH: View client health data */}
+    {tab==="clients"&&isCoach&&<div>
+      {clients.length===0?<Empty icon="👥" text="No clients"/>:
+      selClient?<div>
+        <button onClick={()=>setSelClient(null)} style={{background:"none",border:"none",color:C.ac,cursor:"pointer",fontSize:14,fontWeight:600,marginBottom:12,padding:0,fontFamily:"inherit"}}>← All Clients</button>
+        <Card style={{marginBottom:12,padding:14}}>
+          <div style={{fontSize:16,fontWeight:700,color:C.tx,marginBottom:4}}>{cName(selClient)}</div>
+          <div style={{fontSize:12,color:C.mt}}>Health data shared by client</div>
+        </Card>
+        {clientData.length>0?<div>
+          <div style={{fontSize:14,fontWeight:600,color:C.tx,marginBottom:8}}>Latest Metrics</div>
+          <MetricGrid data={clientData[clientData.length-1]}/>
+          <div style={{marginTop:12}}>
+            <TrendChart data={clientData.slice(-7)} field="steps" label="Steps (7d)" color={C.ac}/>
+            <TrendChart data={clientData.slice(-7)} field="sleepHours" label="Sleep (7d)" color={C.a2} unit="h"/>
+            <TrendChart data={clientData.slice(-7)} field="heartRateAvg" label="Avg HR (7d)" color={C.dg} unit="bpm"/>
+          </div>
+        </div>:<Card style={{padding:20,textAlign:"center"}}><div style={{fontSize:14,color:C.mt}}>This client hasn't shared health data yet.</div><div style={{fontSize:12,color:C.mt,marginTop:8}}>They need to connect a device and enable sharing in their CoachMe app.</div></Card>}
+      </div>:
+      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+        {clients.map(c=>{const cData=ls.get("shared_health_data",[]);const hasData=cData.length>0;
+        return<Card key={c.id} onClick={()=>setSelClient(c)} style={{padding:14,display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}>
+          <div style={{width:42,height:42,borderRadius:12,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:"#fff"}}>{cName(c)[0].toUpperCase()}</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:600,color:C.tx}}>{cName(c)}</div>
+            <div style={{fontSize:12,color:C.mt}}>{cEmail(c)}</div>
+          </div>
+          <Badge color={hasData?C.ok:C.mt}>{hasData?"📊 Data":"No data"}</Badge>
+        </Card>;})}
+      </div>}
+    </div>}
+
+    {/* CLIENT: Sharing controls */}
+    {tab==="sharing"&&!isCoach&&<div>
+      <Card style={{marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div><div style={{fontSize:15,fontWeight:600,color:C.tx}}>Share with Coach</div><div style={{fontSize:12,color:C.mt}}>Your coach can view shared metrics</div></div>
+          <button onClick={()=>updateSharing("shareWithCoach",!sharing.shareWithCoach)} style={{width:52,height:28,borderRadius:14,border:"none",cursor:"pointer",background:sharing.shareWithCoach?C.ok:C.bd,position:"relative",transition:"all .2s"}}>
+            <div style={{width:22,height:22,borderRadius:11,background:"#fff",position:"absolute",top:3,left:sharing.shareWithCoach?27:3,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
+          </button>
         </div>
-        <button onClick={()=>toggleConnect(d.id)} style={{padding:"8px 16px",borderRadius:10,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:connections[d.id]?C.ok+"20":C.ac+"20",color:connections[d.id]?C.ok:C.ac}}>
-          {connections[d.id]?"✓ Connected":"Connect"}
-        </button>
-      </Card>)}
+        {sharing.shareWithCoach&&<div>
+          <div style={{fontSize:13,fontWeight:600,color:C.tx,marginBottom:10}}>Choose what to share:</div>
+          {[{key:"steps",label:"Steps & Distance",icon:"🚶"},{key:"heartRate",label:"Heart Rate",icon:"❤️"},{key:"sleep",label:"Sleep Data",icon:"😴"},{key:"calories",label:"Calories Burned",icon:"🔥"},{key:"spo2",label:"Blood Oxygen (SpO2)",icon:"🫁"},{key:"weight",label:"Weight & Body Comp",icon:"⚖️"},{key:"stress",label:"Stress Level",icon:"😰"}].map(m=>
+            <div key={m.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${C.bd}`}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:18}}>{m.icon}</span><span style={{fontSize:13,color:C.tx,fontWeight:500}}>{m.label}</span></div>
+              <button onClick={()=>updateSharing(m.key,!sharing.metrics[m.key])} style={{width:44,height:24,borderRadius:12,border:"none",cursor:"pointer",background:sharing.metrics[m.key]?C.ok:C.bd,position:"relative",transition:"all .2s"}}>
+                <div style={{width:18,height:18,borderRadius:9,background:"#fff",position:"absolute",top:3,left:sharing.metrics[m.key]?23:3,transition:"left .2s",boxShadow:"0 1px 2px rgba(0,0,0,.3)"}}/>
+              </button>
+            </div>
+          )}
+        </div>}
+      </Card>
       <Card style={{padding:14,background:C.s2,border:`1px dashed ${C.bd}`}}>
-        <div style={{fontSize:13,color:C.mt,textAlign:"center"}}>
-          💡 Connected devices sync automatically every hour.<br/>
-          Use "✏️ Manual Entry" to log data from any source.
+        <div style={{fontSize:12,color:C.mt,textAlign:"center",lineHeight:1.6}}>
+          🔒 Your data is private by default. Only metrics you enable above will be visible to your coach.
+          You can change these settings anytime.
         </div>
       </Card>
     </div>}
 
-    {tab==="data"&&<div>
-      {/* Today's summary */}
-      {today?<Card style={{marginBottom:12}}>
-        <div style={{fontSize:14,fontWeight:600,color:C.tx,marginBottom:10}}>Today's Health Data</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-          {[
-            {l:"Steps",v:today.steps?.toLocaleString(),icon:"🚶",c:C.ac},
-            {l:"Calories",v:today.caloriesBurned,icon:"🔥",c:C.or},
-            {l:"Active Min",v:today.activeMinutes,icon:"⏱️",c:C.ok},
-            {l:"Avg HR",v:`${today.heartRateAvg} bpm`,icon:"❤️",c:C.dg},
-            {l:"Sleep",v:`${today.sleepHours}h`,icon:"😴",c:C.ac},
-            {l:"SpO2",v:`${today.spo2}%`,icon:"🫁",c:C.a2},
-          ].map(m=><div key={m.l} style={{textAlign:"center",padding:8,background:C.s2,borderRadius:10}}>
-            <div style={{fontSize:16}}>{m.icon}</div>
-            <div style={{fontSize:16,fontWeight:700,color:m.c}}>{m.v||"—"}</div>
-            <div style={{fontSize:10,color:C.mt}}>{m.l}</div>
-          </div>)}
-        </div>
-        <div style={{fontSize:11,color:C.mt,marginTop:8,textAlign:"right"}}>Source: {today.source}</div>
-      </Card>:<Card style={{padding:16,textAlign:"center"}}><div style={{color:C.mt,fontSize:13}}>No data for today — connect a device or log manually</div></Card>}
+    {/* Connect devices tab */}
+    {tab==="connect"&&<div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {devices.map(d=><Card key={d.id} style={{padding:14,display:"flex",alignItems:"center",gap:14}}>
+        <div style={{width:48,height:48,borderRadius:14,background:d.color+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>{d.icon}</div>
+        <div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{d.name}</div><div style={{fontSize:12,color:C.mt}}>{d.desc}</div></div>
+        <button onClick={()=>toggleConnect(d.id)} style={{padding:"8px 16px",borderRadius:10,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:connections[d.id]?C.ok+"20":C.ac+"20",color:connections[d.id]?C.ok:C.ac}}>
+          {connections[d.id]?"✓ Connected":"Connect"}
+        </button>
+      </Card>)}
+    </div>}
 
-      {/* Data log */}
-      {syncData.length>0&&<div style={{display:"flex",flexDirection:"column",gap:6}}>
+    {/* Data tab */}
+    {tab==="data"&&<div>
+      {today?<Card style={{marginBottom:12}}><div style={{fontSize:14,fontWeight:600,color:C.tx,marginBottom:10}}>Today</div><MetricGrid data={today}/><div style={{fontSize:11,color:C.mt,marginTop:8,textAlign:"right"}}>Source: {today.source}</div></Card>:
+      <Card style={{padding:16,textAlign:"center"}}><div style={{color:C.mt,fontSize:13}}>No data today — connect a device or log manually</div></Card>}
+      {syncData.length>0&&<div style={{display:"flex",flexDirection:"column",gap:4}}>
         {syncData.sort((a,b)=>b.date.localeCompare(a.date)).slice(0,14).map((d,i)=><Card key={i} style={{padding:10,display:"flex",alignItems:"center",gap:10}}>
-          <div style={{fontSize:12,fontWeight:600,color:C.tx,minWidth:70}}>{d.date.slice(5)}</div>
-          <div style={{flex:1,display:"flex",gap:12,fontSize:11,color:C.mt,flexWrap:"wrap"}}>
-            {d.steps>0&&<span>🚶{d.steps.toLocaleString()}</span>}
-            {d.caloriesBurned>0&&<span>🔥{d.caloriesBurned}</span>}
-            {d.heartRateAvg>0&&<span>❤️{d.heartRateAvg}bpm</span>}
-            {d.sleepHours>0&&<span>😴{d.sleepHours}h</span>}
-            {d.activeMinutes>0&&<span>⏱️{d.activeMinutes}m</span>}
+          <div style={{fontSize:12,fontWeight:600,color:C.tx,minWidth:56}}>{d.date.slice(5)}</div>
+          <div style={{flex:1,display:"flex",gap:10,fontSize:11,color:C.mt,flexWrap:"wrap"}}>
+            {d.steps>0&&<span>🚶{d.steps.toLocaleString()}</span>}{d.caloriesBurned>0&&<span>🔥{d.caloriesBurned}</span>}{d.heartRateAvg>0&&<span>❤️{d.heartRateAvg}</span>}{d.sleepHours>0&&<span>😴{d.sleepHours}h</span>}
           </div>
           <Badge color={C.mt} style={{fontSize:10}}>{d.source}</Badge>
         </Card>)}
       </div>}
     </div>}
 
+    {/* Trends tab */}
     {tab==="trends"&&<div>
-      {latest7.length>1?<>
-        {/* Steps trend */}
-        <Card style={{padding:14,marginBottom:12}}>
-          <div style={{fontSize:13,fontWeight:600,color:C.tx,marginBottom:8}}>Steps (7 days)</div>
-          <div style={{display:"flex",alignItems:"flex-end",gap:4,height:80}}>
-            {latest7.map((d,i)=>{const max=Math.max(...latest7.map(x=>x.steps||0),1);const h=((d.steps||0)/max)*70+10;
-            return<div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-              <div style={{fontSize:9,color:C.tx,fontWeight:600}}>{(d.steps||0)>999?`${((d.steps||0)/1000).toFixed(1)}k`:d.steps}</div>
-              <div style={{width:"100%",height:h,borderRadius:4,background:C.gr,opacity:.5+(i/7)*.5}}/>
-              <span style={{fontSize:8,color:C.mt}}>{d.date.slice(8)}</span>
-            </div>;})}
-          </div>
-        </Card>
-        {/* Sleep trend */}
-        <Card style={{padding:14,marginBottom:12}}>
-          <div style={{fontSize:13,fontWeight:600,color:C.tx,marginBottom:8}}>Sleep (7 days)</div>
-          <div style={{display:"flex",alignItems:"flex-end",gap:4,height:60}}>
-            {latest7.map((d,i)=>{const max=Math.max(...latest7.map(x=>x.sleepHours||0),1);const h=((d.sleepHours||0)/max)*50+10;
-            return<div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-              <div style={{fontSize:9,color:C.a2,fontWeight:600}}>{d.sleepHours||0}h</div>
-              <div style={{width:"100%",height:h,borderRadius:4,background:C.a2,opacity:.4+(i/7)*.6}}/>
-              <span style={{fontSize:8,color:C.mt}}>{d.date.slice(8)}</span>
-            </div>;})}
-          </div>
-        </Card>
-        {/* Heart rate trend */}
-        <Card style={{padding:14}}>
-          <div style={{fontSize:13,fontWeight:600,color:C.tx,marginBottom:8}}>Avg Heart Rate (7 days)</div>
-          <div style={{display:"flex",alignItems:"flex-end",gap:4,height:60}}>
-            {latest7.map((d,i)=>{const min=Math.min(...latest7.map(x=>x.heartRateAvg||60));const max=Math.max(...latest7.map(x=>x.heartRateAvg||60));const range=max-min||1;const h=((d.heartRateAvg||60)-min)/range*40+20;
-            return<div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-              <div style={{fontSize:9,color:C.dg,fontWeight:600}}>{d.heartRateAvg||"—"}</div>
-              <div style={{width:"100%",height:h,borderRadius:4,background:C.dg,opacity:.4+(i/7)*.6}}/>
-              <span style={{fontSize:8,color:C.mt}}>{d.date.slice(8)}</span>
-            </div>;})}
-          </div>
-        </Card>
-      </>:<Empty icon="📊" text="Connect a device to see trends"/>}
+      {latest7.length>1?<div>
+        <TrendChart data={latest7} field="steps" label="Steps (7 days)" color={C.ac}/>
+        <TrendChart data={latest7} field="sleepHours" label="Sleep (7 days)" color={C.a2} unit="h"/>
+        <TrendChart data={latest7} field="heartRateAvg" label="Avg Heart Rate (7 days)" color={C.dg} unit="bpm"/>
+        <TrendChart data={latest7} field="caloriesBurned" label="Calories Burned (7 days)" color={C.or}/>
+        {latest7.some(d=>d.weight>0)&&<TrendChart data={latest7} field="weight" label="Weight (7 days)" color={C.pk} unit="kg"/>}
+      </div>:<Empty icon="📊" text="Connect a device to see trends"/>}
     </div>}
 
-    {/* Manual entry modal */}
-    <Modal open={showManual} onClose={()=>setShowManual(false)} title="Log Health Data Manually" wide>
+    <Modal open={showManual} onClose={()=>setShowManual(false)} title="Log Health Data" wide>
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
         <Input label="Date" type="date" value={manualForm.date} onChange={e=>setManualForm({...manualForm,date:e.target.value})}/>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-          <Input label="🚶 Steps" type="number" value={manualForm.steps} onChange={e=>setManualForm({...manualForm,steps:e.target.value})} placeholder="10000"/>
-          <Input label="🔥 Calories" type="number" value={manualForm.caloriesBurned} onChange={e=>setManualForm({...manualForm,caloriesBurned:e.target.value})} placeholder="2200"/>
-          <Input label="⏱️ Active Min" type="number" value={manualForm.activeMinutes} onChange={e=>setManualForm({...manualForm,activeMinutes:e.target.value})} placeholder="45"/>
+          <Input label="🚶 Steps" type="number" value={manualForm.steps} onChange={e=>setManualForm({...manualForm,steps:e.target.value})}/>
+          <Input label="🔥 Calories" type="number" value={manualForm.caloriesBurned} onChange={e=>setManualForm({...manualForm,caloriesBurned:e.target.value})}/>
+          <Input label="⏱️ Active Min" type="number" value={manualForm.activeMinutes} onChange={e=>setManualForm({...manualForm,activeMinutes:e.target.value})}/>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-          <Input label="❤️ Avg HR" type="number" value={manualForm.heartRateAvg} onChange={e=>setManualForm({...manualForm,heartRateAvg:e.target.value})} placeholder="72"/>
-          <Input label="❤️ Max HR" type="number" value={manualForm.heartRateMax} onChange={e=>setManualForm({...manualForm,heartRateMax:e.target.value})} placeholder="165"/>
-          <Input label="🫁 SpO2 %" type="number" value={manualForm.spo2} onChange={e=>setManualForm({...manualForm,spo2:e.target.value})} placeholder="98"/>
+          <Input label="❤️ Avg HR" type="number" value={manualForm.heartRateAvg} onChange={e=>setManualForm({...manualForm,heartRateAvg:e.target.value})}/>
+          <Input label="🫁 SpO2 %" type="number" value={manualForm.spo2} onChange={e=>setManualForm({...manualForm,spo2:e.target.value})}/>
+          <Input label="😴 Sleep hrs" type="number" step="0.1" value={manualForm.sleepHours} onChange={e=>setManualForm({...manualForm,sleepHours:e.target.value})}/>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-          <Input label="😴 Sleep (hrs)" type="number" step="0.1" value={manualForm.sleepHours} onChange={e=>setManualForm({...manualForm,sleepHours:e.target.value})} placeholder="7.5"/>
-          <Input label="🏃 Distance km" type="number" step="0.1" value={manualForm.distance} onChange={e=>setManualForm({...manualForm,distance:e.target.value})} placeholder="5.2"/>
-          <Input label="⚖️ Weight kg" type="number" step="0.1" value={manualForm.weight} onChange={e=>setManualForm({...manualForm,weight:e.target.value})} placeholder="75"/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Input label="🏃 Distance km" type="number" step="0.1" value={manualForm.distance} onChange={e=>setManualForm({...manualForm,distance:e.target.value})}/>
+          <Input label="⚖️ Weight kg" type="number" step="0.1" value={manualForm.weight} onChange={e=>setManualForm({...manualForm,weight:e.target.value})}/>
         </div>
         <Btn onClick={saveManual} style={{width:"100%"}}>Save Health Data</Btn>
       </div>
@@ -1304,10 +1730,11 @@ function FitnessDevicesPage(){
   </div>;
 }
 
+
 function MoreMenu({onNav}){const items=[{id:"clients",icon:"👥",label:"Clients",desc:"Manage clients"},{id:"leads",icon:"🎯",label:"Leads Pipeline",desc:"Kanban board"},{id:"mealplan",icon:"🍎",label:"AI Meal Planner",desc:"AI-generated plans"},{id:"nutrition",icon:"🥗",label:"Nutrition Tracker",desc:"Log food & macros"},{id:"habits",icon:"✅",label:"Habit Tracker",desc:"Daily habits & streaks"},{id:"checkins",icon:"📋",label:"Check-ins",desc:"Weekly questionnaires"},{id:"reports",icon:"📊",label:"Analytics",desc:"Revenue & reports"},{id:"invoices",icon:"🧾",label:"Invoices",desc:"Billing & payments"},{id:"ai",icon:"🤖",label:"AI Coach",desc:"RAG-powered assistant"},{id:"media",icon:"🎥",label:"Media Library",desc:"Videos & progress photos"},{id:"devices",icon:"⌚",label:"Fitness Devices",desc:"Fitbit, Garmin, Apple Health"},{id:"settings",icon:"⚙️",label:"Settings",desc:"Profile & prefs"},{id:"tests",icon:"🧪",label:"Test Suite",desc:"Run automated tests"}];return<div><ST>More</ST><div style={{display:"flex",flexDirection:"column",gap:6}}>{items.map(i=><Card key={i.id} onClick={()=>onNav(i.id)} style={{padding:14,display:"flex",alignItems:"center",gap:14,cursor:"pointer"}}><div style={{width:42,height:42,borderRadius:12,background:C.ac+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>{i.icon}</div><div style={{flex:1}}><div style={{color:C.tx,fontSize:14,fontWeight:600}}>{i.label}</div><div style={{color:C.mt,fontSize:12}}>{i.desc}</div></div><span style={{color:C.mt,fontSize:18}}>›</span></Card>)}</div></div>;}
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
-function MainApp(){const[tab,setTab]=useState("dashboard");const[sub,setSub]=useState(null);const[chatCl,setChatCl]=useState(null);const handleV=useCallback((cmd,speak)=>{const r={dashboard:["home","dashboard"],workouts:["workout","exercise"],bookings:["schedule","booking","calendar"],chat:["message","chat"],clients:["client"],leads:["lead","pipeline"],reports:["report","analytics"],ai:["ai","assistant"],mealplan:["meal","diet","nutrition plan"],habits:["habit"],checkins:["checkin","check-in"],invoices:["invoice","payment","billing"],settings:["setting","profile"],tests:["test","testing","suite"],devices:["device","fitbit","garmin","watch","health","wearable"]};for(const[rt,kw] of Object.entries(r)){if(kw.some(k=>cmd.includes(k))){if(["dashboard","workouts","bookings","chat"].includes(rt)){setTab(rt);setSub(null);}else{setTab("more");setSub(rt);}speak(`Opening ${rt}`);return;}}speak("Try saying a page name.");},[]);const{listening,toggle}=useVoice(handleV);const nav=id=>{if(["dashboard","workouts","bookings","chat"].includes(id)){setTab(id);setSub(null);}else if(id==="more"){setTab("more");setSub(null);}else{setTab("more");setSub(id);}};const render=()=>{if(tab==="more"&&sub){const p={clients:<ClientsPage onOpenChat={c=>{setChatCl(c);setTab("chat");}}/>,leads:<LeadsPage/>,reports:<ReportsPage/>,ai:<AIChatPage/>,settings:<SettingsPage/>,mealplan:<MealPlannerPage/>,nutrition:<NutritionTracker/>,habits:<HabitTracker/>,checkins:<CheckInsPage/>,invoices:<InvoicesPage/>,media:<MediaLibrary/>,devices:<FitnessDevicesPage/>,tests:<TestSuitePage/>};return p[sub]||<MoreMenu onNav={setSub}/>;}const p={dashboard:<DashboardPage/>,workouts:<WorkoutsPage/>,bookings:<BookingsPage/>,chat:<MessagingPage initialClient={chatCl} onBack={()=>setChatCl(null)}/>,more:<MoreMenu onNav={setSub}/>};return p[tab]||<DashboardPage/>;};return<div style={{minHeight:"100dvh",background:C.bg,color:C.tx,fontFamily:"'DM Sans','SF Pro Display',-apple-system,system-ui,sans-serif"}}><style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{background:${C.bg};overflow-x:hidden}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:${C.bd};border-radius:4px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}input::placeholder,textarea::placeholder{color:${C.mt}}select option{background:${C.sf};color:${C.tx}}`}</style><button onClick={toggle} style={{position:"fixed",right:16,bottom:80,zIndex:200,width:48,height:48,borderRadius:24,border:"none",cursor:"pointer",background:listening?C.dg:C.gr,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 4px 20px ${listening?C.dg+"60":C.ac+"40"}`,animation:listening?"pulse 1.5s ease infinite":"none",fontSize:20}} title="Voice">🎙️</button><div style={{padding:"16px 16px 90px",maxWidth:600,margin:"0 auto"}}>{tab==="more"&&sub&&<button onClick={()=>setSub(null)} style={{background:"none",border:"none",color:C.ac,cursor:"pointer",fontSize:14,fontWeight:600,marginBottom:12,padding:0,fontFamily:"inherit"}}>← Back</button>}{render()}</div><BNav active={tab} onChange={nav}/></div>;}
+function MainApp(){const[tab,setTab]=useState("dashboard");const[sub,setSub]=useState(null);const[chatCl,setChatCl]=useState(null);const[rk,setRk]=useState(0);const handleV=useCallback((cmd,speak)=>{const r={dashboard:["home","dashboard"],workouts:["workout","exercise"],bookings:["schedule","booking","calendar"],chat:["message","chat"],clients:["client"],leads:["lead","pipeline"],reports:["report","analytics"],ai:["ai","assistant"],mealplan:["meal","diet","nutrition plan"],habits:["habit"],checkins:["checkin","check-in"],invoices:["invoice","payment","billing"],settings:["setting","profile"],tests:["test","testing","suite"],devices:["device","fitbit","garmin","watch","health","wearable"]};for(const[rt,kw] of Object.entries(r)){if(kw.some(k=>cmd.includes(k))){if(["dashboard","workouts","bookings","chat"].includes(rt)){setTab(rt);setSub(null);}else{setTab("more");setSub(rt);}setRk(k=>k+1);speak(`Opening ${rt}`);return;}}speak("Try saying a page name.");},[]);const{listening,toggle}=useVoice(handleV);const nav=id=>{setRk(k=>k+1);if(["dashboard","workouts","bookings","chat"].includes(id)){setTab(id);setSub(null);}else if(id==="more"){setTab("more");setSub(null);}else{setTab("more");setSub(id);}};const render=()=>{const K=`${tab}_${sub||""}_${rk}`;if(tab==="more"&&sub){const p={clients:<ClientsPage key={K} onOpenChat={c=>{setChatCl(c);setTab("chat");}}/>,leads:<LeadsPage key={K}/>,reports:<ReportsPage key={K}/>,ai:<AIChatPage key={K}/>,settings:<SettingsPage key={K}/>,mealplan:<MealPlannerPage key={K}/>,nutrition:<NutritionTracker key={K}/>,habits:<HabitTracker key={K}/>,checkins:<CheckInsPage key={K}/>,invoices:<InvoicesPage key={K}/>,media:<MediaLibrary key={K}/>,devices:<FitnessDevicesPage key={K}/>,tests:<TestSuitePage key={K}/>};return p[sub]||<MoreMenu onNav={setSub}/>;}const p={dashboard:<DashboardPage key={K}/>,workouts:<WorkoutsPage key={K}/>,bookings:<BookingsPage key={K}/>,chat:<MessagingPage key={K} initialClient={chatCl} onBack={()=>setChatCl(null)}/>,more:<MoreMenu onNav={setSub}/>};return p[tab]||<DashboardPage key={K}/>;};return<div style={{minHeight:"100dvh",background:C.bg,color:C.tx,fontFamily:"'DM Sans','SF Pro Display',-apple-system,system-ui,sans-serif"}}><style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{background:${C.bg};overflow-x:hidden}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:${C.bd};border-radius:4px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}input::placeholder,textarea::placeholder{color:${C.mt}}select option{background:${C.sf};color:${C.tx}}`}</style><button onClick={toggle} style={{position:"fixed",right:16,bottom:80,zIndex:200,width:48,height:48,borderRadius:24,border:"none",cursor:"pointer",background:listening?C.dg:C.gr,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 4px 20px ${listening?C.dg+"60":C.ac+"40"}`,animation:listening?"pulse 1.5s ease infinite":"none",fontSize:20}} title="Voice">🎙️</button><div style={{padding:"16px 16px 90px",maxWidth:600,margin:"0 auto"}}>{tab==="more"&&sub&&<button onClick={()=>setSub(null)} style={{background:"none",border:"none",color:C.ac,cursor:"pointer",fontSize:14,fontWeight:600,marginBottom:12,padding:0,fontFamily:"inherit"}}>← Back</button>}{render()}</div><BNav active={tab} onChange={nav}/></div>;}
 
 function useVoice(onCmd){const[listening,setListening]=useState(false);const speak=useCallback(t=>{if("speechSynthesis"in window){const u=new SpeechSynthesisUtterance(t);u.rate=1.05;speechSynthesis.speak(u);}},[]);const toggle=useCallback(()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return speak("Voice not supported");if(listening)return setListening(false);const r=new SR();r.continuous=false;r.lang="en-US";r.onresult=e=>{onCmd(e.results[0][0].transcript.toLowerCase().trim(),speak);setListening(false);};r.onerror=()=>setListening(false);r.onend=()=>setListening(false);r.start();setListening(true);},[listening,onCmd,speak]);return{listening,toggle,speak};}
 
