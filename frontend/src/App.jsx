@@ -1,1388 +1,1442 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+// CoachMe.life — Full-Feature App.jsx
+// Backend: just-perception-production.up.railway.app
+// All routes wired: auth, workouts, bookings, reports, ai/chat, clients, leads, coaches
 
-/* ═══════════════════════════════════════════════════════════════════════
-   FIT:OS NEXUS v6.0 — Production SaaS Platform
-   
-   SECURITY & ACCESS CONTROL:
-   • Role-Based Access Control (RBAC): Admin, Coach, Client
-   • Package-gated features (Starter/Pro/Elite for coaches)
-   • JWT-ready auth with session management
-   • Input sanitization, rate limiting, CSRF protection design
-   • Encrypted storage abstraction layer
-   
-   COACH PLATFORM:
-   • Easy registration with smart autocomplete
-   • Client upload & management dashboard
-   • AI-powered lead indicators (probable clients)
-   • Package management with feature gating
-   • Analytics & revenue tracking
-   
-   CLIENT PLATFORM:
-   • Coach search & discovery marketplace
-   • AI-matched coach recommendations
-   • Progress tracking & workout history
-   • Package-based feature access
-   
-   MOBILE DEPLOYMENT:
-   • PWA (installable web app)
-   • React Native / Expo guide
-   • Android APK + iOS build paths
-   ═══════════════════════════════════════════════════════════════════════ */
+import { useState, useEffect, useRef, useCallback, createContext, useContext, useMemo } from "react";
 
-// ─── API CLIENT (talks to Express backend) ───────────────────────────
-// All data flows through our backend: PostgreSQL, RBAC, JWT, rate limiting
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const API = "https://just-perception-production.up.railway.app/api";
 
-const API_URL = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) || "http://localhost:4000";
-
-// Token storage (in-memory only — never localStorage)
-let _accessToken = null;
-let _refreshToken = null;
-
+// ─── API CLIENT (JWT) ─────────────────────────────────────────────────────────
 const api = {
-  setTokens(access, refresh) { _accessToken = access; _refreshToken = refresh; },
-  clearTokens() { _accessToken = null; _refreshToken = null; },
-
-  async fetch(path, options = {}) {
-    const headers = { "Content-Type": "application/json", ...options.headers };
-    if (_accessToken) headers["Authorization"] = "Bearer " + _accessToken;
-
-    let res = await fetch(API_URL + path, { ...options, headers });
-
-    // Auto-refresh on 401
-    if (res.status === 401 && _refreshToken) {
-      const refreshRes = await fetch(API_URL + "/api/auth/refresh", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken: _refreshToken }),
-      });
-      if (refreshRes.ok) {
-        const tokens = await refreshRes.json();
-        _accessToken = tokens.accessToken;
-        _refreshToken = tokens.refreshToken;
-        headers["Authorization"] = "Bearer " + _accessToken;
-        res = await fetch(API_URL + path, { ...options, headers });
-      } else {
-        api.clearTokens();
-        throw new Error("SESSION_EXPIRED");
-      }
+  token: localStorage.getItem("cm_token"),
+  setToken(t) {
+    this.token = t;
+    t ? localStorage.setItem("cm_token", t) : localStorage.removeItem("cm_token");
+  },
+  async req(path, opts = {}) {
+    const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    const res = await fetch(`${API}${path}`, { ...opts, headers });
+    if (res.status === 401) {
+      this.setToken(null);
+      window.location.reload();
     }
-    return res;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || res.statusText);
+    }
+    return res.json();
   },
-
-  async get(path) { const r = await api.fetch(path); return r.json(); },
-  async post(path, body) { const r = await api.fetch(path, { method: "POST", body: JSON.stringify(body) }); return r.json(); },
-  async put(path, body) { const r = await api.fetch(path, { method: "PUT", body: JSON.stringify(body) }); return r.json(); },
-  async patch(path, body) { const r = await api.fetch(path, { method: "PATCH", body: JSON.stringify(body) }); return r.json(); },
-  async del(path) { const r = await api.fetch(path, { method: "DELETE" }); return r.json(); },
+  get: (p) => api.req(p),
+  post: (p, b) => api.req(p, { method: "POST", body: JSON.stringify(b) }),
+  put: (p, b) => api.req(p, { method: "PUT", body: JSON.stringify(b) }),
+  del: (p) => api.req(p, { method: "DELETE" }),
 };
 
-// ─── INPUT VALIDATION (client-side pre-check — server validates too) ─
+// ─── AUTH CONTEXT ─────────────────────────────────────────────────────────────
+const AuthCtx = createContext(null);
+const useAuth = () => useContext(AuthCtx);
 
-const sanitize = (input) => {
-  if (typeof input !== "string") return String(input || "");
-  return input.replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;" }[c] || c)).trim().slice(0, 2000);
-};
-const validateEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || "").trim());
-const strongPassword = (p) => p && p.length >= 8 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p);
-
-// ─── RBAC PERMISSION MATRIX ─────────────────────────────────────────
-
-const ROLES = { ADMIN: "admin", COACH: "coach", CLIENT: "client" };
-
-const PERMISSIONS = {
-  // Admin permissions
-  "admin.users.manage": [ROLES.ADMIN],
-  "admin.platform.settings": [ROLES.ADMIN],
-  "admin.analytics.full": [ROLES.ADMIN],
-  "admin.packages.manage": [ROLES.ADMIN],
-  "admin.reports.view": [ROLES.ADMIN],
-  // Coach permissions
-  "coach.clients.manage": [ROLES.ADMIN, ROLES.COACH],
-  "coach.clients.upload": [ROLES.ADMIN, ROLES.COACH],
-  "coach.plans.create": [ROLES.ADMIN, ROLES.COACH],
-  "coach.analytics.own": [ROLES.ADMIN, ROLES.COACH],
-  "coach.leads.view": [ROLES.ADMIN, ROLES.COACH],
-  "coach.profile.edit": [ROLES.ADMIN, ROLES.COACH],
-  "coach.billing.manage": [ROLES.ADMIN, ROLES.COACH],
-  // Client permissions
-  "client.workouts.view": [ROLES.ADMIN, ROLES.COACH, ROLES.CLIENT],
-  "client.progress.view": [ROLES.ADMIN, ROLES.COACH, ROLES.CLIENT],
-  "client.coaches.search": [ROLES.ADMIN, ROLES.CLIENT],
-  "client.profile.edit": [ROLES.ADMIN, ROLES.CLIENT],
-  "client.bookings.manage": [ROLES.ADMIN, ROLES.CLIENT],
-};
-
-const hasPermission = (role, permission) => {
-  return (PERMISSIONS[permission] || []).includes(role);
-};
-
-// ─── PACKAGE / FEATURE GATING ────────────────────────────────────────
-
-const COACH_PACKAGES = [
-  {
-    id: "starter", name: "Starter", price: 0, priceLabel: "Free",
-    color: "#8b9dc3", icon: "🌱",
-    maxClients: 5, features: ["Basic client management", "Workout plan builder", "Client progress view", "Email support"],
-    gated: { aiCoaching: false, leadScoring: false, videoAnalysis: false, brandedApp: false, apiAccess: false, advancedAnalytics: false, bulkUpload: false, customBranding: false },
-  },
-  {
-    id: "pro", name: "Pro", price: 49, priceLabel: "$49/mo",
-    color: "#00e5ff", icon: "⚡",
-    maxClients: 50, features: ["Everything in Starter", "AI-powered coaching", "Lead scoring & insights", "Camera form analysis", "Priority support", "Client bulk upload", "Advanced analytics"],
-    gated: { aiCoaching: true, leadScoring: true, videoAnalysis: true, brandedApp: false, apiAccess: false, advancedAnalytics: true, bulkUpload: true, customBranding: false },
-  },
-  {
-    id: "elite", name: "Elite", price: 149, priceLabel: "$149/mo",
-    color: "#f59e0b", icon: "👑",
-    maxClients: 999, features: ["Everything in Pro", "White-label branded app", "API access", "Custom branding", "Dedicated account manager", "Unlimited clients", "Revenue analytics"],
-    gated: { aiCoaching: true, leadScoring: true, videoAnalysis: true, brandedApp: true, apiAccess: true, advancedAnalytics: true, bulkUpload: true, customBranding: true },
-  },
-];
-
-const CLIENT_PACKAGES = [
-  { id: "free", name: "Free", price: 0, priceLabel: "Free", color: "#8b9dc3", icon: "🌱", features: ["Browse coaches", "Basic workout tracking", "1 coach connection"], maxCoaches: 1 },
-  { id: "premium", name: "Premium", price: 19, priceLabel: "$19/mo", color: "#00e5ff", icon: "⚡", features: ["Unlimited coaches", "AI form analysis", "Camera tracking", "Priority matching", "Advanced progress analytics"], maxCoaches: 999 },
-];
-
-const canAccess = (pkg, feature) => {
-  const p = COACH_PACKAGES.find((x) => x.id === pkg) || COACH_PACKAGES[0];
-  return p.gated[feature] === true;
-};
-
-// ─── SPECIALIZATION & AUTOCOMPLETE DATA ──────────────────────────────
-
-const SPECIALIZATIONS = [
-  "Strength & Conditioning", "Weight Loss", "Yoga & Flexibility", "HIIT & Cardio",
-  "Bodybuilding", "CrossFit", "Post-Injury Rehab", "Senior Fitness",
-  "Pre/Postnatal", "Sports Performance", "Martial Arts", "Nutrition Coaching",
-  "Mental Wellness", "Functional Training", "Dance Fitness", "Endurance/Marathon",
-];
-
-const CERTIFICATIONS = [
-  "NASM-CPT", "ACE-CPT", "ISSA-CPT", "NSCA-CSCS", "ACSM-EP", "CrossFit L1",
-  "RYT-200 Yoga", "RYT-500 Yoga", "Precision Nutrition L1", "NASM-CES",
-  "ACE Health Coach", "NASM-PES", "CSEP-CEP", "AFAA-GFI", "ISSA Nutritionist",
-];
-
-const COUNTRIES = [
-  "India", "United States", "United Kingdom", "Canada", "Australia",
-  "UAE", "Singapore", "Germany", "Brazil", "South Africa",
-  "Netherlands", "France", "Japan", "South Korea", "Mexico",
-];
-
-const CITIES_BY_COUNTRY = {
-  "India": ["Hyderabad", "Mumbai", "Delhi", "Bangalore", "Chennai", "Pune", "Kolkata", "Ahmedabad"],
-  "United States": ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "San Francisco", "Miami", "Seattle"],
-  "United Kingdom": ["London", "Manchester", "Birmingham", "Leeds", "Glasgow", "Edinburgh", "Bristol"],
-  "Canada": ["Toronto", "Vancouver", "Montreal", "Calgary", "Ottawa"],
-  "Australia": ["Sydney", "Melbourne", "Brisbane", "Perth", "Adelaide"],
-  "UAE": ["Dubai", "Abu Dhabi", "Sharjah"],
-};
-
-const LANGUAGES = ["English", "Hindi", "Spanish", "French", "German", "Arabic", "Portuguese", "Japanese", "Korean", "Mandarin", "Tamil", "Telugu"];
-
-// ─── AI AGENT (via backend proxy — API key never exposed) ────────────
-
-async function aiCall(sys, msg, search = false) {
-  try {
-    const data = await api.post("/api/ai/chat", { system: sys, message: msg, search });
-    return String(data.text || "");
-  } catch { return ""; }
-}
-
-async function aiJSON(sys, msg, search = false) {
-  const r = await aiCall(sys + "\nRESPOND ONLY WITH VALID JSON. No markdown, no backticks.", msg, search);
-  try { return JSON.parse(r.replace(/```json|```/g, "").trim()); }
-  catch { try { const m = r.match(/\{[\s\S]*\}/); return m ? JSON.parse(m[0]) : null; } catch { return null; } }
-}
-
-// ─── DATA COMES FROM BACKEND API ─────────────────────────────────────
-// No mock data — all fetched from PostgreSQL via Express API routes:
-//   GET /api/coaches       → coach marketplace (cached in Redis)
-//   GET /api/clients       → coach's client list
-//   GET /api/leads         → AI-scored leads (Pro+ package)
-//   GET /api/reports/*     → dashboard analytics
-//   POST /api/ai/match     → AI coach matching
-//   POST /api/ai/leads     → AI lead scoring
-
-// ─── UI PRIMITIVES ───────────────────────────────────────────────────
-
-const AC = "#00e5ff", AC2 = "#0057ff", DIM = "rgba(255,255,255,0.35)", BRD = "rgba(255,255,255,0.055)";
-const WARN = "#fbbf24", OK = "#34d399", ERR = "#ef4444";
-
-function Card({ children, style, glow, onClick, hv }) {
-  const [h, sH] = useState(false);
-  return (
-    <div onClick={onClick} onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
-      style={{ background: "rgba(255,255,255,0.022)", borderRadius: 16, padding: 20, border: "1px solid " + BRD, transition: "all 0.3s",
-        ...(glow ? { boxShadow: "0 0 25px " + glow + "12", borderColor: glow + "28" } : {}),
-        ...(onClick ? { cursor: "pointer" } : {}),
-        ...(hv && h ? { borderColor: AC + "40", transform: "translateY(-2px)" } : {}),
-        ...style }}>
-      {children}
-    </div>
-  );
-}
-
-function Btn({ children, onClick, v = "primary", s = "md", disabled, style: sx, full }) {
-  const cs = {
-    primary: { background: "linear-gradient(135deg," + AC + "," + AC2 + ")", color: "#000" },
-    secondary: { background: "rgba(255,255,255,0.05)", color: "#fff", border: "1px solid " + BRD },
-    danger: { background: "rgba(239,68,68,0.1)", color: ERR, border: "1px solid rgba(239,68,68,0.2)" },
-    success: { background: "rgba(52,211,153,0.1)", color: OK, border: "1px solid rgba(52,211,153,0.2)" },
-    ghost: { background: "transparent", color: DIM },
-    warn: { background: "rgba(251,191,36,0.1)", color: WARN, border: "1px solid rgba(251,191,36,0.2)" },
-  };
-  const ss = { sm: { padding: "6px 14px", fontSize: 11 }, md: { padding: "10px 20px", fontSize: 13 }, lg: { padding: "14px 30px", fontSize: 15 } };
-  return (
-    <button onClick={disabled ? undefined : onClick}
-      style={{ border: "none", cursor: disabled ? "not-allowed" : "pointer", fontWeight: 700, borderRadius: 12, transition: "all 0.2s",
-        opacity: disabled ? 0.4 : 1, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6,
-        ...(full ? { width: "100%", justifyContent: "center" } : {}), ...ss[s], ...cs[v], ...sx }}>
-      {children}
-    </button>
-  );
-}
-
-function Badge({ children, color = AC }) {
-  return (
-    <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: color + "15", color, textTransform: "uppercase", letterSpacing: 1, whiteSpace: "nowrap" }}>
-      {children}
-    </span>
-  );
-}
-
-function Input({ label, value, onChange, type = "text", placeholder, error, required, disabled, autoComplete }) {
-  return (
-    <div style={{ marginBottom: 14 }}>
-      {label && <label style={{ display: "block", fontSize: 11, color: DIM, marginBottom: 5, fontWeight: 600 }}>{label}{required && <span style={{ color: ERR }}> *</span>}</label>}
-      <input type={type} value={value || ""} onChange={onChange} placeholder={placeholder} disabled={disabled}
-        autoComplete={autoComplete || "off"}
-        style={{ width: "100%", padding: "10px 14px", borderRadius: 12, border: "1px solid " + (error ? ERR + "60" : BRD), background: disabled ? "rgba(255,255,255,0.01)" : "rgba(255,255,255,0.03)", color: disabled ? DIM : "#fff", fontSize: 13, fontFamily: "inherit", outline: "none", transition: "border-color 0.2s" }} />
-      {error && <div style={{ fontSize: 10, color: ERR, marginTop: 4 }}>{error}</div>}
-    </div>
-  );
-}
-
-function Select({ label, value, onChange, options, required }) {
-  return (
-    <div style={{ marginBottom: 14 }}>
-      {label && <label style={{ display: "block", fontSize: 11, color: DIM, marginBottom: 5, fontWeight: 600 }}>{label}{required && <span style={{ color: ERR }}> *</span>}</label>}
-      <select value={value || ""} onChange={onChange}
-        style={{ width: "100%", padding: "10px 14px", borderRadius: 12, border: "1px solid " + BRD, background: "rgba(255,255,255,0.03)", color: "#fff", fontSize: 13, fontFamily: "inherit", outline: "none", appearance: "none" }}>
-        <option value="" style={{ background: "#111" }}>Select...</option>
-        {(options || []).map((o) => <option key={typeof o === "string" ? o : o.value} value={typeof o === "string" ? o : o.value} style={{ background: "#111" }}>{typeof o === "string" ? o : o.label}</option>)}
-      </select>
-    </div>
-  );
-}
-
-function Chip({ label, selected, onClick, icon, color }) {
-  return (
-    <div onClick={onClick} style={{ padding: "7px 13px", borderRadius: 12, cursor: "pointer", transition: "all 0.2s", fontSize: 12,
-      fontWeight: selected ? 700 : 400, background: selected ? (color || AC) + "15" : "rgba(255,255,255,0.03)",
-      border: "1px solid " + (selected ? (color || AC) + "50" : BRD), color: selected ? (color || AC) : "rgba(255,255,255,0.6)" }}>
-      {icon && <span style={{ marginRight: 4 }}>{icon}</span>}{label}
-    </div>
-  );
-}
-
-function Toggle({ label, value, onChange }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid " + BRD }}>
-      <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>{label}</span>
-      <div onClick={onChange} style={{ width: 38, height: 20, borderRadius: 10, padding: 2, cursor: "pointer", background: value ? AC : "rgba(255,255,255,0.08)", transition: "all 0.3s" }}>
-        <div style={{ width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "all 0.3s", transform: value ? "translateX(18px)" : "translateX(0)" }} />
-      </div>
-    </div>
-  );
-}
-
-function Ring({ value, max, size = 80, color = AC, children, label }) {
-  const r = (size - 6) / 2, c = 2 * Math.PI * r, p = Math.min((value || 0) / (max || 1), 1);
-  return (
-    <div style={{ position: "relative", width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <svg width={size} height={size} style={{ position: "absolute", transform: "rotate(-90deg)" }}>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth={6} />
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={6} strokeDasharray={c} strokeDashoffset={c * (1 - p)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 1s" }} />
-      </svg>
-      <div style={{ textAlign: "center", zIndex: 1 }}>{children}{label && <div style={{ fontSize: 7, color: DIM, marginTop: 1, textTransform: "uppercase", letterSpacing: 1.5 }}>{label}</div>}</div>
-    </div>
-  );
-}
-
-function FeatureGate({ feature, pkg, children, fallback }) {
-  if (canAccess(pkg, feature)) return children;
-  return fallback || (
-    <Card style={{ textAlign: "center", padding: 30, opacity: 0.6 }}>
-      <div style={{ fontSize: 28, marginBottom: 8 }}>🔒</div>
-      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Upgrade Required</div>
-      <div style={{ fontSize: 11, color: DIM }}>This feature requires a Pro or Elite package</div>
-    </Card>
-  );
-}
-
-function Stat({ icon, label, value, color = AC }) {
-  return (
-    <Card style={{ padding: 14, textAlign: "center" }}>
-      <div style={{ fontSize: 18, marginBottom: 2 }}>{icon}</div>
-      <div style={{ fontSize: 20, fontWeight: 800, color, fontFamily: "'Orbitron'" }}>{value}</div>
-      <div style={{ fontSize: 8, color: DIM, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
-    </Card>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// MAIN APPLICATION
-// ═══════════════════════════════════════════════════════════════════════
-
-export default function App() {
-  // ─── AUTH STATE ─────────────────────────────────────────────────
-  const [screen, setScreen] = useState("loading"); // loading, auth, main
-  const [authMode, setAuthMode] = useState("login"); // login, register, role-select
-  const [authRole, setAuthRole] = useState(""); // coach, client
+function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [sessionToken, setSessionToken] = useState("");
-  const [authError, setAuthError] = useState("");
-  const [authLoading, setAuthLoading] = useState(false);
-
-  // Auth form
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPass, setConfirmPass] = useState("");
-
-  // ─── COACH REGISTRATION ────────────────────────────────────────
-  const [regStep, setRegStep] = useState(0);
-  const [coachReg, setCoachReg] = useState({
-    name: "", phone: "", country: "", city: "", bio: "",
-    specializations: [], certifications: [], languages: ["English"],
-    experience: 1, pricePerSession: 30, online: true, inPerson: false,
-    instagram: "", website: "", gym: "",
-  });
-
-  // ─── CLIENT REGISTRATION ───────────────────────────────────────
-  const [clientReg, setClientReg] = useState({
-    name: "", age: 25, gender: "other", height: 170, weight: 70,
-    goals: [], conditions: [], country: "", city: "",
-  });
-
-  // ─── APP STATE ─────────────────────────────────────────────────
-  const [tab, setTab] = useState("dashboard");
-  const [navH, setNavH] = useState(null);
-  const [coaches, setCoaches] = useState([]);
-  const [leads, setLeads] = useState([]);
-  const [clients, setClients] = useState([]);
-  const [selectedCoach, setSelectedCoach] = useState(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchFilters, setSearchFilters] = useState({ spec: "", city: "", priceMax: 100, ratingMin: 0 });
-  const [aiLoading, setAiLoading] = useState(false);
-  const [addClientMode, setAddClientMode] = useState(false);
-  const [newClient, setNewClient] = useState({ name: "", email: "", phone: "", age: 25, goals: [], conditions: [] });
-  const [bulkUploadText, setBulkUploadText] = useState("");
-  const [deployTab, setDeployTab] = useState("pwa");
-  const [dashboardData, setDashboardData] = useState(null); // Reports from /api/reports
-
-  // ─── LOAD STATE (from backend API) ─────────────────────────────
-  const loadUserData = useCallback(async (userData) => {
-    try {
-      // Fetch coaches marketplace (public, cached in Redis)
-      const coachData = await api.get("/api/coaches?limit=50");
-      setCoaches((coachData.coaches || []).map((c) => ({
-        ...c, name: c.displayName, photo: "💪", experience: c.experienceYears,
-        price: c.pricePerSession, reviews: c.reviewCount, clients: c.totalClients,
-        online: c.isOnline,
-      })));
-    } catch { setCoaches([]); }
-
-    if (userData?.role === ROLES.COACH) {
-      try {
-        // Fetch coach's clients from PostgreSQL
-        const clientData = await api.get("/api/clients");
-        setClients(Array.isArray(clientData) ? clientData : []);
-      } catch { setClients([]); }
-
-      try {
-        // Fetch AI-scored leads
-        const leadData = await api.get("/api/leads");
-        setLeads(Array.isArray(leadData) ? leadData : []);
-      } catch { setLeads([]); }
-
-      try {
-        // Fetch dashboard report
-        const report = await api.get("/api/reports/coach/dashboard");
-        setDashboardData(report);
-      } catch { setDashboardData(null); }
-    }
-  }, []);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    (async () => {
-      // Try to restore session from stored tokens
-      // In production, tokens come from httpOnly cookies set by the backend
-      // For the preview, we check if API is reachable
-      try {
-        const me = await api.get("/api/auth/me");
-        if (me?.user) {
-          setUser({ ...me.user, ...me.profile });
-          setSessionToken("active");
-          await loadUserData(me.user);
-          setScreen("main");
-          return;
-        }
-      } catch {}
-      setScreen("auth");
-    })();
-  }, [loadUserData]);
-
-  // ─── AUTH HANDLERS (via backend /api/auth/*) ────────────────────
-  const handleLogin = useCallback(async () => {
-    setAuthError("");
-    const e = sanitize(email).trim();
-    const p = password;
-    if (!validateEmail(e)) { setAuthError("Invalid email address"); return; }
-    if (!p || p.length < 6) { setAuthError("Password must be at least 6 characters"); return; }
-    setAuthLoading(true);
-    try {
-      const res = await fetch(API_URL + "/api/auth/login", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: e, password: p }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setAuthError(data.error || "Login failed"); setAuthLoading(false); return; }
-      // Store JWT tokens in memory (never localStorage)
-      api.setTokens(data.accessToken, data.refreshToken);
-      const userData = { ...data.user, ...data.profile };
-      setUser(userData);
-      setSessionToken(data.accessToken);
-      await loadUserData(data.user);
-      setScreen("main");
-    } catch (err) {
-      setAuthError(err.message === "SESSION_EXPIRED" ? "Session expired" : "Connection failed — is the backend running?");
-    }
-    setAuthLoading(false);
-  }, [email, password, loadUserData]);
-
-  const handleRegister = useCallback(async () => {
-    setAuthError("");
-    const e = sanitize(email).trim();
-    if (!validateEmail(e)) { setAuthError("Invalid email address"); return; }
-    if (!strongPassword(password)) { setAuthError("Password needs 8+ chars, uppercase, lowercase, and a number"); return; }
-    if (password !== confirmPass) { setAuthError("Passwords don't match"); return; }
-    setAuthLoading(true);
-    // Pre-check: we'll actually register after role/profile selection
-    // Just move to role selection for now
-    setAuthMode("role-select");
-    setAuthLoading(false);
-  }, [email, password, confirmPass]);
-
-  const completeRegistration = useCallback(async (role, profileData) => {
-    const e = sanitize(email).trim();
-    setAuthLoading(true);
-    try {
-      const res = await fetch(API_URL + "/api/auth/register", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: e, password,
-          role: role.toUpperCase(),
-          profile: {
-            displayName: profileData.name || profileData.displayName || "User",
-            phone: profileData.phone,
-            country: profileData.country,
-            city: profileData.city,
-            specializations: profileData.specializations,
-            certifications: profileData.certifications,
-            languages: profileData.languages,
-            experienceYears: profileData.experience,
-            pricePerSession: profileData.pricePerSession,
-            bio: profileData.bio,
-            instagram: profileData.instagram,
-            website: profileData.website,
-            gymName: profileData.gym,
-            online: profileData.online,
-            inPerson: profileData.inPerson,
-            age: profileData.age,
-            gender: profileData.gender,
-            heightCm: profileData.height,
-            weightKg: profileData.weight,
-            fitnessGoals: profileData.goals,
-            conditions: profileData.conditions,
-          },
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setAuthError(data.error || "Registration failed"); setAuthLoading(false); return; }
-      api.setTokens(data.accessToken, data.refreshToken);
-      const userData = { ...data.user, ...profileData, role: role.toLowerCase() };
-      setUser(userData);
-      setSessionToken(data.accessToken);
-      await loadUserData(data.user);
-      setScreen("main");
-    } catch (err) {
-      setAuthError("Connection failed — is the backend running on " + API_URL + "?");
-    }
-    setAuthLoading(false);
-  }, [email, password, loadUserData]);
-
-  const logout = useCallback(async () => {
-    try { await api.post("/api/auth/logout", {}); } catch {}
-    api.clearTokens();
-    setUser(null); setSessionToken("");
-    setScreen("auth"); setAuthMode("login"); setTab("dashboard");
-    setEmail(""); setPassword(""); setConfirmPass(""); setAuthError("");
-    setRegStep(0);
-    setCoachReg({ name: "", phone: "", country: "", city: "", bio: "", specializations: [], certifications: [], languages: ["English"], experience: 1, pricePerSession: 30, online: true, inPerson: false, instagram: "", website: "", gym: "" });
-    setClientReg({ name: "", age: 25, gender: "other", height: 170, weight: 70, goals: [], conditions: [], country: "", city: "" });
+    if (!api.token) return setLoading(false);
+    api.get("/auth/me").then(setUser).catch(() => api.setToken(null)).finally(() => setLoading(false));
   }, []);
 
-  // ─── COACH: ADD CLIENT (via POST /api/clients) ──────────────────
-  const addClient = useCallback(async () => {
-    if (!newClient.name || !newClient.email) return;
-    try {
-      const result = await api.post("/api/clients", {
-        name: sanitize(newClient.name),
-        email: sanitize(newClient.email),
-        phone: sanitize(newClient.phone || ""),
-        age: newClient.age,
-        goals: newClient.goals,
-        conditions: newClient.conditions,
-      });
-      if (result.error) { alert(result.message || result.error); return; }
-      // Refresh client list from backend
-      const clientData = await api.get("/api/clients");
-      setClients(Array.isArray(clientData) ? clientData : []);
-      setNewClient({ name: "", email: "", phone: "", age: 25, goals: [], conditions: [] });
-      setAddClientMode(false);
-    } catch (err) { alert("Failed to add client: " + err.message); }
-  }, [newClient]);
+  const login = async (email, password) => {
+    const data = await api.post("/auth/login", { email, password });
+    api.setToken(data.token);
+    setUser(data.user);
+  };
+  const register = async (payload) => {
+    const data = await api.post("/auth/register", payload);
+    api.setToken(data.token);
+    setUser(data.user);
+  };
+  const logout = () => { api.setToken(null); setUser(null); };
 
-  const bulkUploadClients = useCallback(async () => {
-    if (!bulkUploadText.trim()) return;
-    const lines = bulkUploadText.trim().split("\n").filter(Boolean);
-    const clientList = lines.map((line) => {
-      const parts = line.split(",").map((s) => s.trim());
-      return { name: parts[0] || "", email: parts[1] || "", phone: parts[2] || "", age: parseInt(parts[3]) || 25, goals: [], conditions: [] };
-    });
-    try {
-      const result = await api.post("/api/clients/bulk", { clients: clientList });
-      alert(`Uploaded: ${result.success || 0} success, ${result.failed || 0} failed`);
-      // Refresh client list
-      const clientData = await api.get("/api/clients");
-      setClients(Array.isArray(clientData) ? clientData : []);
-      setBulkUploadText("");
-    } catch (err) { alert("Bulk upload failed: " + err.message); }
-  }, [bulkUploadText]);
+  if (loading) return <SplashScreen />;
+  return <AuthCtx.Provider value={{ user, login, register, logout }}>{children}</AuthCtx.Provider>;
+}
 
-  // ─── AI FEATURES ───────────────────────────────────────────────
-  const [aiMatchResults, setAiMatchResults] = useState(null);
+// ─── VOICE COMMANDS HOOK ──────────────────────────────────────────────────────
+function useVoice(onCommand) {
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef(null);
 
-  // ─── FILTERED COACHES ──────────────────────────────────────────
-  const filteredCoaches = useMemo(() => {
-    return coaches.filter((c) => {
-      if (searchQuery && !c.name.toLowerCase().includes(searchQuery.toLowerCase()) && !c.specializations.some((s) => s.toLowerCase().includes(searchQuery.toLowerCase()))) return false;
-      if (searchFilters.spec && !c.specializations.includes(searchFilters.spec)) return false;
-      if (searchFilters.city && c.city !== searchFilters.city) return false;
-      if (c.price > searchFilters.priceMax) return false;
-      if (parseFloat(c.rating) < searchFilters.ratingMin) return false;
-      return true;
-    });
-  }, [coaches, searchQuery, searchFilters]);
+  const speak = useCallback((text) => {
+    if (!("speechSynthesis" in window)) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05;
+    u.pitch = 1;
+    speechSynthesis.speak(u);
+  }, []);
 
-  const searchCoachesAI = useCallback(async (query) => {
-    if (!query.trim()) return;
-    setAiLoading(true);
-    try {
-      const result = await api.post("/api/ai/match", {
-        userProfile: { query: sanitize(query), goals: user?.fitnessGoals || user?.goals || [], city: user?.city },
-        coaches: filteredCoaches.slice(0, 20).map((c) => ({ id: c.id, name: c.name || c.displayName, specializations: c.specializations, rating: c.rating, price: c.price || c.pricePerSession, city: c.city })),
-      });
-      setAiMatchResults(result);
-    } catch { setAiMatchResults(null); }
-    setAiLoading(false);
-  }, [filteredCoaches, user]);
+  const toggle = useCallback(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return speak("Voice not supported on this browser");
 
-  // ─── NAVIGATION ────────────────────────────────────────────────
-  const navItems = useMemo(() => {
-    if (!user) return [];
-    if (user.role === ROLES.COACH) return [
-      { id: "dashboard", i: "⬡", l: "Dashboard" }, { id: "clients", i: "👥", l: "Clients" },
-      { id: "leads", i: "🎯", l: "Leads" }, { id: "packages", i: "📦", l: "Package" },
-      { id: "deploy", i: "🚀", l: "Deploy" }, { id: "settings", i: "⚙", l: "Settings" },
-    ];
-    if (user.role === ROLES.CLIENT) return [
-      { id: "dashboard", i: "⬡", l: "Dashboard" }, { id: "coaches", i: "🔍", l: "Find Coach" },
-      { id: "workouts", i: "💪", l: "Workouts" }, { id: "progress", i: "📊", l: "Progress" },
-      { id: "settings", i: "⚙", l: "Settings" },
-    ];
-    return [
-      { id: "dashboard", i: "⬡", l: "Dashboard" }, { id: "users", i: "👥", l: "Users" },
-      { id: "analytics", i: "📊", l: "Analytics" }, { id: "settings", i: "⚙", l: "Settings" },
-    ];
-  }, [user]);
+    if (listening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setListening(false);
+      return;
+    }
 
-  // ═══ LOADING SCREEN ════════════════════════════════════════════
-  if (screen === "loading") return (
-    <div style={{ minHeight: "100vh", background: "#050509", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
-      <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-      <div style={{ fontFamily: "'Orbitron'", fontSize: 26, fontWeight: 900, background: "linear-gradient(135deg," + AC + "," + AC2 + ")", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>FIT:OS NEXUS</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ width: 16, height: 16, border: "2px solid " + BRD, borderTopColor: AC, borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-        <span style={{ fontSize: 12, color: DIM }}>Initializing secure session...</span>
+    const r = new SR();
+    r.continuous = false;
+    r.interimResults = false;
+    r.lang = "en-US";
+    r.onresult = (e) => {
+      const transcript = e.results[0][0].transcript.toLowerCase().trim();
+      onCommand(transcript, speak);
+      setListening(false);
+    };
+    r.onerror = () => setListening(false);
+    r.onend = () => setListening(false);
+    recognitionRef.current = r;
+    r.start();
+    setListening(true);
+  }, [listening, onCommand, speak]);
+
+  return { listening, toggle, speak };
+}
+
+// ─── DESIGN SYSTEM PRIMITIVES ─────────────────────────────────────────────────
+const colors = {
+  bg: "#0a0a0f",
+  surface: "#12121a",
+  surfaceHover: "#1a1a25",
+  border: "#1e1e2e",
+  text: "#e4e4ef",
+  textMuted: "#7a7a8e",
+  accent: "#6c5ce7",
+  accentAlt: "#00cec9",
+  gradient: "linear-gradient(135deg, #6c5ce7 0%, #a29bfe 50%, #00cec9 100%)",
+  danger: "#ff4757",
+  warning: "#ffa502",
+  success: "#2ed573",
+};
+
+const Card = ({ children, style, className = "", onClick, ...props }) => (
+  <div
+    onClick={onClick}
+    className={className}
+    style={{
+      background: colors.surface,
+      border: `1px solid ${colors.border}`,
+      borderRadius: 16,
+      padding: 20,
+      ...style,
+    }}
+    {...props}
+  >
+    {children}
+  </div>
+);
+
+const Badge = ({ children, color = colors.accent, style }) => (
+  <span
+    style={{
+      display: "inline-block",
+      padding: "4px 12px",
+      borderRadius: 20,
+      fontSize: 12,
+      fontWeight: 600,
+      background: color + "22",
+      color,
+      ...style,
+    }}
+  >
+    {children}
+  </span>
+);
+
+const Btn = ({ children, variant = "primary", style, disabled, ...props }) => {
+  const base = {
+    padding: "12px 24px",
+    borderRadius: 12,
+    border: "none",
+    fontWeight: 600,
+    fontSize: 14,
+    cursor: disabled ? "not-allowed" : "pointer",
+    transition: "all 0.2s",
+    opacity: disabled ? 0.5 : 1,
+    fontFamily: "inherit",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    justifyContent: "center",
+  };
+  const variants = {
+    primary: { background: colors.gradient, color: "#fff" },
+    secondary: { background: colors.surfaceHover, color: colors.text, border: `1px solid ${colors.border}` },
+    danger: { background: colors.danger + "22", color: colors.danger },
+    ghost: { background: "transparent", color: colors.textMuted },
+  };
+  return <button style={{ ...base, ...variants[variant], ...style }} disabled={disabled} {...props}>{children}</button>;
+};
+
+const Input = ({ label, style, ...props }) => (
+  <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%" }}>
+    {label && <label style={{ fontSize: 13, color: colors.textMuted, fontWeight: 500 }}>{label}</label>}
+    <input
+      style={{
+        background: colors.surfaceHover,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 10,
+        padding: "12px 16px",
+        color: colors.text,
+        fontSize: 14,
+        outline: "none",
+        fontFamily: "inherit",
+        width: "100%",
+        boxSizing: "border-box",
+        ...style,
+      }}
+      {...props}
+    />
+  </div>
+);
+
+const Select = ({ label, options, style, ...props }) => (
+  <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%" }}>
+    {label && <label style={{ fontSize: 13, color: colors.textMuted, fontWeight: 500 }}>{label}</label>}
+    <select
+      style={{
+        background: colors.surfaceHover,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 10,
+        padding: "12px 16px",
+        color: colors.text,
+        fontSize: 14,
+        outline: "none",
+        fontFamily: "inherit",
+        ...style,
+      }}
+      {...props}
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
+    </select>
+  </div>
+);
+
+const Modal = ({ open, onClose, title, children }) => {
+  if (!open) return null;
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.7)",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: colors.surface, borderRadius: 20, padding: 24, maxWidth: 480,
+          width: "100%", maxHeight: "85vh", overflowY: "auto", border: `1px solid ${colors.border}`,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <h3 style={{ color: colors.text, margin: 0, fontSize: 18 }}>{title}</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: colors.textMuted, fontSize: 22, cursor: "pointer" }}>✕</button>
+        </div>
+        {children}
       </div>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
+};
 
-  // ═══ AUTH SCREEN ═══════════════════════════════════════════════
-  if (screen === "auth") {
-    // Coach registration flow
-    if (authMode === "coach-register") {
-      const steps = [
-        { t: "About You", i: "👤" }, { t: "Expertise", i: "🎓" },
-        { t: "Services", i: "💼" }, { t: "Review", i: "✅" },
-      ];
-      const canNextReg = regStep === 0 ? (coachReg.name && coachReg.country && coachReg.city)
-        : regStep === 1 ? (coachReg.specializations.length > 0)
-        : regStep === 2 ? (coachReg.experience > 0)
-        : true;
+const Spinner = () => (
+  <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
+    <div style={{
+      width: 32, height: 32, border: `3px solid ${colors.border}`,
+      borderTopColor: colors.accent, borderRadius: "50%",
+      animation: "spin 0.8s linear infinite",
+    }} />
+  </div>
+);
 
-      return (
-        <div style={{ minHeight: "100vh", background: "#050509", color: "#fff", fontFamily: "'Manrope',sans-serif" }}>
-          <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-          <div style={{ maxWidth: 560, margin: "0 auto", padding: "30px 18px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 24 }}>
-              <span onClick={() => setAuthMode("role-select")} style={{ cursor: "pointer", color: DIM, fontSize: 18 }}>←</span>
-              <span style={{ fontFamily: "'Orbitron'", fontWeight: 900, fontSize: 14, color: AC }}>COACH REGISTRATION</span>
+const Empty = ({ icon, text }) => (
+  <div style={{ textAlign: "center", padding: 48, color: colors.textMuted }}>
+    <div style={{ fontSize: 40, marginBottom: 12 }}>{icon}</div>
+    <div style={{ fontSize: 14 }}>{text}</div>
+  </div>
+);
+
+// ─── ICONS (inline SVG) ──────────────────────────────────────────────────────
+const Icon = ({ name, size = 22, color = "currentColor" }) => {
+  const icons = {
+    home: <><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" /></>,
+    users: <><path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></>,
+    dumbbell: <><path d="M6.5 6.5h11M6 12h12M4 8h2v8H4zM18 8h2v8h-2zM2 10h2v4H2zM20 10h2v4h-2z" /></>,
+    calendar: <><path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></>,
+    chart: <><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></>,
+    chat: <><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></>,
+    bot: <><path d="M12 2a2 2 0 012 2v1h3a2 2 0 012 2v3a2 2 0 01-2 2h-1v2h1a2 2 0 012 2v3a2 2 0 01-2 2H7a2 2 0 01-2-2v-3a2 2 0 012-2h1v-2H7a2 2 0 01-2-2V7a2 2 0 012-2h3V4a2 2 0 012-2zM9 9a1 1 0 100 2 1 1 0 000-2zm6 0a1 1 0 100 2 1 1 0 000-2z" /></>,
+    mic: <><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4m-3 0h6M12 1a3 3 0 00-3 3v6a3 3 0 006 0V4a3 3 0 00-3-3z" /></>,
+    send: <><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" /></>,
+    plus: <><path d="M12 4v16m8-8H4" /></>,
+    check: <><path d="M5 13l4 4L19 7" /></>,
+    x: <><path d="M6 18L18 6M6 6l12 12" /></>,
+    settings: <><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><circle cx="12" cy="12" r="3" /></>,
+    leads: <><path d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></>,
+    logout: <><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></>,
+    phone: <><path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></>,
+    play: <><polygon points="5 3 19 12 5 21 5 3" /></>,
+    clock: <><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>,
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      {icons[name] || icons.home}
+    </svg>
+  );
+};
+
+// ─── SPLASH SCREEN ────────────────────────────────────────────────────────────
+function SplashScreen() {
+  return (
+    <div style={{
+      height: "100dvh", display: "flex", alignItems: "center", justifyContent: "center",
+      background: colors.bg, flexDirection: "column", gap: 16,
+    }}>
+      <div style={{
+        width: 56, height: 56, borderRadius: 16, background: colors.gradient,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 28, fontWeight: 800, color: "#fff",
+      }}>C</div>
+      <Spinner />
+    </div>
+  );
+}
+
+// ─── AUTH SCREENS ─────────────────────────────────────────────────────────────
+function AuthScreen() {
+  const { login, register } = useAuth();
+  const [mode, setMode] = useState("login");
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "coach" });
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const handleSubmit = async () => {
+    setError("");
+    setBusy(true);
+    try {
+      if (mode === "login") await login(form.email, form.password);
+      else await register(form);
+    } catch (e) {
+      setError(e.message);
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{
+      minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center",
+      background: colors.bg, padding: 20,
+    }}>
+      <Card style={{ maxWidth: 400, width: "100%" }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: 14, background: colors.gradient,
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            fontSize: 24, fontWeight: 800, color: "#fff", marginBottom: 12,
+          }}>C</div>
+          <h1 style={{ color: colors.text, margin: 0, fontSize: 22, fontWeight: 700 }}>CoachMe.life</h1>
+          <p style={{ color: colors.textMuted, margin: "6px 0 0", fontSize: 14 }}>
+            {mode === "login" ? "Welcome back" : "Create your account"}
+          </p>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {mode === "register" && (
+            <>
+              <Input label="Full Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="John Doe" />
+              <Select
+                label="I am a…"
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
+                options={[{ value: "coach", label: "Coach" }, { value: "client", label: "Client" }]}
+              />
+            </>
+          )}
+          <Input label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="you@email.com" />
+          <Input label="Password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="••••••••" />
+
+          {error && <div style={{ color: colors.danger, fontSize: 13, padding: "8px 12px", background: colors.danger + "15", borderRadius: 8 }}>{error}</div>}
+
+          <Btn onClick={handleSubmit} disabled={busy} style={{ width: "100%", marginTop: 4 }}>
+            {busy ? "Please wait…" : mode === "login" ? "Sign In" : "Create Account"}
+          </Btn>
+
+          <p style={{ color: colors.textMuted, fontSize: 13, textAlign: "center", margin: "8px 0 0" }}>
+            {mode === "login" ? "Don't have an account?" : "Already have an account?"}{" "}
+            <span
+              onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}
+              style={{ color: colors.accent, cursor: "pointer", fontWeight: 600 }}
+            >
+              {mode === "login" ? "Sign Up" : "Sign In"}
+            </span>
+          </p>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PAGE: DASHBOARD (/api/reports/summary)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function DashboardPage() {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get("/reports/summary").then(setStats).catch(() => {
+      setStats({ totalClients: 0, activeClients: 0, totalRevenue: 0, monthlyRevenue: 0, totalBookings: 0, upcomingBookings: 0, totalLeads: 0, conversionRate: 0 });
+    }).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <Spinner />;
+
+  const cards = [
+    { label: "Active Clients", value: stats?.activeClients ?? 0, icon: "users", color: colors.accent },
+    { label: "Monthly Revenue", value: `₹${(stats?.monthlyRevenue ?? 0).toLocaleString()}`, icon: "chart", color: colors.success },
+    { label: "Upcoming Sessions", value: stats?.upcomingBookings ?? 0, icon: "calendar", color: colors.accentAlt },
+    { label: "Leads", value: stats?.totalLeads ?? 0, icon: "leads", color: colors.warning },
+  ];
+
+  return (
+    <div>
+      <h2 style={{ color: colors.text, fontSize: 20, margin: "0 0 20px", fontWeight: 700 }}>Dashboard</h2>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {cards.map((c) => (
+          <Card key={c.label} style={{ padding: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10, background: c.color + "18",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <Icon name={c.icon} size={18} color={c.color} />
+              </div>
             </div>
-            <div style={{ display: "flex", gap: 4, marginBottom: 24 }}>
-              {steps.map((_, i) => <div key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= regStep ? AC : "rgba(255,255,255,0.06)", transition: "all 0.5s" }} />)}
-            </div>
-            <div style={{ textAlign: "center", marginBottom: 20 }}>
-              <div style={{ fontSize: 36, marginBottom: 6 }}>{steps[regStep].i}</div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>{steps[regStep].t}</div>
-            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: colors.text }}>{c.value}</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>{c.label}</div>
+          </Card>
+        ))}
+      </div>
 
-            <Card style={{ marginBottom: 16 }}>
-              {regStep === 0 && (<div>
-                <Input label="Full Name" value={coachReg.name} onChange={(e) => setCoachReg((p) => ({ ...p, name: e.target.value }))} required autoComplete="name" placeholder="Your full name" />
-                <Input label="Phone" value={coachReg.phone} onChange={(e) => setCoachReg((p) => ({ ...p, phone: e.target.value }))} type="tel" autoComplete="tel" placeholder="+91 98765 43210" />
-                <Select label="Country" value={coachReg.country} onChange={(e) => setCoachReg((p) => ({ ...p, country: e.target.value, city: "" }))} options={COUNTRIES} required />
-                {coachReg.country && <Select label="City" value={coachReg.city} onChange={(e) => setCoachReg((p) => ({ ...p, city: e.target.value }))} options={CITIES_BY_COUNTRY[coachReg.country] || []} required />}
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: "block", fontSize: 11, color: DIM, marginBottom: 5, fontWeight: 600 }}>Languages</label>
-                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                    {LANGUAGES.slice(0, 8).map((l) => <Chip key={l} label={l} selected={coachReg.languages.includes(l)} onClick={() => setCoachReg((p) => ({ ...p, languages: p.languages.includes(l) ? p.languages.filter((x) => x !== l) : [...p.languages, l] }))} />)}
-                  </div>
-                </div>
-              </div>)}
+      <Card style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 8 }}>Quick Stats</div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: colors.textMuted, padding: "8px 0", borderBottom: `1px solid ${colors.border}` }}>
+          <span>Total Clients</span><span style={{ color: colors.text, fontWeight: 600 }}>{stats?.totalClients ?? 0}</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: colors.textMuted, padding: "8px 0", borderBottom: `1px solid ${colors.border}` }}>
+          <span>All-time Revenue</span><span style={{ color: colors.text, fontWeight: 600 }}>₹{(stats?.totalRevenue ?? 0).toLocaleString()}</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: colors.textMuted, padding: "8px 0" }}>
+          <span>Conversion Rate</span><span style={{ color: colors.text, fontWeight: 600 }}>{stats?.conversionRate ?? 0}%</span>
+        </div>
+      </Card>
+    </div>
+  );
+}
 
-              {regStep === 1 && (<div>
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: "block", fontSize: 11, color: DIM, marginBottom: 5, fontWeight: 600 }}>Specializations <span style={{ color: ERR }}>*</span></label>
-                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                    {SPECIALIZATIONS.map((s) => <Chip key={s} label={s} selected={coachReg.specializations.includes(s)} onClick={() => setCoachReg((p) => ({ ...p, specializations: p.specializations.includes(s) ? p.specializations.filter((x) => x !== s) : [...p.specializations, s] }))} />)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: "block", fontSize: 11, color: DIM, marginBottom: 5, fontWeight: 600 }}>Certifications</label>
-                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                    {CERTIFICATIONS.map((c) => <Chip key={c} label={c} selected={coachReg.certifications.includes(c)} onClick={() => setCoachReg((p) => ({ ...p, certifications: p.certifications.includes(c) ? p.certifications.filter((x) => x !== c) : [...p.certifications, c] }))} />)}
-                  </div>
-                </div>
-              </div>)}
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PAGE: CLIENTS (/api/clients)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function ClientsPage({ onOpenChat }) {
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
 
-              {regStep === 2 && (<div>
-                <Input label="Years of Experience" value={coachReg.experience} onChange={(e) => setCoachReg((p) => ({ ...p, experience: parseInt(e.target.value) || 0 }))} type="number" required />
-                <Input label="Price per Session ($)" value={coachReg.pricePerSession} onChange={(e) => setCoachReg((p) => ({ ...p, pricePerSession: parseInt(e.target.value) || 0 }))} type="number" />
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: "block", fontSize: 11, color: DIM, marginBottom: 5, fontWeight: 600 }}>Session Types</label>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <Chip label="🌐 Online" selected={coachReg.online} onClick={() => setCoachReg((p) => ({ ...p, online: !p.online }))} />
-                    <Chip label="📍 In-Person" selected={coachReg.inPerson} onClick={() => setCoachReg((p) => ({ ...p, inPerson: !p.inPerson }))} />
-                  </div>
-                </div>
-                <Input label="Instagram" value={coachReg.instagram} onChange={(e) => setCoachReg((p) => ({ ...p, instagram: e.target.value }))} placeholder="@handle" autoComplete="off" />
-                <Input label="Gym / Studio" value={coachReg.gym} onChange={(e) => setCoachReg((p) => ({ ...p, gym: e.target.value }))} placeholder="e.g., Gold's Gym Hyderabad" autoComplete="organization" />
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: "block", fontSize: 11, color: DIM, marginBottom: 5, fontWeight: 600 }}>Bio</label>
-                  <textarea value={coachReg.bio} onChange={(e) => setCoachReg((p) => ({ ...p, bio: e.target.value }))} placeholder="Tell clients about your coaching style, approach, and what makes you unique..."
-                    style={{ width: "100%", padding: "10px 14px", borderRadius: 12, border: "1px solid " + BRD, background: "rgba(255,255,255,0.03)", color: "#fff", fontSize: 12, fontFamily: "inherit", outline: "none", minHeight: 80, resize: "vertical" }} />
-                </div>
-              </div>)}
+  useEffect(() => {
+    api.get("/clients").then((d) => setClients(d.clients || d || [])).catch(() => {}).finally(() => setLoading(false));
+  }, []);
 
-              {regStep === 3 && (<div>
-                <div style={{ textAlign: "center", marginBottom: 16 }}>
-                  <div style={{ width: 60, height: 60, borderRadius: "50%", background: "linear-gradient(135deg," + AC + "," + AC2 + ")", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, margin: "0 auto 10px" }}>💪</div>
-                  <div style={{ fontSize: 16, fontWeight: 800 }}>{coachReg.name || "Coach"}</div>
-                  <div style={{ fontSize: 11, color: DIM }}>{coachReg.city}, {coachReg.country}</div>
-                </div>
-                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "center", marginBottom: 12 }}>
-                  {coachReg.specializations.map((s) => <Badge key={s} color={AC}>{s}</Badge>)}
-                </div>
-                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "center", marginBottom: 12 }}>
-                  {coachReg.certifications.map((c) => <Badge key={c} color={OK}>{c}</Badge>)}
-                </div>
-                <div style={{ textAlign: "center", fontSize: 12, color: DIM, marginBottom: 16 }}>
-                  {coachReg.experience} yrs experience · ${coachReg.pricePerSession}/session · {coachReg.online ? "Online" : ""}{coachReg.online && coachReg.inPerson ? " + " : ""}{coachReg.inPerson ? "In-Person" : ""}
-                </div>
-                <div style={{ padding: 12, background: AC + "08", borderRadius: 12, fontSize: 11, color: "rgba(255,255,255,0.5)", textAlign: "center" }}>
-                  🌱 Starting on <strong style={{ color: AC }}>Free Starter Plan</strong> — upgrade anytime to unlock AI coaching, lead scoring, and more.
-                </div>
-              </div>)}
+  const filtered = clients.filter((c) =>
+    (c.name || c.user?.name || "").toLowerCase().includes(search.toLowerCase())
+  );
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h2 style={{ color: colors.text, fontSize: 20, margin: 0, fontWeight: 700 }}>Clients</h2>
+        <Badge>{clients.length}</Badge>
+      </div>
+      <Input placeholder="Search clients…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 14 }} />
+      {filtered.length === 0 ? (
+        <Empty icon="👥" text="No clients found" />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {filtered.map((c) => (
+            <Card key={c.id} style={{ padding: 14, display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{
+                width: 42, height: 42, borderRadius: 12, background: colors.gradient,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 16, fontWeight: 700, color: "#fff", flexShrink: 0,
+              }}>
+                {(c.name || c.user?.name || "?")[0].toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: colors.text, fontSize: 14, fontWeight: 600 }}>{c.name || c.user?.name}</div>
+                <div style={{ color: colors.textMuted, fontSize: 12 }}>{c.email || c.user?.email}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => onOpenChat?.(c)}
+                  style={{
+                    width: 34, height: 34, borderRadius: 8, border: "none", cursor: "pointer",
+                    background: colors.accentAlt + "20", display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >
+                  <Icon name="chat" size={16} color={colors.accentAlt} />
+                </button>
+              </div>
             </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <Btn v="ghost" onClick={() => regStep > 0 ? setRegStep((s) => s - 1) : setAuthMode("role-select")}>← Back</Btn>
-              {regStep < 3 ? (
-                <Btn onClick={() => setRegStep((s) => s + 1)} disabled={!canNextReg}>Next →</Btn>
-              ) : (
-                <Btn onClick={() => completeRegistration(ROLES.COACH, coachReg)} s="lg">Launch My Profile 🚀</Btn>
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PAGE: LEADS (/api/leads)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function LeadsPage() {
+  const [leads, setLeads] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ name: "", email: "", phone: "", source: "website", notes: "" });
+
+  const load = () => api.get("/leads").then((d) => setLeads(d.leads || d || [])).catch(() => {}).finally(() => setLoading(false));
+  useEffect(() => { load(); }, []);
+
+  const addLead = async () => {
+    await api.post("/leads", form);
+    setForm({ name: "", email: "", phone: "", source: "website", notes: "" });
+    setShowAdd(false);
+    load();
+  };
+
+  const statusColors = { new: colors.accentAlt, contacted: colors.warning, converted: colors.success, lost: colors.danger };
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h2 style={{ color: colors.text, fontSize: 20, margin: 0, fontWeight: 700 }}>Leads</h2>
+        <Btn onClick={() => setShowAdd(true)} style={{ padding: "8px 16px", fontSize: 13 }}><Icon name="plus" size={16} /> Add</Btn>
+      </div>
+
+      {leads.length === 0 ? (
+        <Empty icon="🎯" text="No leads yet — add your first one!" />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {leads.map((l) => (
+            <Card key={l.id} style={{ padding: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+                <div>
+                  <div style={{ color: colors.text, fontSize: 14, fontWeight: 600 }}>{l.name}</div>
+                  <div style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>{l.email} · {l.phone}</div>
+                </div>
+                <Badge color={statusColors[l.status] || colors.accent}>{l.status || "new"}</Badge>
+              </div>
+              {l.notes && <div style={{ color: colors.textMuted, fontSize: 12, marginTop: 8 }}>{l.notes}</div>}
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add Lead">
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <Input label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <Input label="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          <Select label="Source" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}
+            options={[{ value: "website", label: "Website" }, { value: "referral", label: "Referral" }, { value: "social", label: "Social Media" }, { value: "other", label: "Other" }]} />
+          <Input label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <Btn onClick={addLead} style={{ width: "100%", marginTop: 8 }}>Save Lead</Btn>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PAGE: WORKOUTS (/api/workouts)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function WorkoutsPage() {
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showBuilder, setShowBuilder] = useState(false);
+  const [clients, setClients] = useState([]);
+  const [form, setForm] = useState({
+    title: "", description: "", clientId: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60, notes: "" }],
+  });
+
+  const load = () => {
+    Promise.all([
+      api.get("/workouts").catch(() => []),
+      api.get("/clients").catch(() => []),
+    ]).then(([w, c]) => {
+      setPlans(w.workouts || w || []);
+      setClients(c.clients || c || []);
+    }).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const addExercise = () => setForm({ ...form, exercises: [...form.exercises, { name: "", sets: 3, reps: 12, rest: 60, notes: "" }] });
+  const removeExercise = (i) => setForm({ ...form, exercises: form.exercises.filter((_, j) => j !== i) });
+  const updateExercise = (i, field, value) => {
+    const ex = [...form.exercises];
+    ex[i] = { ...ex[i], [field]: value };
+    setForm({ ...form, exercises: ex });
+  };
+
+  const save = async () => {
+    await api.post("/workouts", form);
+    setForm({ title: "", description: "", clientId: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60, notes: "" }] });
+    setShowBuilder(false);
+    load();
+  };
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h2 style={{ color: colors.text, fontSize: 20, margin: 0, fontWeight: 700 }}>Workout Plans</h2>
+        <Btn onClick={() => setShowBuilder(true)} style={{ padding: "8px 16px", fontSize: 13 }}><Icon name="plus" size={16} /> Create</Btn>
+      </div>
+
+      {plans.length === 0 ? (
+        <Empty icon="💪" text="No workout plans yet" />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {plans.map((p) => (
+            <Card key={p.id} style={{ padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+                <div>
+                  <div style={{ color: colors.text, fontWeight: 600, fontSize: 15 }}>{p.title}</div>
+                  {p.description && <div style={{ color: colors.textMuted, fontSize: 12, marginTop: 4 }}>{p.description}</div>}
+                </div>
+                <Badge color={p.status === "active" ? colors.success : colors.textMuted}>{p.status || "draft"}</Badge>
+              </div>
+              {p.exercises && (
+                <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {(Array.isArray(p.exercises) ? p.exercises : []).slice(0, 4).map((ex, i) => (
+                    <span key={i} style={{
+                      padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 500,
+                      background: colors.accent + "15", color: colors.accent,
+                    }}>
+                      {ex.name || ex} · {ex.sets}×{ex.reps}
+                    </span>
+                  ))}
+                  {(p.exercises?.length || 0) > 4 && (
+                    <span style={{ fontSize: 11, color: colors.textMuted, padding: "4px 0" }}>+{p.exercises.length - 4} more</span>
+                  )}
+                </div>
               )}
-            </div>
-          </div>
-          <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}} *{box-sizing:border-box;margin:0;padding:0} ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.06);border-radius:2px} button:hover{filter:brightness(1.1)} input::placeholder,textarea::placeholder{color:rgba(255,255,255,0.2)}`}</style>
+              {p.client && (
+                <div style={{ marginTop: 10, fontSize: 12, color: colors.textMuted }}>
+                  Assigned to: <span style={{ color: colors.accentAlt, fontWeight: 500 }}>{p.client.name || p.client.user?.name}</span>
+                </div>
+              )}
+            </Card>
+          ))}
         </div>
-      );
-    }
+      )}
 
-    // Client registration flow
-    if (authMode === "client-register") {
-      const GOALS = ["Weight Loss", "Muscle Gain", "Flexibility", "Endurance", "Rehab", "Stress Relief", "General Fitness", "Sports Performance"];
-      const CONDITIONS = ["None", "Hypertension", "Diabetes", "Asthma", "Back Pain", "Knee Issues", "Heart Condition", "Anxiety"];
-      return (
-        <div style={{ minHeight: "100vh", background: "#050509", color: "#fff", fontFamily: "'Manrope',sans-serif" }}>
-          <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-          <div style={{ maxWidth: 480, margin: "0 auto", padding: "30px 18px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 24 }}>
-              <span onClick={() => setAuthMode("role-select")} style={{ cursor: "pointer", color: DIM, fontSize: 18 }}>←</span>
-              <span style={{ fontFamily: "'Orbitron'", fontWeight: 900, fontSize: 14, color: AC }}>CLIENT PROFILE</span>
-            </div>
-            <Card style={{ marginBottom: 16 }}>
-              <Input label="Full Name" value={clientReg.name} onChange={(e) => setClientReg((p) => ({ ...p, name: e.target.value }))} required autoComplete="name" />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                <Input label="Age" value={clientReg.age} onChange={(e) => setClientReg((p) => ({ ...p, age: parseInt(e.target.value) || 0 }))} type="number" autoComplete="off" />
-                <Input label="Height (cm)" value={clientReg.height} onChange={(e) => setClientReg((p) => ({ ...p, height: parseInt(e.target.value) || 0 }))} type="number" autoComplete="off" />
-                <Input label="Weight (kg)" value={clientReg.weight} onChange={(e) => setClientReg((p) => ({ ...p, weight: parseInt(e.target.value) || 0 }))} type="number" autoComplete="off" />
+      <Modal open={showBuilder} onClose={() => setShowBuilder(false)} title="Create Workout Plan">
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Input label="Plan Title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. PPL Week 1" />
+          <Input label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          {clients.length > 0 && (
+            <Select label="Assign to Client"
+              value={form.clientId}
+              onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+              options={[{ value: "", label: "— Select —" }, ...clients.map((c) => ({ value: c.id, label: c.name || c.user?.name }))]}
+            />
+          )}
+
+          <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginTop: 8 }}>Exercises</div>
+          {form.exercises.map((ex, i) => (
+            <Card key={i} style={{ padding: 12, background: colors.surfaceHover }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontSize: 12, color: colors.textMuted, fontWeight: 600 }}>Exercise {i + 1}</span>
+                {form.exercises.length > 1 && (
+                  <button onClick={() => removeExercise(i)} style={{ background: "none", border: "none", cursor: "pointer", color: colors.danger, fontSize: 18 }}>✕</button>
+                )}
               </div>
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: "block", fontSize: 11, color: DIM, marginBottom: 5, fontWeight: 600 }}>Gender</label>
-                <div style={{ display: "flex", gap: 6 }}>{["Male", "Female", "Other"].map((g) => <Chip key={g} label={g} selected={clientReg.gender === g.toLowerCase()} onClick={() => setClientReg((p) => ({ ...p, gender: g.toLowerCase() }))} />)}</div>
-              </div>
-              <Select label="Country" value={clientReg.country} onChange={(e) => setClientReg((p) => ({ ...p, country: e.target.value, city: "" }))} options={COUNTRIES} />
-              {clientReg.country && <Select label="City" value={clientReg.city} onChange={(e) => setClientReg((p) => ({ ...p, city: e.target.value }))} options={CITIES_BY_COUNTRY[clientReg.country] || []} />}
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: "block", fontSize: 11, color: DIM, marginBottom: 5, fontWeight: 600 }}>Fitness Goals</label>
-                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{GOALS.map((g) => <Chip key={g} label={g} selected={clientReg.goals.includes(g)} onClick={() => setClientReg((p) => ({ ...p, goals: p.goals.includes(g) ? p.goals.filter((x) => x !== g) : [...p.goals, g] }))} />)}</div>
-              </div>
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: "block", fontSize: 11, color: DIM, marginBottom: 5, fontWeight: 600 }}>Medical Conditions</label>
-                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{CONDITIONS.map((c) => <Chip key={c} label={c} selected={clientReg.conditions.includes(c)} onClick={() => setClientReg((p) => ({ ...p, conditions: p.conditions.includes(c) ? p.conditions.filter((x) => x !== c) : [...p.conditions, c] }))} />)}</div>
+              <Input placeholder="Exercise name" value={ex.name} onChange={(e) => updateExercise(i, "name", e.target.value)} style={{ marginBottom: 8 }} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                <Input label="Sets" type="number" value={ex.sets} onChange={(e) => updateExercise(i, "sets", +e.target.value)} />
+                <Input label="Reps" type="number" value={ex.reps} onChange={(e) => updateExercise(i, "reps", +e.target.value)} />
+                <Input label="Rest(s)" type="number" value={ex.rest} onChange={(e) => updateExercise(i, "rest", +e.target.value)} />
               </div>
             </Card>
-            <Btn full s="lg" onClick={() => completeRegistration(ROLES.CLIENT, clientReg)} disabled={!clientReg.name}>Find My Coach →</Btn>
-          </div>
-          <style>{`@keyframes spin{to{transform:rotate(360deg)}} *{box-sizing:border-box;margin:0;padding:0} ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.06);border-radius:2px} button:hover{filter:brightness(1.1)} input::placeholder{color:rgba(255,255,255,0.2)}`}</style>
+          ))}
+          <Btn variant="secondary" onClick={addExercise} style={{ width: "100%" }}><Icon name="plus" size={16} /> Add Exercise</Btn>
+          <Btn onClick={save} style={{ width: "100%", marginTop: 4 }}>Save Workout Plan</Btn>
         </div>
-      );
-    }
+      </Modal>
+    </div>
+  );
+}
 
-    // Role selection
-    if (authMode === "role-select") {
-      return (
-        <div style={{ minHeight: "100vh", background: "#050509", color: "#fff", fontFamily: "'Manrope',sans-serif", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-          <div style={{ maxWidth: 520, padding: 20, textAlign: "center" }}>
-            <div style={{ fontFamily: "'Orbitron'", fontSize: 20, fontWeight: 900, background: "linear-gradient(135deg," + AC + "," + AC2 + ")", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", marginBottom: 6 }}>FIT:OS NEXUS</div>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>I am a...</div>
-            <div style={{ fontSize: 11, color: DIM, marginBottom: 24 }}>Choose your role to customize your experience</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
-              <Card hv onClick={() => setAuthMode("coach-register")} glow={AC2} style={{ padding: 28, textAlign: "center" }}>
-                <div style={{ fontSize: 44, marginBottom: 10 }}>🏋️</div>
-                <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>Fitness Coach</div>
-                <div style={{ fontSize: 11, color: DIM, lineHeight: 1.6 }}>Manage clients, AI lead scoring, branded app, workout plans, analytics</div>
-                <div style={{ marginTop: 12 }}><Badge color={AC}>Start Free</Badge></div>
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PAGE: BOOKINGS / SCHEDULER (/api/bookings)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function BookingsPage() {
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [clients, setClients] = useState([]);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [form, setForm] = useState({ clientId: "", date: selectedDate, time: "09:00", duration: 60, type: "training", notes: "" });
+
+  const load = () => {
+    Promise.all([
+      api.get("/bookings").catch(() => []),
+      api.get("/clients").catch(() => []),
+    ]).then(([b, c]) => {
+      setBookings(b.bookings || b || []);
+      setClients(c.clients || c || []);
+    }).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    await api.post("/bookings", { ...form, date: form.date + "T" + form.time + ":00" });
+    setShowAdd(false);
+    load();
+  };
+
+  // Build simple week calendar
+  const getWeekDays = () => {
+    const base = new Date(selectedDate);
+    const day = base.getDay();
+    const start = new Date(base);
+    start.setDate(base.getDate() - day);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      return d;
+    });
+  };
+  const weekDays = getWeekDays();
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  const dayBookings = bookings.filter((b) => {
+    const bDate = new Date(b.date || b.startTime || b.scheduledAt).toISOString().slice(0, 10);
+    return bDate === selectedDate;
+  }).sort((a, b) => new Date(a.date || a.startTime || a.scheduledAt) - new Date(b.date || b.startTime || b.scheduledAt));
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h2 style={{ color: colors.text, fontSize: 20, margin: 0, fontWeight: 700 }}>Schedule</h2>
+        <Btn onClick={() => setShowAdd(true)} style={{ padding: "8px 16px", fontSize: 13 }}><Icon name="plus" size={16} /> Book</Btn>
+      </div>
+
+      {/* Week strip */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 16, overflowX: "auto" }}>
+        {weekDays.map((d, i) => {
+          const iso = d.toISOString().slice(0, 10);
+          const isSelected = iso === selectedDate;
+          const isToday = iso === new Date().toISOString().slice(0, 10);
+          const hasBooking = bookings.some((b) => (new Date(b.date || b.startTime || b.scheduledAt).toISOString().slice(0, 10)) === iso);
+          return (
+            <button
+              key={i}
+              onClick={() => setSelectedDate(iso)}
+              style={{
+                flex: 1, minWidth: 44, padding: "10px 4px", borderRadius: 12, border: "none", cursor: "pointer",
+                background: isSelected ? colors.gradient : colors.surfaceHover,
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+                transition: "all 0.2s",
+              }}
+            >
+              <span style={{ fontSize: 10, fontWeight: 600, color: isSelected ? "#fff" : colors.textMuted, textTransform: "uppercase" }}>
+                {dayNames[d.getDay()]}
+              </span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: isSelected ? "#fff" : colors.text }}>{d.getDate()}</span>
+              {hasBooking && <div style={{ width: 5, height: 5, borderRadius: "50%", background: isSelected ? "#fff" : colors.accent }} />}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Day's bookings */}
+      {dayBookings.length === 0 ? (
+        <Empty icon="📅" text="No sessions on this day" />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {dayBookings.map((b) => {
+            const t = new Date(b.date || b.startTime || b.scheduledAt);
+            const time = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            return (
+              <Card key={b.id} style={{ padding: 14, display: "flex", gap: 12, alignItems: "center" }}>
+                <div style={{
+                  width: 48, display: "flex", flexDirection: "column", alignItems: "center",
+                  padding: "6px 0", borderRadius: 8, background: colors.accent + "15",
+                }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: colors.accent }}>{time}</span>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>
+                    {b.client?.name || b.client?.user?.name || b.type || "Session"}
+                  </div>
+                  <div style={{ fontSize: 12, color: colors.textMuted }}>{b.duration || 60} min · {b.type || "training"}</div>
+                </div>
+                <Badge color={b.status === "confirmed" ? colors.success : b.status === "cancelled" ? colors.danger : colors.warning}>
+                  {b.status || "pending"}
+                </Badge>
               </Card>
-              <Card hv onClick={() => setAuthMode("client-register")} glow={OK} style={{ padding: 28, textAlign: "center" }}>
-                <div style={{ fontSize: 44, marginBottom: 10 }}>💪</div>
-                <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>Client</div>
-                <div style={{ fontSize: 11, color: DIM, lineHeight: 1.6 }}>Find coaches, AI workouts, camera tracking, progress analytics</div>
-                <div style={{ marginTop: 12 }}><Badge color={OK}>Start Free</Badge></div>
-              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Book Session">
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {clients.length > 0 && (
+            <Select label="Client" value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+              options={[{ value: "", label: "— Select —" }, ...clients.map((c) => ({ value: c.id, label: c.name || c.user?.name }))]} />
+          )}
+          <Input label="Date" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+          <Input label="Time" type="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <Input label="Duration (min)" type="number" value={form.duration} onChange={(e) => setForm({ ...form, duration: +e.target.value })} />
+            <Select label="Type" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}
+              options={[{ value: "training", label: "Training" }, { value: "assessment", label: "Assessment" }, { value: "consultation", label: "Consultation" }]} />
+          </div>
+          <Input label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <Btn onClick={save} style={{ width: "100%", marginTop: 4 }}>Confirm Booking</Btn>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PAGE: REPORTS & ANALYTICS (/api/reports)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function ReportsPage() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [period, setPeriod] = useState("month");
+
+  useEffect(() => {
+    api.get(`/reports?period=${period}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+  }, [period]);
+
+  if (loading) return <Spinner />;
+
+  const revenue = data?.revenue || data?.monthlyRevenue || [];
+  const clients = data?.clientGrowth || [];
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h2 style={{ color: colors.text, fontSize: 20, margin: 0, fontWeight: 700 }}>Analytics</h2>
+        <div style={{ display: "flex", gap: 6 }}>
+          {["week", "month", "year"].map((p) => (
+            <button
+              key={p}
+              onClick={() => { setLoading(true); setPeriod(p); }}
+              style={{
+                padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                background: period === p ? colors.accent : colors.surfaceHover,
+                color: period === p ? "#fff" : colors.textMuted,
+              }}
+            >{p}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Revenue chart (simple bar viz) */}
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: colors.text, marginBottom: 4 }}>Revenue</div>
+        <div style={{ fontSize: 26, fontWeight: 700, color: colors.success, marginBottom: 16 }}>
+          ₹{((data?.totalRevenue || data?.revenue?.total) ?? 0).toLocaleString()}
+        </div>
+        {Array.isArray(revenue) && revenue.length > 0 && (
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 100 }}>
+            {revenue.map((r, i) => {
+              const val = typeof r === "number" ? r : r.amount || r.value || 0;
+              const max = Math.max(...revenue.map((x) => (typeof x === "number" ? x : x.amount || x.value || 0)), 1);
+              const h = (val / max) * 100;
+              return (
+                <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                  <div style={{
+                    width: "100%", height: h, borderRadius: 4, minHeight: 2,
+                    background: colors.gradient, opacity: 0.6 + (i / revenue.length) * 0.4,
+                  }} />
+                  <span style={{ fontSize: 9, color: colors.textMuted }}>{r.label || r.month || i + 1}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {/* Summary stats */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <Card style={{ padding: 14 }}>
+          <div style={{ fontSize: 12, color: colors.textMuted }}>Sessions Completed</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: colors.accent, marginTop: 4 }}>{data?.sessionsCompleted ?? data?.totalBookings ?? 0}</div>
+        </Card>
+        <Card style={{ padding: 14 }}>
+          <div style={{ fontSize: 12, color: colors.textMuted }}>Client Retention</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: colors.accentAlt, marginTop: 4 }}>{data?.retentionRate ?? 0}%</div>
+        </Card>
+        <Card style={{ padding: 14 }}>
+          <div style={{ fontSize: 12, color: colors.textMuted }}>Avg Session/Client</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: colors.warning, marginTop: 4 }}>{data?.avgSessionsPerClient ?? 0}</div>
+        </Card>
+        <Card style={{ padding: 14 }}>
+          <div style={{ fontSize: 12, color: colors.textMuted }}>Conversion Rate</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: colors.success, marginTop: 4 }}>{data?.conversionRate ?? 0}%</div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PAGE: AI COACH CHAT (/api/ai/chat)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function AIChatPage() {
+  const [messages, setMessages] = useState([
+    { role: "assistant", content: "Hey! I'm your AI coaching assistant. Ask me about workout plans, nutrition, client management, or anything fitness-related." },
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef(null);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  const send = async () => {
+    if (!input.trim() || loading) return;
+    const msg = input.trim();
+    setInput("");
+    setMessages((m) => [...m, { role: "user", content: msg }]);
+    setLoading(true);
+    try {
+      const res = await api.post("/ai/chat", { message: msg, history: messages.slice(-10) });
+      setMessages((m) => [...m, { role: "assistant", content: res.reply || res.message || res.response || "I'll look into that." }]);
+    } catch (e) {
+      setMessages((m) => [...m, { role: "assistant", content: "Sorry, I couldn't process that. Please try again." }]);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100dvh - 160px)" }}>
+      <h2 style={{ color: colors.text, fontSize: 20, margin: "0 0 12px", fontWeight: 700, flexShrink: 0 }}>AI Coach</h2>
+
+      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, paddingBottom: 12 }}>
+        {messages.map((m, i) => (
+          <div key={i} style={{
+            maxWidth: "82%",
+            alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+            padding: "12px 16px",
+            borderRadius: 16,
+            borderBottomRightRadius: m.role === "user" ? 4 : 16,
+            borderBottomLeftRadius: m.role === "user" ? 16 : 4,
+            background: m.role === "user" ? colors.accent : colors.surfaceHover,
+            color: m.role === "user" ? "#fff" : colors.text,
+            fontSize: 14,
+            lineHeight: 1.5,
+            whiteSpace: "pre-wrap",
+          }}>
+            {m.content}
+          </div>
+        ))}
+        {loading && (
+          <div style={{ alignSelf: "flex-start", padding: "12px 20px", borderRadius: 16, background: colors.surfaceHover }}>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[0, 1, 2].map((i) => (
+                <div key={i} style={{
+                  width: 8, height: 8, borderRadius: "50%", background: colors.textMuted,
+                  animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+                }} />
+              ))}
             </div>
-            <Btn v="ghost" onClick={() => setAuthMode("login")}>← Back to Login</Btn>
           </div>
-          <style>{`*{box-sizing:border-box;margin:0;padding:0} button:hover{filter:brightness(1.1)}`}</style>
-        </div>
-      );
-    }
+        )}
+        <div ref={bottomRef} />
+      </div>
 
-    // Login / Register form
+      <div style={{ display: "flex", gap: 8, flexShrink: 0, paddingTop: 8 }}>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+          placeholder="Ask your AI coach…"
+          style={{
+            flex: 1, background: colors.surfaceHover, border: `1px solid ${colors.border}`,
+            borderRadius: 14, padding: "12px 16px", color: colors.text, fontSize: 14,
+            outline: "none", fontFamily: "inherit",
+          }}
+        />
+        <button
+          onClick={send}
+          disabled={loading}
+          style={{
+            width: 48, height: 48, borderRadius: 14, border: "none", cursor: "pointer",
+            background: colors.gradient, display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <Icon name="send" size={18} color="#fff" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PAGE: MESSAGING (WhatsApp-style) — coach ↔ client
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function MessagingPage({ initialClient, onBack }) {
+  const { user } = useAuth();
+  const [conversations, setConversations] = useState([]);
+  const [activeChat, setActiveChat] = useState(initialClient || null);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const bottomRef = useRef(null);
+  const pollRef = useRef(null);
+
+  // Load conversations list
+  useEffect(() => {
+    api.get("/clients").then((d) => setConversations(d.clients || d || [])).catch(() => {});
+  }, []);
+
+  // Load messages for active chat
+  useEffect(() => {
+    if (!activeChat) return;
+    const loadMessages = () => {
+      api.get(`/messages/${activeChat.id || activeChat.userId}`).then((d) => setMessages(d.messages || d || [])).catch(() => {});
+    };
+    setLoadingMsgs(true);
+    loadMessages();
+    setLoadingMsgs(false);
+    // Poll every 5s
+    pollRef.current = setInterval(loadMessages, 5000);
+    return () => clearInterval(pollRef.current);
+  }, [activeChat]);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  const sendMsg = async () => {
+    if (!input.trim()) return;
+    const text = input.trim();
+    setInput("");
+    // Optimistic
+    setMessages((m) => [...m, { id: Date.now(), senderId: user?.id, content: text, createdAt: new Date().toISOString() }]);
+    try {
+      await api.post("/messages", { recipientId: activeChat.id || activeChat.userId, content: text });
+    } catch {}
+  };
+
+  // Conversation list view
+  if (!activeChat) {
     return (
-      <div style={{ minHeight: "100vh", background: "#050509", color: "#fff", fontFamily: "'Manrope',sans-serif", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-        <div style={{ position: "fixed", inset: 0, pointerEvents: "none", background: "radial-gradient(ellipse at 30% 20%,rgba(0,100,255,0.06),transparent 60%)" }} />
-        <div style={{ maxWidth: 400, width: "100%", padding: 20 }}>
-          <div style={{ textAlign: "center", marginBottom: 28 }}>
-            <div style={{ fontFamily: "'Orbitron'", fontSize: 28, fontWeight: 900, background: "linear-gradient(135deg," + AC + "," + AC2 + ")", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", marginBottom: 6 }}>FIT:OS NEXUS</div>
-            <div style={{ fontSize: 12, color: DIM }}>AI-Powered Fitness Platform</div>
+      <div>
+        <h2 style={{ color: colors.text, fontSize: 20, margin: "0 0 16px", fontWeight: 700 }}>Messages</h2>
+        {conversations.length === 0 ? (
+          <Empty icon="💬" text="No conversations yet" />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {conversations.map((c) => (
+              <Card
+                key={c.id}
+                onClick={() => setActiveChat(c)}
+                style={{ padding: 14, display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
+              >
+                <div style={{
+                  width: 44, height: 44, borderRadius: 22, background: colors.gradient,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 17, fontWeight: 700, color: "#fff", flexShrink: 0,
+                }}>
+                  {(c.name || c.user?.name || "?")[0].toUpperCase()}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ color: colors.text, fontSize: 14, fontWeight: 600 }}>{c.name || c.user?.name}</div>
+                  <div style={{ color: colors.textMuted, fontSize: 12 }}>Tap to chat</div>
+                </div>
+                <Icon name="chat" size={18} color={colors.textMuted} />
+              </Card>
+            ))}
           </div>
-          <Card style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
-              <Btn v={authMode === "login" ? "primary" : "secondary"} full onClick={() => { setAuthMode("login"); setAuthError(""); }}>Sign In</Btn>
-              <Btn v={authMode === "register" ? "primary" : "secondary"} full onClick={() => { setAuthMode("register"); setAuthError(""); }}>Create Account</Btn>
-            </div>
-            <Input label="Email" value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="you@email.com" required autoComplete="email" />
-            <Input label="Password" value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" required autoComplete={authMode === "login" ? "current-password" : "new-password"} />
-            {authMode === "register" && <Input label="Confirm Password" value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} type="password" placeholder="••••••••" required autoComplete="new-password" />}
-            {authError && <div style={{ padding: "8px 12px", background: "rgba(239,68,68,0.08)", borderRadius: 10, borderLeft: "3px solid " + ERR, fontSize: 11, color: ERR, marginBottom: 12 }}>{authError}</div>}
-            <Btn full s="lg" onClick={authMode === "login" ? handleLogin : handleRegister} disabled={authLoading}>
-              {authLoading ? "⟳ " : ""}{authMode === "login" ? "Sign In" : "Continue →"}
-            </Btn>
-            {authMode === "register" && <div style={{ fontSize: 10, color: DIM, marginTop: 8, textAlign: "center" }}>Password: 8+ chars, uppercase, lowercase, number</div>}
-          </Card>
-          <Card style={{ padding: 12, textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: DIM }}>🔒 End-to-end encrypted · RBAC secured · GDPR compliant</div>
-          </Card>
-        </div>
-        <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}} *{box-sizing:border-box;margin:0;padding:0} button:hover{filter:brightness(1.1)} input::placeholder{color:rgba(255,255,255,0.2)}`}</style>
+        )}
       </div>
     );
   }
 
-  // ═══ MAIN APP ══════════════════════════════════════════════════
-  const pkg = user?.package || "starter";
-  const pkgData = COACH_PACKAGES.find((p) => p.id === pkg) || COACH_PACKAGES[0];
-
+  // Chat view
   return (
-    <div style={{ minHeight: "100vh", background: "#050509", color: "#fff", fontFamily: "'Manrope',sans-serif" }}>
-      <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-      <div style={{ position: "fixed", inset: 0, pointerEvents: "none", background: "radial-gradient(ellipse at 15% 0%,rgba(0,100,255,0.05),transparent 55%)" }} />
-
-      {/* Header */}
-      <header style={{ position: "sticky", top: 0, zIndex: 100, backdropFilter: "blur(24px)", background: "rgba(5,5,9,0.92)", borderBottom: "1px solid " + BRD, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontFamily: "'Orbitron'", fontWeight: 900, fontSize: 14, background: "linear-gradient(135deg," + AC + "," + AC2 + ")", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>NEXUS</span>
-          <Badge color={user?.role === ROLES.COACH ? AC : user?.role === ROLES.CLIENT ? OK : WARN}>
-            {user?.role === ROLES.COACH ? "🏋️ Coach" : user?.role === ROLES.CLIENT ? "💪 Client" : "⚙ Admin"}
-          </Badge>
-          {user?.role === ROLES.COACH && <Badge color={pkgData.color}>{pkgData.icon + " " + pkgData.name}</Badge>}
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100dvh - 160px)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexShrink: 0 }}>
+        <button
+          onClick={() => { setActiveChat(null); onBack?.(); }}
+          style={{ background: "none", border: "none", cursor: "pointer", color: colors.text, fontSize: 20, padding: 0 }}
+        >←</button>
+        <div style={{
+          width: 36, height: 36, borderRadius: 18, background: colors.gradient,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 14, fontWeight: 700, color: "#fff",
+        }}>
+          {(activeChat.name || activeChat.user?.name || "?")[0].toUpperCase()}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>{user?.name || user?.email}</span>
-          <Btn v="ghost" s="sm" onClick={logout}>Logout</Btn>
+        <div>
+          <div style={{ color: colors.text, fontSize: 15, fontWeight: 600 }}>{activeChat.name || activeChat.user?.name}</div>
+          <div style={{ color: colors.success, fontSize: 11 }}>● online</div>
         </div>
-      </header>
+      </div>
 
-      {/* Nav */}
-      <nav style={{ display: "flex", justifyContent: "center", gap: 1, padding: "5px 8px", background: "rgba(0,0,0,0.3)", overflowX: "auto" }}>
-        {navItems.map((n) => (
-          <div key={n.id} onClick={() => setTab(n.id)} onMouseEnter={() => setNavH(n.id)} onMouseLeave={() => setNavH(null)}
-            style={{ padding: "5px 13px", borderRadius: 10, cursor: "pointer", transition: "all 0.2s", whiteSpace: "nowrap",
-              background: tab === n.id ? AC + "12" : navH === n.id ? "rgba(255,255,255,0.02)" : "transparent",
-              color: tab === n.id ? AC : DIM, fontSize: 11, fontWeight: tab === n.id ? 700 : 400 }}>
-            {n.i + " " + n.l}
-          </div>
-        ))}
-      </nav>
-
-      <main style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 16px 90px" }}>
-
-        {/* ═══ COACH DASHBOARD ═══ */}
-        {user?.role === ROLES.COACH && tab === "dashboard" && (
-          <div style={{ animation: "fadeIn 0.4s ease" }}>
-            <div style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 2 }}>Welcome, {sanitize(user.name || "Coach")} 👋</div>
-              <div style={{ fontSize: 11, color: DIM }}>{pkgData.name} Plan · {clients.length}/{pkgData.maxClients} clients</div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(130px,1fr))", gap: 8, marginBottom: 18 }}>
-              <Stat icon="👥" label="Clients" value={dashboardData?.overview?.activeClients ?? clients.length} color={AC} />
-              <Stat icon="🎯" label="Hot Leads" value={dashboardData?.leads?.hot ?? leads.filter((l) => l.matchScore > 80).length} color={WARN} />
-              <Stat icon="⭐" label="Rating" value={dashboardData?.ratings?.average || user.rating || "--"} color={OK} />
-              <Stat icon="💰" label="Monthly" value={"$" + (dashboardData?.revenue?.thisMonth || 0)} color="#a78bfa" />
-            </div>
-
-            {/* Growth Indicators */}
-            {dashboardData && (
-              <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-                {dashboardData.overview?.clientGrowth !== undefined && <Badge color={dashboardData.overview.clientGrowth >= 0 ? OK : ERR}>{dashboardData.overview.clientGrowth >= 0 ? "↑" : "↓"} {Math.abs(dashboardData.overview.clientGrowth)}% clients</Badge>}
-                {dashboardData.revenue?.growth !== undefined && <Badge color={dashboardData.revenue.growth >= 0 ? OK : ERR}>{dashboardData.revenue.growth >= 0 ? "↑" : "↓"} {Math.abs(dashboardData.revenue.growth)}% revenue</Badge>}
-                {dashboardData.leads?.conversionRate !== undefined && <Badge color={AC}>🎯 {dashboardData.leads.conversionRate}% conversion</Badge>}
-                {dashboardData.overview?.bookingsThisMonth !== undefined && <Badge>📅 {dashboardData.overview.bookingsThisMonth} bookings this month</Badge>}
-              </div>
-            )}
-
-            {/* Quick Actions */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 18 }}>
-              <Card hv onClick={() => { setTab("clients"); setAddClientMode(true); }} style={{ textAlign: "center", padding: 16 }}>
-                <div style={{ fontSize: 24, marginBottom: 4 }}>➕</div>
-                <div style={{ fontSize: 12, fontWeight: 700 }}>Add Client</div>
-              </Card>
-              <Card hv onClick={() => setTab("leads")} style={{ textAlign: "center", padding: 16 }}>
-                <div style={{ fontSize: 24, marginBottom: 4 }}>🎯</div>
-                <div style={{ fontSize: 12, fontWeight: 700 }}>View Leads</div>
-                {leads.filter((l) => l.matchScore > 80).length > 0 && <Badge color={ERR}>{leads.filter((l) => l.matchScore > 80).length} hot</Badge>}
-              </Card>
-              <Card hv onClick={() => setTab("packages")} style={{ textAlign: "center", padding: 16 }}>
-                <div style={{ fontSize: 24, marginBottom: 4 }}>📦</div>
-                <div style={{ fontSize: 12, fontWeight: 700 }}>Upgrade</div>
-              </Card>
-            </div>
-
-            {/* Recent Clients */}
-            <Card style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Recent Clients</div>
-              {clients.length === 0 ? (
-                <div style={{ textAlign: "center", padding: 20, color: DIM, fontSize: 12 }}>No clients yet. Add your first client to get started!</div>
-              ) : clients.slice(-5).reverse().map((c) => (
-                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid " + BRD }}>
-                  <div style={{ width: 32, height: 32, borderRadius: "50%", background: AC + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: AC }}>{(c.name || "?")[0]}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600 }}>{sanitize(c.name)}</div>
-                    <div style={{ fontSize: 10, color: DIM }}>{c.email} · {c.lastActive}</div>
-                  </div>
-                  <Badge color={c.status === "active" ? OK : DIM}>{c.status}</Badge>
-                </div>
-              ))}
-            </Card>
-          </div>
-        )}
-
-        {/* ═══ COACH: CLIENTS TAB ═══ */}
-        {user?.role === ROLES.COACH && tab === "clients" && (
-          <div style={{ animation: "fadeIn 0.4s ease" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-              <div>
-                <div style={{ fontSize: 20, fontWeight: 800 }}>Clients</div>
-                <div style={{ fontSize: 11, color: DIM }}>{clients.length}/{pkgData.maxClients} slots used</div>
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <Btn s="sm" onClick={() => setAddClientMode(true)}>+ Add Client</Btn>
-                {canAccess(pkg, "bulkUpload") && <Btn v="secondary" s="sm" onClick={() => setBulkUploadText(" ")}>📤 Bulk Upload</Btn>}
+      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, paddingBottom: 8 }}>
+        {messages.length === 0 && <Empty icon="💬" text="Start the conversation" />}
+        {messages.map((m) => {
+          const isMe = m.senderId === user?.id;
+          return (
+            <div key={m.id} style={{
+              maxWidth: "78%", alignSelf: isMe ? "flex-end" : "flex-start",
+              padding: "10px 14px", borderRadius: 14,
+              borderBottomRightRadius: isMe ? 4 : 14,
+              borderBottomLeftRadius: isMe ? 14 : 4,
+              background: isMe ? colors.accent : colors.surfaceHover,
+              color: isMe ? "#fff" : colors.text, fontSize: 14, lineHeight: 1.45,
+            }}>
+              {m.content}
+              <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4, textAlign: "right" }}>
+                {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </div>
             </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
 
-            {/* Add Client Form */}
-            {addClientMode && (
-              <Card glow={AC} style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Add New Client</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                  <Input label="Name" value={newClient.name} onChange={(e) => setNewClient((p) => ({ ...p, name: e.target.value }))} required autoComplete="off" />
-                  <Input label="Email" value={newClient.email} onChange={(e) => setNewClient((p) => ({ ...p, email: e.target.value }))} type="email" required autoComplete="off" />
-                  <Input label="Phone" value={newClient.phone} onChange={(e) => setNewClient((p) => ({ ...p, phone: e.target.value }))} type="tel" autoComplete="off" />
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Btn onClick={addClient} disabled={!newClient.name || !newClient.email || clients.length >= pkgData.maxClients}>Add Client</Btn>
-                  <Btn v="ghost" onClick={() => setAddClientMode(false)}>Cancel</Btn>
-                  {clients.length >= pkgData.maxClients && <span style={{ fontSize: 11, color: WARN, alignSelf: "center" }}>Client limit reached — upgrade plan</span>}
-                </div>
-              </Card>
-            )}
-
-            {/* Bulk Upload */}
-            {bulkUploadText !== "" && canAccess(pkg, "bulkUpload") && (
-              <Card glow="#a78bfa" style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>📤 Bulk Upload Clients</div>
-                <div style={{ fontSize: 10, color: DIM, marginBottom: 8 }}>One client per line: Name, Email, Phone, Age</div>
-                <textarea value={bulkUploadText === " " ? "" : bulkUploadText} onChange={(e) => setBulkUploadText(e.target.value)} placeholder={"Rahul Kumar, rahul@email.com, +91 9876543210, 28\nAisha Khan, aisha@email.com, +91 8765432109, 32"}
-                  style={{ width: "100%", padding: "10px 14px", borderRadius: 12, border: "1px solid " + BRD, background: "rgba(255,255,255,0.03)", color: "#fff", fontSize: 12, fontFamily: "monospace", outline: "none", minHeight: 100, resize: "vertical" }} />
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <Btn onClick={bulkUploadClients}>Upload All</Btn>
-                  <Btn v="ghost" onClick={() => setBulkUploadText("")}>Cancel</Btn>
-                </div>
-              </Card>
-            )}
-
-            {/* Client List */}
-            {clients.map((c) => (
-              <Card key={c.id} style={{ marginBottom: 6, padding: 14, display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 36, height: 36, borderRadius: "50%", background: AC + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 700, color: AC }}>{(c.name || "?")[0]}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{sanitize(c.name)}</div>
-                  <div style={{ fontSize: 10, color: DIM }}>{c.email}{c.phone ? " · " + c.phone : ""} · Added {new Date(c.addedAt).toLocaleDateString()}</div>
-                </div>
-                <Badge color={c.status === "active" ? OK : DIM}>{c.status}</Badge>
-                <Btn v="danger" s="sm" onClick={async () => { try { await api.del("/api/clients/" + c.id); setClients((prev) => prev.filter((x) => x.id !== c.id)); } catch {} }}>✕</Btn>
-              </Card>
-            ))}
-            {clients.length === 0 && <Card style={{ textAlign: "center", padding: 40 }}><div style={{ fontSize: 36, marginBottom: 8 }}>👥</div><div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>No clients yet</div><div style={{ fontSize: 12, color: DIM }}>Add your first client to start managing their fitness journey</div></Card>}
-          </div>
-        )}
-
-        {/* ═══ COACH: LEADS TAB ═══ */}
-        {user?.role === ROLES.COACH && tab === "leads" && (
-          <div style={{ animation: "fadeIn 0.4s ease" }}>
-            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>AI Lead Scoring</div>
-            <div style={{ fontSize: 12, color: DIM, marginBottom: 18 }}>Potential clients matched to your specializations using AI</div>
-
-            <FeatureGate feature="leadScoring" pkg={pkg}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 10 }}>
-                {leads.sort((a, b) => b.score - a.score).map((lead) => (
-                  <Card key={lead.id} glow={lead.matchScore > 85 ? OK : lead.matchScore > 70 ? WARN : undefined} style={{ padding: 16 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 700 }}>{lead.name}</div>
-                        <div style={{ fontSize: 10, color: DIM }}>{lead.location} · {lead.lastActive}</div>
-                      </div>
-                      <Ring value={lead.matchScore} max={100} size={44} color={lead.matchScore > 85 ? OK : lead.matchScore > 70 ? WARN : ERR}>
-                        <div style={{ fontSize: 10, fontWeight: 800 }}>{lead.matchScore}</div>
-                      </Ring>
-                    </div>
-                    <div style={{ display: "flex", gap: 4, marginBottom: 6, flexWrap: "wrap" }}>
-                      <Badge color={lead.type === "High Intent" ? OK : lead.type === "Warm Lead" ? WARN : AC}>{lead.type}</Badge>
-                      <Badge>{lead.goal}</Badge>
-                    </div>
-                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginBottom: 8 }}>{lead.intent}</div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <Btn s="sm" v="success">Reach Out</Btn>
-                      <Btn s="sm" v="ghost">Dismiss</Btn>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </FeatureGate>
-          </div>
-        )}
-
-        {/* ═══ COACH: PACKAGES TAB ═══ */}
-        {user?.role === ROLES.COACH && tab === "packages" && (
-          <div style={{ animation: "fadeIn 0.4s ease" }}>
-            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Coach Packages</div>
-            <div style={{ fontSize: 12, color: DIM, marginBottom: 18 }}>Upgrade to unlock AI features, more clients, and lead scoring</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 14 }}>
-              {COACH_PACKAGES.map((p) => (
-                <Card key={p.id} glow={pkg === p.id ? p.color : undefined} style={{ padding: 24, textAlign: "center", border: pkg === p.id ? "2px solid " + p.color + "60" : "1px solid " + BRD }}>
-                  <div style={{ fontSize: 36, marginBottom: 8 }}>{p.icon}</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: p.color, marginBottom: 4 }}>{p.name}</div>
-                  <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "'Orbitron'", marginBottom: 4 }}>{p.priceLabel}</div>
-                  <div style={{ fontSize: 11, color: DIM, marginBottom: 14 }}>Up to {p.maxClients === 999 ? "unlimited" : p.maxClients} clients</div>
-                  {p.features.map((f) => <div key={f} style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", padding: "3px 0", borderBottom: "1px solid rgba(255,255,255,0.02)" }}>✓ {f}</div>)}
-                  <div style={{ marginTop: 14 }}>
-                    {pkg === p.id ? <Badge color={p.color}>Current Plan</Badge> : <Btn full v={p.id === "elite" ? "warn" : "primary"}>Upgrade to {p.name}</Btn>}
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ═══ CLIENT DASHBOARD ═══ */}
-        {user?.role === ROLES.CLIENT && tab === "dashboard" && (
-          <div style={{ animation: "fadeIn 0.4s ease" }}>
-            <div style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 2 }}>Welcome, {sanitize(user.name || "there")} 💪</div>
-              <div style={{ fontSize: 11, color: DIM }}>{user.package === "premium" ? "Premium Member" : "Free Plan"}</div>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(130px,1fr))", gap: 8, marginBottom: 18 }}>
-              <Stat icon="🏋️" label="Workouts" value="0" color={AC} />
-              <Stat icon="🔥" label="Streak" value="0d" color={WARN} />
-              <Stat icon="⭐" label="Form" value="--" color={OK} />
-              <Stat icon="📈" label="Progress" value="--" color="#a78bfa" />
-            </div>
-            <Card glow={AC2} style={{ marginBottom: 14, textAlign: "center", padding: 30 }}>
-              <div style={{ fontSize: 36, marginBottom: 8 }}>🔍</div>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Find Your Coach</div>
-              <div style={{ fontSize: 12, color: DIM, marginBottom: 12 }}>AI-matched coaches based on your goals and location</div>
-              <Btn s="lg" onClick={() => setTab("coaches")}>Browse Coaches →</Btn>
-            </Card>
-          </div>
-        )}
-
-        {/* ═══ CLIENT: FIND COACH ═══ */}
-        {user?.role === ROLES.CLIENT && tab === "coaches" && (
-          <div style={{ animation: "fadeIn 0.4s ease" }}>
-            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Find a Coach</div>
-            <div style={{ fontSize: 12, color: DIM, marginBottom: 14 }}>AI-matched coaches for your goals</div>
-
-            {/* AI Search */}
-            <Card style={{ marginBottom: 14, padding: 14 }}>
-              <div style={{ display: "flex", gap: 8 }}>
-                <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") searchCoachesAI(searchQuery); }}
-                  placeholder="Describe what you're looking for... (e.g., 'weight loss coach in Hyderabad who speaks Telugu')"
-                  style={{ flex: 1, padding: "10px 14px", borderRadius: 12, border: "1px solid " + BRD, background: "rgba(255,255,255,0.03)", color: "#fff", fontSize: 12, fontFamily: "inherit", outline: "none" }} />
-                <Btn onClick={() => searchCoachesAI(searchQuery)} disabled={aiLoading}>{aiLoading ? "⟳" : "🤖 AI Search"}</Btn>
-              </div>
-            </Card>
-
-            {/* Filters */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-              <Select label="" value={searchFilters.spec} onChange={(e) => setSearchFilters((p) => ({ ...p, spec: e.target.value }))} options={[{ value: "", label: "All Specializations" }, ...SPECIALIZATIONS.map((s) => ({ value: s, label: s }))]} />
-              <Select label="" value={searchFilters.city} onChange={(e) => setSearchFilters((p) => ({ ...p, city: e.target.value }))} options={[{ value: "", label: "All Cities" }, ...(CITIES_BY_COUNTRY[user?.country || "India"] || []).map((c) => ({ value: c, label: c }))]} />
-            </div>
-
-            {/* AI Match Results */}
-            {aiMatchResults?.matches && (
-              <Card glow={AC2} style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: AC, marginBottom: 8 }}>🤖 AI Recommendations</div>
-                {aiMatchResults.matches.map((m, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: i < aiMatchResults.matches.length - 1 ? "1px solid " + BRD : "none" }}>
-                    <div style={{ fontSize: 16, fontWeight: 900, color: AC, fontFamily: "'Orbitron'", width: 24 }}>#{m.rank}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700 }}>{m.name}</div>
-                      <div style={{ fontSize: 10, color: DIM }}>{m.reason}</div>
-                    </div>
-                    <Badge color={OK}>{m.matchScore}% match</Badge>
-                  </div>
-                ))}
-              </Card>
-            )}
-
-            {/* Coach Grid */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 10 }}>
-              {filteredCoaches.map((c) => (
-                <Card key={c.id} hv onClick={() => setSelectedCoach(c)} style={{ padding: 16 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                    <div style={{ width: 44, height: 44, borderRadius: "50%", background: "linear-gradient(135deg," + AC + "," + AC2 + ")", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>{c.photo}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 14, fontWeight: 700 }}>{c.name}</span>
-                        {c.verified && <span style={{ fontSize: 10, color: AC }}>✓</span>}
-                      </div>
-                      <div style={{ fontSize: 10, color: DIM }}>{c.city} · {c.experience}yr exp</div>
-                    </div>
-                    {c.online && <Badge color={OK}>● Online</Badge>}
-                  </div>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
-                    {c.specializations.map((s) => <Badge key={s} color={AC}>{s}</Badge>)}
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ fontSize: 11, color: WARN }}>⭐ {c.rating} ({c.reviews})</div>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: AC, fontFamily: "'Orbitron'" }}>${c.price}<span style={{ fontSize: 9, color: DIM }}>/session</span></div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-
-            {/* Coach Detail Modal */}
-            {selectedCoach && (
-              <div onClick={() => setSelectedCoach(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-                <Card onClick={(e) => e.stopPropagation()} glow={AC} style={{ maxWidth: 480, width: "100%", maxHeight: "80vh", overflowY: "auto" }}>
-                  <div style={{ textAlign: "center", marginBottom: 16 }}>
-                    <div style={{ width: 60, height: 60, borderRadius: "50%", background: "linear-gradient(135deg," + AC + "," + AC2 + ")", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 10px" }}>{selectedCoach.photo}</div>
-                    <div style={{ fontSize: 18, fontWeight: 800 }}>{selectedCoach.name} {selectedCoach.verified && <span style={{ color: AC }}>✓</span>}</div>
-                    <div style={{ fontSize: 11, color: DIM }}>{selectedCoach.city}, {selectedCoach.country} · {selectedCoach.experience} yrs</div>
-                  </div>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "center", marginBottom: 10 }}>
-                    {selectedCoach.specializations.map((s) => <Badge key={s}>{s}</Badge>)}
-                  </div>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "center", marginBottom: 12 }}>
-                    {selectedCoach.certifications.map((c) => <Badge key={c} color={OK}>{c}</Badge>)}
-                  </div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.7, marginBottom: 14, textAlign: "center" }}>{selectedCoach.bio}</div>
-                  <div style={{ display: "flex", justifyContent: "center", gap: 14, marginBottom: 14 }}>
-                    <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800, color: WARN }}>⭐ {selectedCoach.rating}</div><div style={{ fontSize: 9, color: DIM }}>{selectedCoach.reviews} reviews</div></div>
-                    <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800, color: AC }}>{selectedCoach.clients}</div><div style={{ fontSize: 9, color: DIM }}>clients</div></div>
-                    <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800, color: OK }}>${selectedCoach.price}</div><div style={{ fontSize: 9, color: DIM }}>per session</div></div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <Btn full s="lg">Book Session</Btn>
-                    <Btn v="secondary" full s="lg">Message</Btn>
-                  </div>
-                  <div style={{ textAlign: "center", marginTop: 10 }}><Btn v="ghost" s="sm" onClick={() => setSelectedCoach(null)}>Close</Btn></div>
-                </Card>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ═══ COACH: DEPLOY TAB ═══ */}
-        {tab === "deploy" && (
-          <div style={{ animation: "fadeIn 0.4s ease" }}>
-            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Deploy to Production</div>
-            <div style={{ fontSize: 12, color: DIM, marginBottom: 18 }}>Launch your fitness platform on Android, iOS, and web</div>
-
-            <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-              {[
-                { id: "pwa", icon: "🌐", label: "PWA (Web App)" },
-                { id: "android", icon: "🤖", label: "Android APK" },
-                { id: "ios", icon: "🍎", label: "iOS App" },
-                { id: "security", icon: "🔐", label: "Security" },
-                { id: "backend", icon: "⚙", label: "Backend API" },
-              ].map((t) => <Chip key={t.id} icon={t.icon} label={t.label} selected={deployTab === t.id} onClick={() => setDeployTab(t.id)} />)}
-            </div>
-
-            {deployTab === "pwa" && (<div>
-              <Card style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>🌐 Progressive Web App</div>
-                <div style={{ fontSize: 11, color: DIM, lineHeight: 1.7, marginBottom: 12 }}>Installable on any device from the browser. Works offline. Auto-updates. No app store needed.</div>
-                {[
-                  { cmd: "npx create-vite fitos-nexus --template react\ncd fitos-nexus && npm install", desc: "Create project" },
-                  { cmd: "npm install vite-plugin-pwa -D", desc: "Add PWA plugin" },
-                  { cmd: `// vite.config.js\nimport { VitePWA } from 'vite-plugin-pwa'\nexport default {\n  plugins: [react(), VitePWA({\n    registerType: 'autoUpdate',\n    manifest: {\n      name: 'FIT:OS NEXUS',\n      short_name: 'NEXUS',\n      theme_color: '#050509',\n      icons: [{ src: '/icon-192.png', sizes: '192x192' }]\n    }\n  })]\n}`, desc: "Configure PWA manifest" },
-                  { cmd: "npm run build && npx serve dist", desc: "Build & serve" },
-                ].map((s, i) => (
-                  <div key={i} style={{ marginBottom: 8 }}>
-                    <div style={{ fontSize: 10, color: DIM, marginBottom: 4 }}>{s.desc}</div>
-                    <pre style={{ padding: "10px 14px", background: "rgba(0,0,0,0.4)", borderRadius: 10, border: "1px solid " + BRD, fontSize: 11, color: AC, fontFamily: "'Fira Code',monospace", whiteSpace: "pre-wrap", margin: 0 }}>{s.cmd}</pre>
-                  </div>
-                ))}
-              </Card>
-            </div>)}
-
-            {deployTab === "android" && (<div>
-              <Card style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>🤖 Android Deployment</div>
-                {[
-                  { cmd: "npx create-expo-app FitosNexus --template blank\ncd FitosNexus", desc: "Option A: Expo (easiest)" },
-                  { cmd: "npx expo install expo-camera expo-sensors expo-haptics expo-speech", desc: "Install native modules" },
-                  { cmd: "eas build --platform android --profile production", desc: "Build APK/AAB for Play Store" },
-                  { cmd: "# Option B: Capacitor (wrap existing web app)\nnpm install @capacitor/core @capacitor/cli\nnpx cap init FitosNexus com.fitos.nexus\nnpx cap add android\nnpm run build && npx cap sync\nnpx cap open android", desc: "Or use Capacitor to wrap the web app" },
-                ].map((s, i) => (
-                  <div key={i} style={{ marginBottom: 8 }}>
-                    <div style={{ fontSize: 10, color: DIM, marginBottom: 4 }}>{s.desc}</div>
-                    <pre style={{ padding: "10px 14px", background: "rgba(0,0,0,0.4)", borderRadius: 10, border: "1px solid " + BRD, fontSize: 11, color: AC, fontFamily: "'Fira Code',monospace", whiteSpace: "pre-wrap", margin: 0 }}>{s.cmd}</pre>
-                  </div>
-                ))}
-              </Card>
-            </div>)}
-
-            {deployTab === "ios" && (<div>
-              <Card style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>🍎 iOS App Store</div>
-                <div style={{ fontSize: 11, color: DIM, lineHeight: 1.7, marginBottom: 12 }}>Requires macOS with Xcode. Apple Developer account ($99/yr).</div>
-                {[
-                  { cmd: "eas build --platform ios --profile production", desc: "Build with Expo EAS (no Mac needed for build)" },
-                  { cmd: "eas submit --platform ios", desc: "Submit to App Store" },
-                  { cmd: "# Or with Capacitor:\nnpx cap add ios\nnpx cap sync\nnpx cap open ios  # Opens Xcode", desc: "Or use Capacitor" },
-                ].map((s, i) => (
-                  <div key={i} style={{ marginBottom: 8 }}>
-                    <div style={{ fontSize: 10, color: DIM, marginBottom: 4 }}>{s.desc}</div>
-                    <pre style={{ padding: "10px 14px", background: "rgba(0,0,0,0.4)", borderRadius: 10, border: "1px solid " + BRD, fontSize: 11, color: AC, fontFamily: "'Fira Code',monospace", whiteSpace: "pre-wrap", margin: 0 }}>{s.cmd}</pre>
-                  </div>
-                ))}
-              </Card>
-            </div>)}
-
-            {deployTab === "security" && (<div>
-              <Card style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🔐 Security Architecture</div>
-                {[
-                  { t: "Authentication", d: "JWT tokens with refresh rotation. bcrypt password hashing (cost factor 12). Rate-limited login (5 attempts/min). HttpOnly secure cookies.", c: OK },
-                  { t: "RBAC", d: "Role-based middleware on every API route. Permission matrix: Admin > Coach > Client. Resource-level access control (coach can only see own clients).", c: AC },
-                  { t: "Input Sanitization", d: "All user inputs sanitized against XSS. Parameterized SQL queries (no injection). Content Security Policy headers. File upload validation.", c: WARN },
-                  { t: "Data Encryption", d: "TLS 1.3 in transit. AES-256 for medical data at rest. API keys in environment variables only. No secrets in frontend code.", c: "#a78bfa" },
-                  { t: "CSRF Protection", d: "CSRF tokens on all state-changing requests. SameSite cookie attribute. Origin header validation.", c: ERR },
-                  { t: "Compliance", d: "GDPR: data export/deletion. HIPAA: medical data encryption. SOC 2: audit logging. Privacy policy + ToS required.", c: "#ec4899" },
-                ].map((item) => (
-                  <div key={item.t} style={{ padding: "10px 14px", background: item.c + "06", borderRadius: 10, borderLeft: "3px solid " + item.c, marginBottom: 8 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: item.c }}>{item.t}</div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 1.6 }}>{item.d}</div>
-                  </div>
-                ))}
-              </Card>
-            </div>)}
-
-            {deployTab === "backend" && (<div>
-              <Card style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>⚙ Backend API Architecture</div>
-                {[
-                  { cmd: `// Recommended stack:
-// Node.js + Express/Fastify
-// PostgreSQL + Prisma ORM
-// Redis for sessions & rate limiting
-// S3/Cloudflare R2 for file storage
-
-npm init -y
-npm install express @prisma/client bcryptjs jsonwebtoken
-npm install helmet cors express-rate-limit
-npx prisma init`, desc: "Initialize backend" },
-                  { cmd: `// prisma/schema.prisma
-model User {
-  id       String   @id @default(cuid())
-  email    String   @unique
-  password String
-  role     Role     @default(CLIENT)
-  package  String   @default("free")
-  profile  Json?
-  clients  Client[] @relation("CoachClients")
-}
-
-enum Role { ADMIN COACH CLIENT }
-
-model Client {
-  id      String @id @default(cuid())
-  name    String
-  email   String
-  coachId String
-  coach   User   @relation("CoachClients", fields: [coachId])
-}`, desc: "Database schema" },
-                  { cmd: `// middleware/auth.js
-const jwt = require('jsonwebtoken');
-module.exports = (roles = []) => (req, res, next) => {
-  const token = req.cookies?.token;
-  if (!token) return res.status(401).json({ error: 'Auth required' });
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (roles.length && !roles.includes(decoded.role))
-      return res.status(403).json({ error: 'Forbidden' });
-    req.user = decoded;
-    next();
-  } catch { res.status(401).json({ error: 'Invalid token' }); }
-};
-
-// Usage: app.get('/api/clients', auth(['coach','admin']), handler)`, desc: "RBAC middleware" },
-                ].map((s, i) => (
-                  <div key={i} style={{ marginBottom: 10 }}>
-                    <div style={{ fontSize: 10, color: DIM, marginBottom: 4 }}>{s.desc}</div>
-                    <pre style={{ padding: "10px 14px", background: "rgba(0,0,0,0.4)", borderRadius: 10, border: "1px solid " + BRD, fontSize: 10, color: AC, fontFamily: "'Fira Code',monospace", whiteSpace: "pre-wrap", margin: 0, maxHeight: 200, overflowY: "auto" }}>{s.cmd}</pre>
-                  </div>
-                ))}
-              </Card>
-            </div>)}
-          </div>
-        )}
-
-        {/* ═══ SETTINGS ═══ */}
-        {tab === "settings" && (
-          <div style={{ animation: "fadeIn 0.4s ease" }}>
-            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 16 }}>Settings</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Card>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Account</div>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", marginBottom: 4 }}>Email: {user?.email}</div>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", marginBottom: 4 }}>Role: <Badge color={user?.role === ROLES.COACH ? AC : OK}>{user?.role}</Badge></div>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", marginBottom: 12 }}>Joined: {new Date(user?.createdAt || Date.now()).toLocaleDateString()}</div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <Btn v="danger" s="sm" onClick={logout}>Sign Out</Btn>
-                </div>
-              </Card>
-              <Card>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Security</div>
-                <div style={{ fontSize: 11, color: DIM, lineHeight: 1.7 }}>
-                  🔒 Auth: JWT + bcrypt (backend)<br />
-                  🛡️ RBAC: {user?.role} role enforced<br />
-                  📡 API: {API_URL}<br />
-                  🗄️ DB: PostgreSQL + Prisma<br />
-                  ⚡ Cache: Redis sessions<br />
-                  🔐 Medical: AES-256 encrypted
-                </div>
-              </Card>
-            </div>
-            <Card style={{ marginTop: 12, textAlign: "center", padding: 12 }}>
-              <div style={{ fontFamily: "'Orbitron'", fontWeight: 900, fontSize: 12, color: AC }}>FIT:OS NEXUS v6.1</div>
-              <div style={{ fontSize: 9, color: "rgba(255,255,255,0.12)", marginTop: 2 }}>PostgreSQL · Express · RBAC · JWT · Redis · AI Proxy · Reports</div>
-            </Card>
-          </div>
-        )}
-
-        {/* ═══ CLIENT: WORKOUTS & PROGRESS (placeholder tabs) ═══ */}
-        {user?.role === ROLES.CLIENT && tab === "workouts" && (
-          <div style={{ animation: "fadeIn 0.4s ease", textAlign: "center", padding: 40 }}>
-            <div style={{ fontSize: 44, marginBottom: 10 }}>💪</div>
-            <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Workouts</div>
-            <div style={{ fontSize: 12, color: DIM, marginBottom: 16 }}>Connect with a coach to start receiving personalized workouts with AI camera tracking</div>
-            <Btn onClick={() => setTab("coaches")}>Find a Coach →</Btn>
-          </div>
-        )}
-        {user?.role === ROLES.CLIENT && tab === "progress" && (
-          <div style={{ animation: "fadeIn 0.4s ease", textAlign: "center", padding: 40 }}>
-            <div style={{ fontSize: 44, marginBottom: 10 }}>📊</div>
-            <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Progress</div>
-            <div style={{ fontSize: 12, color: DIM }}>Complete workouts to track your progress over time</div>
-          </div>
-        )}
-      </main>
-
-      <style>{`@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.15)}} @keyframes spin{to{transform:rotate(360deg)}} @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}} *{box-sizing:border-box;margin:0;padding:0} ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.06);border-radius:2px} button:hover{filter:brightness(1.1)} button:active{transform:scale(0.97)} input::placeholder,textarea::placeholder{color:rgba(255,255,255,0.2)} pre::-webkit-scrollbar{height:4px} select{-webkit-appearance:none}`}</style>
+      <div style={{ display: "flex", gap: 8, flexShrink: 0, paddingTop: 8 }}>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && sendMsg()}
+          placeholder="Type a message…"
+          style={{
+            flex: 1, background: colors.surfaceHover, border: `1px solid ${colors.border}`,
+            borderRadius: 24, padding: "12px 18px", color: colors.text, fontSize: 14,
+            outline: "none", fontFamily: "inherit",
+          }}
+        />
+        <button
+          onClick={sendMsg}
+          style={{
+            width: 48, height: 48, borderRadius: 24, border: "none", cursor: "pointer",
+            background: colors.gradient, display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <Icon name="send" size={18} color="#fff" />
+        </button>
+      </div>
     </div>
   );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PAGE: SETTINGS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function SettingsPage() {
+  const { user, logout } = useAuth();
+  const [profile, setProfile] = useState({ name: user?.name || "", email: user?.email || "" });
+  const [saved, setSaved] = useState(false);
+
+  const save = async () => {
+    try {
+      await api.put("/auth/profile", profile);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {}
+  };
+
+  return (
+    <div>
+      <h2 style={{ color: colors.text, fontSize: 20, margin: "0 0 20px", fontWeight: 700 }}>Settings</h2>
+
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: 16, background: colors.gradient,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 22, fontWeight: 700, color: "#fff",
+          }}>{(user?.name || "U")[0].toUpperCase()}</div>
+          <div>
+            <div style={{ color: colors.text, fontSize: 16, fontWeight: 600 }}>{user?.name}</div>
+            <Badge>{user?.role || "coach"}</Badge>
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Input label="Name" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
+          <Input label="Email" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} />
+          <Btn onClick={save} style={{ width: "100%" }}>{saved ? "✓ Saved!" : "Update Profile"}</Btn>
+        </div>
+      </Card>
+
+      <Card>
+        <Btn variant="danger" onClick={logout} style={{ width: "100%" }}>
+          <Icon name="logout" size={16} /> Sign Out
+        </Btn>
+      </Card>
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BOTTOM TAB NAVIGATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const TABS = [
+  { id: "dashboard", icon: "home", label: "Home" },
+  { id: "workouts", icon: "dumbbell", label: "Workouts" },
+  { id: "bookings", icon: "calendar", label: "Schedule" },
+  { id: "chat", icon: "chat", label: "Messages" },
+  { id: "more", icon: "settings", label: "More" },
+];
+
+function BottomNav({ active, onChange }) {
+  return (
+    <nav style={{
+      position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 100,
+      background: colors.surface,
+      borderTop: `1px solid ${colors.border}`,
+      display: "flex",
+      paddingBottom: "env(safe-area-inset-bottom, 0px)",
+    }}>
+      {TABS.map((tab) => {
+        const isActive = active === tab.id;
+        return (
+          <button
+            key={tab.id}
+            onClick={() => onChange(tab.id)}
+            style={{
+              flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+              gap: 3, padding: "10px 0 8px", border: "none", cursor: "pointer",
+              background: "transparent", transition: "all 0.2s",
+            }}
+          >
+            <div style={{
+              padding: "4px 16px", borderRadius: 12,
+              background: isActive ? colors.accent + "20" : "transparent",
+              transition: "all 0.3s",
+            }}>
+              <Icon name={tab.icon} size={20} color={isActive ? colors.accent : colors.textMuted} />
+            </div>
+            <span style={{
+              fontSize: 10, fontWeight: isActive ? 700 : 500,
+              color: isActive ? colors.accent : colors.textMuted,
+            }}>{tab.label}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MORE MENU (overflow tabs)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function MoreMenu({ onNav }) {
+  const items = [
+    { id: "clients", icon: "users", label: "Clients", desc: "Manage your clients" },
+    { id: "leads", icon: "leads", label: "Leads", desc: "Track & convert leads" },
+    { id: "reports", icon: "chart", label: "Analytics", desc: "Revenue & reports" },
+    { id: "ai", icon: "bot", label: "AI Coach", desc: "AI coaching assistant" },
+    { id: "settings", icon: "settings", label: "Settings", desc: "Profile & preferences" },
+  ];
+
+  return (
+    <div>
+      <h2 style={{ color: colors.text, fontSize: 20, margin: "0 0 16px", fontWeight: 700 }}>More</h2>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {items.map((item) => (
+          <Card key={item.id} onClick={() => onNav(item.id)} style={{ padding: 16, display: "flex", alignItems: "center", gap: 14, cursor: "pointer" }}>
+            <div style={{
+              width: 42, height: 42, borderRadius: 12, background: colors.accent + "15",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <Icon name={item.icon} size={20} color={colors.accent} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: colors.text, fontSize: 14, fontWeight: 600 }}>{item.label}</div>
+              <div style={{ color: colors.textMuted, fontSize: 12 }}>{item.desc}</div>
+            </div>
+            <span style={{ color: colors.textMuted, fontSize: 18 }}>›</span>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MAIN APP
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function MainApp() {
+  const [tab, setTab] = useState("dashboard");
+  const [subPage, setSubPage] = useState(null);
+  const [chatClient, setChatClient] = useState(null);
+
+  // Voice commands
+  const handleVoice = useCallback((cmd, speak) => {
+    const routes = {
+      dashboard: ["home", "dashboard"],
+      workouts: ["workout", "workouts", "exercise", "training"],
+      bookings: ["schedule", "booking", "bookings", "calendar"],
+      chat: ["message", "messages", "chat"],
+      clients: ["client", "clients"],
+      leads: ["lead", "leads"],
+      reports: ["report", "reports", "analytics", "revenue"],
+      ai: ["ai", "assistant", "coach"],
+      settings: ["setting", "settings", "profile"],
+    };
+
+    for (const [route, keywords] of Object.entries(routes)) {
+      if (keywords.some((k) => cmd.includes(k))) {
+        if (["clients", "leads", "reports", "ai", "settings"].includes(route)) {
+          setTab("more");
+          setSubPage(route);
+        } else {
+          setTab(route);
+          setSubPage(null);
+        }
+        speak(`Opening ${route}`);
+        return;
+      }
+    }
+    speak("I didn't catch that. Try saying a page name like dashboard, workouts, or schedule.");
+  }, []);
+
+  const { listening, toggle: toggleVoice } = useVoice(handleVoice);
+
+  const navigate = (id) => {
+    if (["dashboard", "workouts", "bookings", "chat"].includes(id)) {
+      setTab(id);
+      setSubPage(null);
+    } else if (id === "more") {
+      setTab("more");
+      setSubPage(null);
+    } else {
+      setTab("more");
+      setSubPage(id);
+    }
+  };
+
+  const renderPage = () => {
+    if (tab === "more" && subPage) {
+      switch (subPage) {
+        case "clients": return <ClientsPage onOpenChat={(c) => { setChatClient(c); setTab("chat"); }} />;
+        case "leads": return <LeadsPage />;
+        case "reports": return <ReportsPage />;
+        case "ai": return <AIChatPage />;
+        case "settings": return <SettingsPage />;
+        default: return <MoreMenu onNav={(id) => setSubPage(id)} />;
+      }
+    }
+    switch (tab) {
+      case "dashboard": return <DashboardPage />;
+      case "workouts": return <WorkoutsPage />;
+      case "bookings": return <BookingsPage />;
+      case "chat": return <MessagingPage initialClient={chatClient} onBack={() => setChatClient(null)} />;
+      case "more": return <MoreMenu onNav={(id) => setSubPage(id)} />;
+      default: return <DashboardPage />;
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: "100dvh", background: colors.bg, color: colors.text,
+      fontFamily: "'DM Sans', 'SF Pro Display', -apple-system, system-ui, sans-serif",
+    }}>
+      {/* Global CSS */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { background: ${colors.bg}; overflow-x: hidden; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: ${colors.border}; border-radius: 4px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+        input::placeholder, textarea::placeholder { color: ${colors.textMuted}; }
+        select option { background: ${colors.surface}; color: ${colors.text}; }
+      `}</style>
+
+      {/* Voice FAB */}
+      <button
+        onClick={toggleVoice}
+        style={{
+          position: "fixed", right: 16, bottom: 80, zIndex: 200,
+          width: 48, height: 48, borderRadius: 24, border: "none", cursor: "pointer",
+          background: listening ? colors.danger : colors.gradient,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          boxShadow: `0 4px 20px ${listening ? colors.danger + "60" : colors.accent + "40"}`,
+          animation: listening ? "pulse 1.5s ease infinite" : "none",
+          transition: "all 0.3s",
+        }}
+        title="Voice Command"
+      >
+        <Icon name="mic" size={20} color="#fff" />
+      </button>
+
+      {/* Page content */}
+      <div style={{ padding: "16px 16px 90px", maxWidth: 600, margin: "0 auto" }}>
+        {/* Top bar with back button for sub-pages */}
+        {tab === "more" && subPage && (
+          <button
+            onClick={() => setSubPage(null)}
+            style={{
+              background: "none", border: "none", color: colors.accent, cursor: "pointer",
+              fontSize: 14, fontWeight: 600, marginBottom: 12, padding: 0, display: "flex",
+              alignItems: "center", gap: 6, fontFamily: "inherit",
+            }}
+          >
+            ← Back
+          </button>
+        )}
+        {renderPage()}
+      </div>
+
+      <BottomNav active={tab} onChange={navigate} />
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ROOT EXPORT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+export default function App() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
+  );
+}
+
+function AuthGate() {
+  const { user } = useAuth();
+  return user ? <MainApp /> : <AuthScreen />;
 }
