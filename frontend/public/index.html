@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    
+    <!-- PWA Meta Tags -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#6c5ce7" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="CoachMe" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    
+    <!-- Standard Meta -->
+    <meta name="description" content="CoachMe.life — AI-Powered Fitness Coaching Platform" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    
+    <!-- Splash screens for iOS -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+    
+    <title>CoachMe.life</title>
+    
+    <style>
+      /* Prevent pull-to-refresh and overscroll on mobile */
+      html, body { 
+        overscroll-behavior: none; 
+        -webkit-overflow-scrolling: touch;
+      }
+      /* Safe area padding for notched phones */
+      body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+    
+    <!-- Register Service Worker for PWA -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(reg => console.log('[CoachMe] SW registered:', reg.scope))
+            .catch(err => console.log('[CoachMe] SW failed:', err));
+        });
+      }
+    </script>
+  </body>
+</html>
