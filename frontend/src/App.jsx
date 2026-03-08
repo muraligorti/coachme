@@ -574,6 +574,18 @@ export default function App() {
   // ─── AI FEATURES ───────────────────────────────────────────────
   const [aiMatchResults, setAiMatchResults] = useState(null);
 
+  // ─── FILTERED COACHES ──────────────────────────────────────────
+  const filteredCoaches = useMemo(() => {
+    return coaches.filter((c) => {
+      if (searchQuery && !c.name.toLowerCase().includes(searchQuery.toLowerCase()) && !c.specializations.some((s) => s.toLowerCase().includes(searchQuery.toLowerCase()))) return false;
+      if (searchFilters.spec && !c.specializations.includes(searchFilters.spec)) return false;
+      if (searchFilters.city && c.city !== searchFilters.city) return false;
+      if (c.price > searchFilters.priceMax) return false;
+      if (parseFloat(c.rating) < searchFilters.ratingMin) return false;
+      return true;
+    });
+  }, [coaches, searchQuery, searchFilters]);
+
   const searchCoachesAI = useCallback(async (query) => {
     if (!query.trim()) return;
     setAiLoading(true);
@@ -586,18 +598,6 @@ export default function App() {
     } catch { setAiMatchResults(null); }
     setAiLoading(false);
   }, [filteredCoaches, user]);
-
-  // ─── FILTERED COACHES ──────────────────────────────────────────
-  const filteredCoaches = useMemo(() => {
-    return coaches.filter((c) => {
-      if (searchQuery && !c.name.toLowerCase().includes(searchQuery.toLowerCase()) && !c.specializations.some((s) => s.toLowerCase().includes(searchQuery.toLowerCase()))) return false;
-      if (searchFilters.spec && !c.specializations.includes(searchFilters.spec)) return false;
-      if (searchFilters.city && c.city !== searchFilters.city) return false;
-      if (c.price > searchFilters.priceMax) return false;
-      if (parseFloat(c.rating) < searchFilters.ratingMin) return false;
-      return true;
-    });
-  }, [coaches, searchQuery, searchFilters]);
 
   // ─── NAVIGATION ────────────────────────────────────────────────
   const navItems = useMemo(() => {
