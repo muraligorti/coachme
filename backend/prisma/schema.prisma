@@ -1,21 +1,21 @@
-// ═══════════════════════════════════════════════════════════════════════
-// FIT:OS NEXUS — PostgreSQL Schema (Prisma ORM)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// FIT:OS NEXUS â€” PostgreSQL Schema (Prisma ORM)
 // 
 // Tables: User, CoachProfile, ClientProfile, Subscription, Client,
 //         Workout, WorkoutSession, Exercise, Lead, Review, AuditLog,
 //         Notification, Booking, Report, MedicalData (encrypted)
-// ═══════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-// ─── ENUMS ───────────────────────────────────────────────────────────
+// â”€â”€â”€ ENUMS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 enum Role {
   ADMIN
@@ -53,7 +53,7 @@ enum SessionType {
   HYBRID
 }
 
-// ─── USER (Core Auth) ────────────────────────────────────────────────
+// â”€â”€â”€ USER (Core Auth) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model User {
   id              String    @id @default(cuid())
@@ -88,7 +88,7 @@ model User {
   @@index([isActive])
 }
 
-// ─── SESSION (JWT Token Management) ──────────────────────────────────
+// â”€â”€â”€ SESSION (JWT Token Management) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model Session {
   id           String   @id @default(cuid())
@@ -107,7 +107,7 @@ model Session {
   @@index([expiresAt])
 }
 
-// ─── COACH PROFILE ───────────────────────────────────────────────────
+// â”€â”€â”€ COACH PROFILE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model CoachProfile {
   id                String    @id @default(cuid())
@@ -158,7 +158,7 @@ model CoachProfile {
   @@index([pricePerSession])
 }
 
-// ─── CLIENT PROFILE ──────────────────────────────────────────────────
+// â”€â”€â”€ CLIENT PROFILE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model ClientProfile {
   id              String    @id @default(cuid())
@@ -188,7 +188,7 @@ model ClientProfile {
   @@index([fitnessGoals])
 }
 
-// ─── CLIENT-COACH RELATIONSHIP ───────────────────────────────────────
+// â”€â”€â”€ CLIENT-COACH RELATIONSHIP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model ClientCoach {
   id          String   @id @default(cuid())
@@ -206,7 +206,7 @@ model ClientCoach {
   @@index([status])
 }
 
-// ─── MEDICAL DATA (Encrypted at application level) ───────────────────
+// â”€â”€â”€ MEDICAL DATA (Encrypted at application level) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model MedicalData {
   id              String   @id @default(cuid())
@@ -223,7 +223,7 @@ model MedicalData {
   updatedAt       DateTime @updatedAt
 }
 
-// ─── SUBSCRIPTION ────────────────────────────────────────────────────
+// â”€â”€â”€ SUBSCRIPTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model Subscription {
   id              String           @id @default(cuid())
@@ -244,7 +244,7 @@ model Subscription {
   @@index([stripeCustomerId])
 }
 
-// ─── WORKOUT PLANS ───────────────────────────────────────────────────
+// â”€â”€â”€ WORKOUT PLANS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model WorkoutPlan {
   id              String    @id @default(cuid())
@@ -268,7 +268,7 @@ model WorkoutPlan {
   @@index([isTemplate])
 }
 
-// ─── WORKOUT SESSIONS (Individual workouts performed) ────────────────
+// â”€â”€â”€ WORKOUT SESSIONS (Individual workouts performed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model WorkoutSession {
   id              String    @id @default(cuid())
@@ -297,7 +297,7 @@ model WorkoutSession {
   @@index([planId])
 }
 
-// ─── BOOKINGS ────────────────────────────────────────────────────────
+// â”€â”€â”€ BOOKINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model Booking {
   id              String        @id @default(cuid())
@@ -322,7 +322,7 @@ model Booking {
   @@index([status])
 }
 
-// ─── LEADS (AI-scored potential clients) ─────────────────────────────
+// â”€â”€â”€ LEADS (AI-scored potential clients) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model Lead {
   id              String     @id @default(cuid())
@@ -348,7 +348,7 @@ model Lead {
   @@index([status])
 }
 
-// ─── REVIEWS ─────────────────────────────────────────────────────────
+// â”€â”€â”€ REVIEWS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model Review {
   id              String    @id @default(cuid())
@@ -367,7 +367,7 @@ model Review {
   @@index([rating])
 }
 
-// ─── REPORTS (Analytics) ─────────────────────────────────────────────
+// â”€â”€â”€ REPORTS (Analytics) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model Report {
   id              String   @id @default(cuid())
@@ -382,7 +382,7 @@ model Report {
   @@unique([coachId, type, period])
 }
 
-// ─── MESSAGES ────────────────────────────────────────────────────────
+// â”€â”€â”€ MESSAGES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model Message {
   id              String   @id @default(cuid())
@@ -400,7 +400,7 @@ model Message {
   @@index([createdAt])
 }
 
-// ─── NOTIFICATIONS ───────────────────────────────────────────────────
+// â”€â”€â”€ NOTIFICATIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model Notification {
   id              String   @id @default(cuid())
@@ -418,7 +418,7 @@ model Notification {
   @@index([createdAt])
 }
 
-// ─── AUDIT LOG (Security tracking) ───────────────────────────────────
+// â”€â”€â”€ AUDIT LOG (Security tracking) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model AuditLog {
   id              String   @id @default(cuid())
