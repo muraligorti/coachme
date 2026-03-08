@@ -7,26 +7,48 @@ import { useState, useEffect, useRef, useCallback, createContext, useContext, us
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const API = "https://just-perception-production.up.railway.app/api";
 
+// ─── DEBUG ────────────────────────────────────────────────────────────────────
+const DEBUG = true;
+const log = (...args) => DEBUG && console.log("[CoachMe]", ...args);
+
 // ─── API CLIENT (JWT) ─────────────────────────────────────────────────────────
 const api = {
   token: localStorage.getItem("cm_token"),
+  _loggedOut: false,
   setToken(t) {
     this.token = t;
     t ? localStorage.setItem("cm_token", t) : localStorage.removeItem("cm_token");
+    log("Token set:", t ? t.slice(0, 20) + "…" : "null");
   },
   async req(path, opts = {}) {
     const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
-    const res = await fetch(`${API}${path}`, { ...opts, headers });
-    if (res.status === 401) {
-      this.setToken(null);
-      window.location.reload();
+    const url = `${API}${path}`;
+    log(`→ ${opts.method || "GET"} ${url}`);
+    try {
+      const res = await fetch(url, { ...opts, headers });
+      log(`← ${res.status} ${res.statusText} from ${path}`);
+      if (res.status === 401 && !path.includes("/auth/login") && !path.includes("/auth/register")) {
+        log("401 received — clearing token (no reload)");
+        this.setToken(null);
+        this._loggedOut = true;
+        throw new Error("Session expired. Please log in again.");
+      }
+      const text = await res.text();
+      log(`Response body (first 300):`, text.slice(0, 300));
+      let data;
+      try { data = JSON.parse(text); } catch { data = { raw: text }; }
+      if (!res.ok) {
+        throw new Error(data.message || data.error || res.statusText);
+      }
+      return data;
+    } catch (err) {
+      if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
+        log("CORS or network error on", path);
+        throw new Error(`Network error on ${path} — possible CORS issue. Check browser console.`);
+      }
+      throw err;
     }
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || res.statusText);
-    }
-    return res.json();
   },
   get: (p) => api.req(p),
   post: (p, b) => api.req(p, { method: "POST", body: JSON.stringify(b) }),
@@ -34,33 +56,152 @@ const api = {
   del: (p) => api.req(p, { method: "DELETE" }),
 };
 
+// Helper to unwrap array data from various response shapes
+function unwrapList(data, ...keys) {
+  for (const key of keys) {
+    if (data?.[key] && Array.isArray(data[key])) return data[key];
+    if (data?.data?.[key] && Array.isArray(data.data[key])) return data.data[key];
+  }
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.data)) return data.data;
+  log("unwrapList: could not find array in", Object.keys(data || {}));
+  return [];
+}
+
 // ─── AUTH CONTEXT ─────────────────────────────────────────────────────────────
 const AuthCtx = createContext(null);
 const useAuth = () => useContext(AuthCtx);
 
+// Extract token from any response shape
+function extractToken(data) {
+  const t = data?.token || data?.accessToken || data?.access_token
+    || data?.data?.token || data?.data?.accessToken || data?.jwt;
+  log("extractToken:", t ? t.slice(0, 20) + "…" : "NOT FOUND", "| keys:", Object.keys(data || {}));
+  return t;
+}
+
+// Extract user from any response shape
+function extractUser(data) {
+  const u = data?.user || data?.data?.user || data?.data || data?.profile || data?.coach || data?.client;
+  // If response itself looks like a user (has email or name at top level)
+  if (!u && data && (data.email || data.name || data.id)) {
+    log("extractUser: using top-level data as user");
+    return data;
+  }
+  log("extractUser:", u ? `found (id=${u.id}, name=${u.name})` : "NOT FOUND", "| keys:", Object.keys(data || {}));
+  return u;
+}
+
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState("");
 
   useEffect(() => {
-    if (!api.token) return setLoading(false);
-    api.get("/auth/me").then(setUser).catch(() => api.setToken(null)).finally(() => setLoading(false));
+    if (!api.token) {
+      log("No stored token, showing login");
+      return setLoading(false);
+    }
+    log("Found stored token, verifying with /auth/me…");
+
+    // Try multiple possible "get current user" endpoints
+    const tryEndpoints = ["/auth/me", "/auth/profile", "/coaches/me", "/users/me"];
+    const tryNext = (i) => {
+      if (i >= tryEndpoints.length) {
+        log("All auth endpoints failed — clearing token");
+        api.setToken(null);
+        setLoading(false);
+        return;
+      }
+      api.get(tryEndpoints[i])
+        .then((data) => {
+          const u = extractUser(data);
+          if (u && (u.id || u.email)) {
+            log("✅ Auth verified via", tryEndpoints[i]);
+            setUser(u);
+            setLoading(false);
+          } else {
+            log("Endpoint", tryEndpoints[i], "returned no user, trying next…");
+            tryNext(i + 1);
+          }
+        })
+        .catch((err) => {
+          log("Endpoint", tryEndpoints[i], "failed:", err.message, "— trying next…");
+          tryNext(i + 1);
+        });
+    };
+    tryNext(0);
   }, []);
 
   const login = async (email, password) => {
+    setAuthError("");
+    log("Attempting login for", email);
     const data = await api.post("/auth/login", { email, password });
-    api.setToken(data.token);
-    setUser(data.user);
+    log("Login response:", JSON.stringify(data).slice(0, 500));
+
+    const token = extractToken(data);
+    const u = extractUser(data);
+
+    if (!token) {
+      const msg = "Login succeeded but no token found in response. Check console for response shape.";
+      log("❌", msg);
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
+    api.setToken(token);
+
+    if (u && (u.id || u.email)) {
+      setUser(u);
+    } else {
+      // Token works but no user object — try fetching
+      log("No user in login response, fetching profile…");
+      try {
+        const meData = await api.get("/auth/me");
+        setUser(extractUser(meData) || { email });
+      } catch {
+        // Just use email as fallback user
+        setUser({ email, name: email.split("@")[0] });
+      }
+    }
+    log("✅ Login complete");
   };
+
   const register = async (payload) => {
+    setAuthError("");
+    log("Attempting register for", payload.email);
     const data = await api.post("/auth/register", payload);
-    api.setToken(data.token);
-    setUser(data.user);
+    log("Register response:", JSON.stringify(data).slice(0, 500));
+
+    const token = extractToken(data);
+    const u = extractUser(data);
+
+    if (!token) {
+      const msg = "Registration succeeded but no token found. Check console.";
+      log("❌", msg);
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
+    api.setToken(token);
+
+    if (u && (u.id || u.email)) {
+      setUser(u);
+    } else {
+      try {
+        const meData = await api.get("/auth/me");
+        setUser(extractUser(meData) || { email: payload.email, name: payload.name });
+      } catch {
+        setUser({ email: payload.email, name: payload.name });
+      }
+    }
+    log("✅ Register complete");
   };
+
   const logout = () => { api.setToken(null); setUser(null); };
 
   if (loading) return <SplashScreen />;
-  return <AuthCtx.Provider value={{ user, login, register, logout }}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{ user, login, register, logout, authError }}>{children}</AuthCtx.Provider>;
 }
 
 // ─── VOICE COMMANDS HOOK ──────────────────────────────────────────────────────
@@ -318,7 +459,7 @@ function SplashScreen() {
 
 // ─── AUTH SCREENS ─────────────────────────────────────────────────────────────
 function AuthScreen() {
-  const { login, register } = useAuth();
+  const { login, register, authError } = useAuth();
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "coach" });
   const [error, setError] = useState("");
@@ -326,15 +467,22 @@ function AuthScreen() {
 
   const handleSubmit = async () => {
     setError("");
+    if (!form.email || !form.password) {
+      setError("Email and password are required");
+      return;
+    }
     setBusy(true);
     try {
       if (mode === "login") await login(form.email, form.password);
       else await register(form);
     } catch (e) {
+      log("Auth error:", e.message);
       setError(e.message);
     }
     setBusy(false);
   };
+
+  const displayError = error || authError;
 
   return (
     <div style={{
@@ -369,7 +517,7 @@ function AuthScreen() {
           <Input label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="you@email.com" />
           <Input label="Password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="••••••••" />
 
-          {error && <div style={{ color: colors.danger, fontSize: 13, padding: "8px 12px", background: colors.danger + "15", borderRadius: 8 }}>{error}</div>}
+          {displayError && <div style={{ color: colors.danger, fontSize: 13, padding: "8px 12px", background: colors.danger + "15", borderRadius: 8, wordBreak: "break-word" }}>{displayError}</div>}
 
           <Btn onClick={handleSubmit} disabled={busy} style={{ width: "100%", marginTop: 4 }}>
             {busy ? "Please wait…" : mode === "login" ? "Sign In" : "Create Account"}
@@ -398,7 +546,11 @@ function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get("/reports/summary").then(setStats).catch(() => {
+    api.get("/reports/coach/dashboard").then((data) => {
+      log("✅ Dashboard data:", data);
+      setStats(data?.data || data);
+    }).catch((err) => {
+      log("Dashboard error:", err.message);
       setStats({ totalClients: 0, activeClients: 0, totalRevenue: 0, monthlyRevenue: 0, totalBookings: 0, upcomingBookings: 0, totalLeads: 0, conversionRate: 0 });
     }).finally(() => setLoading(false));
   }, []);
@@ -457,7 +609,7 @@ function ClientsPage({ onOpenChat }) {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    api.get("/clients").then((d) => setClients(d.clients || d || [])).catch(() => {}).finally(() => setLoading(false));
+    api.get("/clients").then((d) => { log("Clients response:", d); setClients(unwrapList(d, "clients")); }).catch((e) => log("Clients error:", e.message)).finally(() => setLoading(false));
   }, []);
 
   const filtered = clients.filter((c) =>
@@ -518,7 +670,7 @@ function LeadsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", phone: "", source: "website", notes: "" });
 
-  const load = () => api.get("/leads").then((d) => setLeads(d.leads || d || [])).catch(() => {}).finally(() => setLoading(false));
+  const load = () => api.get("/leads").then((d) => { log("Leads response:", d); setLeads(unwrapList(d, "leads")); }).catch((e) => log("Leads error:", e.message)).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
 
   const addLead = async () => {
@@ -587,11 +739,12 @@ function WorkoutsPage() {
 
   const load = () => {
     Promise.all([
-      api.get("/workouts").catch(() => []),
-      api.get("/clients").catch(() => []),
+      api.get("/workouts").catch(() => ({ workouts: [] })),
+      api.get("/clients").catch(() => ({ clients: [] })),
     ]).then(([w, c]) => {
-      setPlans(w.workouts || w || []);
-      setClients(c.clients || c || []);
+      log("Workouts response:", w);
+      setPlans(unwrapList(w, "workouts", "plans"));
+      setClients(unwrapList(c, "clients"));
     }).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
@@ -708,11 +861,12 @@ function BookingsPage() {
 
   const load = () => {
     Promise.all([
-      api.get("/bookings").catch(() => []),
-      api.get("/clients").catch(() => []),
+      api.get("/bookings").catch(() => ({ bookings: [] })),
+      api.get("/clients").catch(() => ({ clients: [] })),
     ]).then(([b, c]) => {
-      setBookings(b.bookings || b || []);
-      setClients(c.clients || c || []);
+      log("Bookings response:", b);
+      setBookings(unwrapList(b, "bookings", "sessions"));
+      setClients(unwrapList(c, "clients"));
     }).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
@@ -836,13 +990,27 @@ function BookingsPage() {
 // PAGE: REPORTS & ANALYTICS (/api/reports)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function ReportsPage() {
-  const [data, setData] = useState(null);
+  const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
-  const [period, setPeriod] = useState("month");
+  const [activeTab, setActiveTab] = useState("dashboard");
 
   useEffect(() => {
-    api.get(`/reports?period=${period}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
-  }, [period]);
+    setLoading(true);
+    const endpoint = {
+      dashboard: "/reports/coach/dashboard",
+      revenue: "/reports/coach/revenue",
+      clients: "/reports/coach/clients",
+      workouts: "/reports/coach/workouts",
+    }[activeTab] || "/reports/coach/dashboard";
+
+    api.get(endpoint).then((d) => {
+      log(`✅ Reports (${activeTab}):`, d);
+      setData(d?.data || d);
+    }).catch((e) => {
+      log("Reports error:", e.message);
+      setData({});
+    }).finally(() => setLoading(false));
+  }, [activeTab]);
 
   if (loading) return <Spinner />;
 
@@ -854,16 +1022,21 @@ function ReportsPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 style={{ color: colors.text, fontSize: 20, margin: 0, fontWeight: 700 }}>Analytics</h2>
         <div style={{ display: "flex", gap: 6 }}>
-          {["week", "month", "year"].map((p) => (
+          {[
+            { id: "dashboard", label: "Overview" },
+            { id: "revenue", label: "Revenue" },
+            { id: "clients", label: "Clients" },
+            { id: "workouts", label: "Workouts" },
+          ].map((t) => (
             <button
-              key={p}
-              onClick={() => { setLoading(true); setPeriod(p); }}
+              key={t.id}
+              onClick={() => setActiveTab(t.id)}
               style={{
                 padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
-                background: period === p ? colors.accent : colors.surfaceHover,
-                color: period === p ? "#fff" : colors.textMuted,
+                background: activeTab === t.id ? colors.accent : colors.surfaceHover,
+                color: activeTab === t.id ? "#fff" : colors.textMuted,
               }}
-            >{p}</button>
+            >{t.label}</button>
           ))}
         </div>
       </div>
@@ -1024,14 +1197,14 @@ function MessagingPage({ initialClient, onBack }) {
 
   // Load conversations list
   useEffect(() => {
-    api.get("/clients").then((d) => setConversations(d.clients || d || [])).catch(() => {});
+    api.get("/clients").then((d) => setConversations(unwrapList(d, "clients"))).catch((e) => log("Messages clients error:", e.message));
   }, []);
 
   // Load messages for active chat
   useEffect(() => {
     if (!activeChat) return;
     const loadMessages = () => {
-      api.get(`/messages/${activeChat.id || activeChat.userId}`).then((d) => setMessages(d.messages || d || [])).catch(() => {});
+      api.get(`/messages/${activeChat.id || activeChat.userId}`).then((d) => setMessages(unwrapList(d, "messages"))).catch((e) => log("Messages error:", e.message));
     };
     setLoadingMsgs(true);
     loadMessages();
