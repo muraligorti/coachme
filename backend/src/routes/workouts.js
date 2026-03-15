@@ -25,10 +25,16 @@ router.get("/plans", authenticate, authorize("COACH", "ADMIN"), async (req, res)
   } catch (err) { res.status(500).json({ error: "Failed to load plans" }); }
 });
 
-// POST /api/workouts/sessions — Log completed session (client)
+// POST /api/workouts/sessions — Log completed session (client or coach on behalf of client)
 router.post("/sessions", authenticate, authorize("CLIENT", "COACH"), sanitizeBody, audit("log_session", "workout"), async (req, res) => {
   try {
-    const clientProfile = await prisma.clientProfile.findUnique({ where: { userId: req.user.id } });
+    let clientProfile;
+    if (req.user.role === "COACH" && req.body.clientId) {
+      // Coach logging on behalf of a client — use provided clientId directly
+      clientProfile = await prisma.clientProfile.findUnique({ where: { id: req.body.clientId } });
+    } else {
+      clientProfile = await prisma.clientProfile.findUnique({ where: { userId: req.user.id } });
+    }
     if (!clientProfile) return res.status(404).json({ error: "Client profile not found" });
     const session = await prisma.workoutSession.create({
       data: { clientId: clientProfile.id, planId: req.body.planId || null, exerciseName: req.body.exerciseName,

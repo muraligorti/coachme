@@ -48,7 +48,9 @@ router.get("/", authenticate, async (req, res) => {
 // PATCH /api/bookings/:id — Update status (coach can confirm/cancel)
 router.patch("/:id", authenticate, sanitizeBody, audit("update_booking", "booking"), async (req, res) => {
   try {
-    const booking = await prisma.booking.update({ where: { id: req.params.id }, data: { status: req.body.status, cancelReason: req.body.cancelReason } });
+    const updateData = { status: req.body.status, cancelReason: req.body.cancelReason };
+    if (req.body.notes !== undefined) updateData.notes = req.body.notes;
+    const booking = await prisma.booking.update({ where: { id: req.params.id }, data: updateData });
     res.json(booking);
   } catch (err) { res.status(500).json({ error: "Update failed" }); }
 });

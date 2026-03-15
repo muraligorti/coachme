@@ -632,10 +632,263 @@ function WorkoutsPage(){const[tab,setTab]=useState("plans");const[plans,setPlans
   };const fe=EXDB.filter(e=>{if(exS&&!e.name.toLowerCase().includes(exS.toLowerCase()))return false;if(exF!=="all"&&e.muscle!==exF)return false;return true;});const muscles=[...new Set(EXDB.map(e=>e.muscle))];if(loading)return<Spin/>;return<div><ST right={<Btn onClick={()=>setShowB(true)} style={{padding:"8px 16px",fontSize:13}}>+ Create</Btn>}>Workouts</ST><Tabs tabs={[{id:"plans",label:"My Plans"},{id:"library",label:"Exercise Library"},{id:"templates",label:"Templates"}]} active={tab} onChange={setTab}/>{tab==="plans"&&(plans.length===0?<Empty icon="💪" text="No workout plans yet"/>:<div style={{display:"flex",flexDirection:"column",gap:10}}>{plans.map(p=><Card key={p.id} style={{padding:16}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"start"}}><div><div style={{color:C.tx,fontWeight:600,fontSize:15}}>{p.title}</div>{p.description&&<div style={{color:C.mt,fontSize:12,marginTop:4}}>{p.description}</div>}</div><Badge color={p.status==="active"?C.ok:C.mt}>{p.status||"draft"}</Badge></div>{p.exercises&&Array.isArray(p.exercises)&&<div style={{marginTop:10,display:"flex",flexWrap:"wrap",gap:4}}>{p.exercises.slice(0,4).map((ex,i)=><span key={i} style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:500,background:C.ac+"15",color:C.ac}}>{ex.name||ex}</span>)}</div>}</Card>)}</div>)}{tab==="library"&&<div><Input placeholder="Search exercises…" value={exS} onChange={e=>setExS(e.target.value)} style={{marginBottom:10}}/><div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:12}}><button onClick={()=>setExF("all")} style={{padding:"4px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:exF==="all"?C.ac:C.s2,color:exF==="all"?"#fff":C.mt}}>All</button>{muscles.map(m=><button key={m} onClick={()=>setExF(m)} style={{padding:"4px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:exF===m?C.ac:C.s2,color:exF===m?"#fff":C.mt}}>{m}</button>)}</div>{fe.map((e,i)=><Card key={i} style={{padding:12,marginBottom:6,display:"flex",alignItems:"center",gap:12}}><div style={{width:36,height:36,borderRadius:10,background:C.ac+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🏋️</div><div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:C.tx}}>{e.name}</div><div style={{fontSize:11,color:C.mt}}>{e.muscle} · {e.eq}</div></div></Card>)}</div>}{tab==="templates"&&<div style={{display:"flex",flexDirection:"column",gap:10}}>{[{n:"PPL - Push",ex:6,lv:"Intermediate"},{n:"PPL - Pull",ex:6,lv:"Intermediate"},{n:"PPL - Legs",ex:6,lv:"Intermediate"},{n:"Full Body Beginner",ex:8,lv:"Beginner"},{n:"Upper/Lower A",ex:6,lv:"Advanced"}].map((t,i)=><Card key={i} style={{padding:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{t.n}</div><div style={{fontSize:12,color:C.mt}}>{t.ex} exercises · {t.lv}</div></div><Btn variant="secondary" style={{padding:"6px 12px",fontSize:12}}>Use</Btn></Card>)}</div>}<Modal open={showB} onClose={()=>setShowB(false)} title="Create Workout" wide><div style={{display:"flex",flexDirection:"column",gap:12}}><Input label="Title" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. PPL Week 1"/><Input label="Description" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/>{clients.length>0&&<Sel label="Assign" value={form.clientId} onChange={e=>setForm({...form,clientId:e.target.value})} options={[{value:"",label:"— Select —"},...clients.map(c=>({value:c.id,label:cName(c)}))]}/>}<div style={{fontSize:14,fontWeight:600,color:C.tx,marginTop:8}}>Exercises</div>{form.exercises.map((ex,i)=><Card key={i} style={{padding:12,background:C.s2}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:12,color:C.mt,fontWeight:600}}>#{i+1}</span>{form.exercises.length>1&&<button onClick={()=>rmEx(i)} style={{background:"none",border:"none",cursor:"pointer",color:C.dg,fontSize:18}}>✕</button>}</div><Sel value={ex.name} onChange={e=>upEx(i,"name",e.target.value)} options={[{value:"",label:"— Pick —"},...EXDB.map(e=>({value:e.name,label:`${e.name} (${e.muscle})`}))]} style={{marginBottom:8}}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><Input label="Sets" type="number" value={ex.sets} onChange={e=>upEx(i,"sets",+e.target.value)}/><Input label="Reps" type="number" value={ex.reps} onChange={e=>upEx(i,"reps",+e.target.value)}/><Input label="Rest(s)" type="number" value={ex.rest} onChange={e=>upEx(i,"rest",+e.target.value)}/></div></Card>)}<Btn variant="secondary" onClick={addEx} style={{width:"100%"}}>+ Exercise</Btn><Btn onClick={save} style={{width:"100%"}}>Save Plan</Btn></div></Modal></div>;}
 
 // ─── BOOKINGS ─────────────────────────────────────────────────────────────────
+// ─── LIVE SESSION TRACKER ──────────────────────────────────────────────────────
+function LiveSessionPage({ booking, clients, onBack, onComplete }) {
+  const [phase, setPhase] = useState("recording"); // recording → processing → review → done
+  const [transcript, setTranscript] = useState("");
+  const [manualNotes, setManualNotes] = useState("");
+  const [timer, setTimer] = useState(0);
+  const [exercises, setExercises] = useState([]);
+  const [sessionNotes, setSessionNotes] = useState("");
+  const [attended, setAttended] = useState(true);
+  const [error, setError] = useState("");
+  const [showTranscript, setShowTranscript] = useState(false);
+  const recognitionRef = useRef(null);
+  const timerRef = useRef(null);
+  const wakeLockRef = useRef(null);
+
+  const clientName = cName(booking.client) || clients?.find(c => c.id === booking.clientId)?.displayName || "Client";
+
+  // Timer
+  useEffect(() => {
+    if (phase === "recording") {
+      timerRef.current = setInterval(() => setTimer(t => t + 1), 1000);
+      return () => clearInterval(timerRef.current);
+    }
+    if (timerRef.current) clearInterval(timerRef.current);
+  }, [phase]);
+
+  // WakeLock
+  useEffect(() => {
+    if (phase === "recording" && navigator.wakeLock) {
+      navigator.wakeLock.request("screen").then(wl => { wakeLockRef.current = wl; }).catch(() => {});
+    }
+    return () => { if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); wakeLockRef.current = null; } };
+  }, [phase]);
+
+  // Speech Recognition
+  useEffect(() => {
+    if (phase !== "recording") return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    let finalTranscript = "";
+    recognition.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          finalTranscript += e.results[i][0].transcript + " ";
+        } else {
+          interim += e.results[i][0].transcript;
+        }
+      }
+      setTranscript(finalTranscript + interim);
+    };
+    recognition.onend = () => {
+      // Auto-restart on silence
+      if (phase === "recording") try { recognition.start(); } catch {}
+    };
+    recognition.onerror = () => {
+      if (phase === "recording") setTimeout(() => { try { recognition.start(); } catch {} }, 1000);
+    };
+    try { recognition.start(); } catch {}
+    recognitionRef.current = recognition;
+    return () => { try { recognition.stop(); } catch {} };
+  }, [phase]);
+
+  const formatTime = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+
+  const endRecording = async () => {
+    if (recognitionRef.current) try { recognitionRef.current.stop(); } catch {}
+    setPhase("processing");
+    const fullText = (transcript + "\n" + manualNotes).trim();
+    if (!fullText) {
+      setError("No transcript captured. Please add notes manually.");
+      setExercises([{ name: "", sets: 3, reps: 10, weight: "", notes: "" }]);
+      setPhase("review");
+      return;
+    }
+    try {
+      const prompt = `You are a fitness session parser. Extract exercises from this coaching session transcript. Return ONLY valid JSON, no markdown.
+
+Session: ${booking.sessionType || "training"}, Client: ${clientName}, Duration: ${formatTime(timer)}
+
+Transcript:
+"""
+${fullText}
+"""
+
+Return JSON format:
+{
+  "exercises": [
+    { "name": "Exercise Name", "sets": 3, "reps": 10, "weight": "60kg", "notes": "" }
+  ],
+  "sessionNotes": "Brief session summary"
+}
+
+If no exercises found, return {"exercises": [], "sessionNotes": "General session"}.`;
+      const r = await api.post("/ai/chat", { message: prompt });
+      const reply = r.reply || r.message || r.response || "";
+      // Try to extract JSON from response
+      let parsed;
+      try {
+        const jsonMatch = reply.match(/\{[\s\S]*\}/);
+        parsed = JSON.parse(jsonMatch ? jsonMatch[0] : reply);
+      } catch {
+        parsed = { exercises: [], sessionNotes: reply.slice(0, 200) };
+      }
+      setExercises((parsed.exercises || []).map(ex => ({
+        name: ex.name || "", sets: ex.sets || 3, reps: ex.reps || 10,
+        weight: ex.weight || "", notes: ex.notes || ""
+      })));
+      if (parsed.sessionNotes) setSessionNotes(parsed.sessionNotes);
+    } catch (e) {
+      setError("AI extraction failed: " + e.message + ". You can add exercises manually.");
+      setExercises([{ name: "", sets: 3, reps: 10, weight: "", notes: "" }]);
+    }
+    setPhase("review");
+  };
+
+  const addExercise = () => setExercises([...exercises, { name: "", sets: 3, reps: 10, weight: "", notes: "" }]);
+  const removeExercise = (i) => setExercises(exercises.filter((_, j) => j !== i));
+  const updateExercise = (i, field, value) => setExercises(exercises.map((ex, j) => j === i ? { ...ex, [field]: value } : ex));
+
+  const saveSession = async () => {
+    setPhase("done");
+    try {
+      // 1. Mark booking as COMPLETED with transcript in notes
+      const fullTranscript = (transcript + (manualNotes ? "\n\nManual Notes:\n" + manualNotes : "")).trim();
+      await api.req(`/bookings/${booking.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: attended ? "COMPLETED" : "ABSENT",
+          notes: (fullTranscript ? "Session Transcript:\n" + fullTranscript + "\n\n" : "") + (sessionNotes ? "AI Summary:\n" + sessionNotes : "")
+        })
+      });
+      // 2. Log each exercise as a workout session
+      const validExercises = exercises.filter(ex => ex.name.trim());
+      for (const ex of validExercises) {
+        await api.post("/workouts/sessions", {
+          clientId: booking.clientId || booking.client?.id,
+          exerciseName: ex.name,
+          sets: parseInt(ex.sets) || 0,
+          reps: parseInt(ex.reps) || 0,
+          intensity: ex.weight || null,
+          durationSeconds: timer,
+          notes: ex.notes || null,
+        });
+      }
+      onComplete?.();
+    } catch (e) {
+      setError("Save failed: " + e.message);
+      setPhase("review");
+    }
+  };
+
+  // ── RECORDING PHASE ──
+  if (phase === "recording") return <div style={{ minHeight: "100dvh", background: C.bg, padding: 20, display: "flex", flexDirection: "column" }}>
+    <div style={{ textAlign: "center", marginBottom: 20 }}>
+      <div style={{ fontSize: 12, color: C.mt, marginBottom: 4 }}>LIVE SESSION</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: C.tx }}>{clientName}</div>
+    </div>
+    <Card style={{ textAlign: "center", marginBottom: 16 }}>
+      <div style={{ fontSize: 48, fontWeight: 800, color: C.ac, fontVariantNumeric: "tabular-nums" }}>{formatTime(timer)}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 8 }}>
+        <div style={{ width: 10, height: 10, borderRadius: 5, background: C.dg, animation: "pulse 1.5s ease infinite" }} />
+        <span style={{ fontSize: 13, color: C.dg, fontWeight: 600 }}>Recording</span>
+      </div>
+    </Card>
+    <Card style={{ flex: 1, marginBottom: 16, overflow: "auto", maxHeight: 200 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: C.mt, marginBottom: 8 }}>Live Transcript</div>
+      <div style={{ fontSize: 13, color: C.tx, lineHeight: 1.6, minHeight: 60 }}>{transcript || <span style={{ color: C.mt, fontStyle: "italic" }}>Listening... speak naturally during the session</span>}</div>
+    </Card>
+    <TextArea label="Manual Notes (optional)" value={manualNotes} onChange={e => setManualNotes(e.target.value)} placeholder="Type extra notes here..." style={{ marginBottom: 16 }} />
+    <div style={{ display: "flex", gap: 8 }}>
+      <Btn variant="secondary" onClick={onBack} style={{ flex: 1 }}>Cancel</Btn>
+      <Btn variant="danger" onClick={endRecording} style={{ flex: 2, background: C.dg, color: "#fff" }}>End Session</Btn>
+    </div>
+  </div>;
+
+  // ── PROCESSING PHASE ──
+  if (phase === "processing") return <div style={{ minHeight: "100dvh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 20, padding: 20 }}>
+    <Spin />
+    <div style={{ color: C.tx, fontSize: 16, fontWeight: 600 }}>Analyzing session...</div>
+    <div style={{ color: C.mt, fontSize: 13, textAlign: "center" }}>AI is extracting exercises from the transcript</div>
+  </div>;
+
+  // ── DONE PHASE ──
+  if (phase === "done" && !error) return <div style={{ minHeight: "100dvh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16, padding: 20 }}>
+    <div style={{ fontSize: 48 }}>✅</div>
+    <div style={{ color: C.tx, fontSize: 18, fontWeight: 700 }}>Session Saved!</div>
+    <div style={{ color: C.mt, fontSize: 13, textAlign: "center" }}>
+      {exercises.filter(e => e.name.trim()).length} exercise(s) logged for {clientName}
+    </div>
+    <Btn onClick={onBack} style={{ marginTop: 12 }}>Back to Schedule</Btn>
+  </div>;
+
+  // ── REVIEW PHASE ──
+  return <div style={{ background: C.bg, padding: 16, minHeight: "100dvh" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <h2 style={{ color: C.tx, fontSize: 18, margin: 0, fontWeight: 700 }}>Review Session</h2>
+      <Badge color={C.ac}>{formatTime(timer)}</Badge>
+    </div>
+    {error && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10, marginBottom: 12 }}>{error}</div>}
+
+    {/* Attendance toggle */}
+    <Card style={{ marginBottom: 12, padding: 14, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div><div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{clientName}</div><div style={{ fontSize: 12, color: C.mt }}>Attendance</div></div>
+      <button onClick={() => setAttended(!attended)} style={{ padding: "8px 16px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, background: attended ? C.ok + "20" : C.dg + "20", color: attended ? C.ok : C.dg }}>{attended ? "✅ Present" : "❌ Absent"}</button>
+    </Card>
+
+    {/* Exercises table */}
+    <Card style={{ marginBottom: 12, padding: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>Exercises ({exercises.length})</div>
+        <button onClick={addExercise} style={{ padding: "4px 12px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: C.ac + "20", color: C.ac }}>+ Add</button>
+      </div>
+      {exercises.length === 0 ? <div style={{ color: C.mt, fontSize: 13, textAlign: "center", padding: 16 }}>No exercises extracted. Tap "+ Add" to add manually.</div> :
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {exercises.map((ex, i) => <div key={i} style={{ padding: 12, background: C.s2, borderRadius: 10, position: "relative" }}>
+            <button onClick={() => removeExercise(i)} style={{ position: "absolute", top: 6, right: 8, background: "none", border: "none", color: C.dg, cursor: "pointer", fontSize: 16 }}>×</button>
+            <Input label="Exercise" value={ex.name} onChange={e => updateExercise(i, "name", e.target.value)} placeholder="e.g. Bench Press" style={{ marginBottom: 8 }} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+              <Input label="Sets" type="number" value={ex.sets} onChange={e => updateExercise(i, "sets", e.target.value)} />
+              <Input label="Reps" type="number" value={ex.reps} onChange={e => updateExercise(i, "reps", e.target.value)} />
+              <Input label="Weight" value={ex.weight} onChange={e => updateExercise(i, "weight", e.target.value)} placeholder="60kg" />
+            </div>
+            <Input label="Notes" value={ex.notes} onChange={e => updateExercise(i, "notes", e.target.value)} placeholder="Optional" style={{ marginTop: 6 }} />
+          </div>)}
+        </div>}
+    </Card>
+
+    {/* Session notes */}
+    <TextArea label="Session Notes" value={sessionNotes} onChange={e => setSessionNotes(e.target.value)} placeholder="Session summary..." style={{ marginBottom: 12 }} />
+
+    {/* Collapsible transcript */}
+    <button onClick={() => setShowTranscript(!showTranscript)} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1px solid ${C.bd}`, cursor: "pointer", background: C.sf, color: C.mt, fontSize: 13, fontWeight: 600, textAlign: "left", marginBottom: 12 }}>
+      {showTranscript ? "▾" : "▸"} Full Transcript
+    </button>
+    {showTranscript && <Card style={{ marginBottom: 12, padding: 14, maxHeight: 200, overflow: "auto" }}>
+      <div style={{ fontSize: 12, color: C.tx, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{transcript || "(no transcript)"}</div>
+      {manualNotes && <><div style={{ fontSize: 11, fontWeight: 600, color: C.mt, marginTop: 8, marginBottom: 4 }}>Manual Notes:</div><div style={{ fontSize: 12, color: C.tx, lineHeight: 1.6 }}>{manualNotes}</div></>}
+    </Card>}
+
+    {/* Actions */}
+    <div style={{ display: "flex", gap: 8 }}>
+      <Btn variant="secondary" onClick={onBack} style={{ flex: 1 }}>Discard</Btn>
+      <Btn onClick={saveSession} disabled={!attended && exercises.filter(e => e.name.trim()).length === 0} style={{ flex: 2 }}>Save & Complete</Btn>
+    </div>
+  </div>;
+}
+
 function BookingsPage(){
   const[bookings,setBookings]=useState([]);const[loading,setLoading]=useState(true);
   const[showAdd,setShowAdd]=useState(false);const[showRepeat,setShowRepeat]=useState(false);
   const[clients,setClients]=useState([]);const[viewMode,setViewMode]=useState("week");
+  const[activeSession,setActiveSession]=useState(null);
   const[currentMonth,setCurrentMonth]=useState(new Date());
   const[selDate,setSelDate]=useState(new Date().toISOString().slice(0,10));
   const[holidays,setHolidays]=useState(ls.get("holidays",[]));
@@ -857,6 +1110,9 @@ function BookingsPage(){
 
   if(loading)return<Spin/>;
 
+  // If a live session is active, render LiveSessionPage fullscreen
+  if(activeSession)return<LiveSessionPage booking={activeSession} clients={clients} onBack={()=>setActiveSession(null)} onComplete={()=>{setActiveSession(null);load();}}/>;
+
   return<div>
     <ST right={<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
       <button onClick={()=>setViewMode(viewMode==="month"?"week":"month")} style={{padding:"6px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:C.s2,color:C.mt}}>{viewMode==="month"?"📅 Week":"📆 Month"}</button>
@@ -948,6 +1204,7 @@ function BookingsPage(){
             </div>
           </div>
           <div style={{display:"flex",gap:4}}>
+            {st==="confirmed"&&<button onClick={()=>setActiveSession(b)} style={{flex:1,padding:"6px 2px",borderRadius:8,border:"none",cursor:"pointer",fontSize:10,fontWeight:600,background:C.ac+"30",color:C.ac}}>🎙️ Live Session</button>}
             {[{s:"confirmed",l:"✅ Confirm",c:C.ok},{s:"cancelled",l:"🚫 Cancel",c:C.dg},{s:"pending",l:"⏳ Pending",c:C.wn}].map(a=>
               <button key={a.s} onClick={()=>markAttendance(b.id,a.s)} style={{flex:1,padding:"6px 2px",borderRadius:8,border:"none",cursor:"pointer",fontSize:10,fontWeight:600,background:st===a.s?a.c+"30":C.s2,color:st===a.s?a.c:C.mt}}>{a.l}</button>
             )}
