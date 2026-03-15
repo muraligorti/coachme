@@ -30,6 +30,24 @@ export const prisma = new PrismaClient({
   log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
 });
 
+// Auto-migrate: add missing columns to ClientProfile
+(async () => {
+  const cols = [
+    { name: "phone", type: "TEXT" },
+    { name: "notes", type: "TEXT" },
+    { name: "emergencyContact", type: "TEXT" },
+    { name: "address", type: "TEXT" },
+    { name: "dob", type: "TEXT" },
+    { name: "injuries", type: "TEXT" },
+  ];
+  for (const col of cols) {
+    try {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "ClientProfile" ADD COLUMN IF NOT EXISTS "${col.name}" ${col.type}`);
+    } catch (e) { /* column likely exists */ }
+  }
+  console.log("ClientProfile schema migration: done");
+})();
+
 export const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
   maxRetriesPerRequest: 3,
   retryStrategy: (times) => Math.min(times * 50, 2000),

@@ -7,4 +7,4 @@ COPY prisma ./prisma
 RUN npx prisma generate
 COPY . .
 EXPOSE 4000
-CMD ["node", "start.js"]
+CMD ["node", "src/server.js"]
