@@ -73,7 +73,7 @@ router.post("/register", registerLimiter, sanitizeBody, audit("register", "user"
 
     // Check existing user
     const existing = await prisma.user.findUnique({ where: { email: data.email } });
-    if (existing) {
+    if (existing && existing.passwordHash !== "PENDING_INVITE") {
       return res.status(409).json({ error: "Email already registered" });
     }
 
@@ -82,73 +82,98 @@ router.post("/register", registerLimiter, sanitizeBody, audit("register", "user"
 
     // Create user + profile + subscription in transaction
     const user = await prisma.$transaction(async (tx) => {
-      const newUser = await tx.user.create({
-        data: {
-          email: data.email,
-          passwordHash,
-          role: data.role,
-        },
-      });
-
-      // Create role-specific profile
-      if (data.role === "COACH") {
-        const sessionTypes = [];
-        if (data.profile.online !== false) sessionTypes.push("ONLINE");
-        if (data.profile.inPerson) sessionTypes.push("IN_PERSON");
-
-        await tx.coachProfile.create({
-          data: {
-            userId: newUser.id,
-            displayName: data.profile.displayName,
-            phone: data.profile.phone || null,
-            country: data.profile.country || "",
-            city: data.profile.city || "",
-            specializations: data.profile.specializations || [],
-            certifications: data.profile.certifications || [],
-            languages: data.profile.languages || ["English"],
-            experienceYears: data.profile.experienceYears || 0,
-            pricePerSession: data.profile.pricePerSession || 30,
-            sessionTypes: sessionTypes.length ? sessionTypes : ["ONLINE"],
-            bio: data.profile.bio || null,
-            instagram: data.profile.instagram || null,
-            website: data.profile.website || null,
-            gymName: data.profile.gymName || null,
-          },
+      let newUser;
+      if (existing && existing.passwordHash === "PENDING_INVITE") {
+        // User was pre-created by coach — claim the account
+        newUser = await tx.user.update({
+          where: { id: existing.id },
+          data: { passwordHash, role: data.role || existing.role },
         });
+        // Update profile displayName if it exists
+        const existingProfile = data.role === "COACH"
+          ? await tx.coachProfile.findUnique({ where: { userId: existing.id } })
+          : await tx.clientProfile.findUnique({ where: { userId: existing.id } });
+        if (existingProfile) {
+          if (data.role === "COACH") {
+            await tx.coachProfile.update({ where: { userId: existing.id }, data: { displayName: data.profile.displayName } });
+          } else {
+            await tx.clientProfile.update({ where: { userId: existing.id }, data: { displayName: data.profile.displayName } });
+          }
+        }
       } else {
-        await tx.clientProfile.create({
-          data: {
-            userId: newUser.id,
-            displayName: data.profile.displayName,
-            age: data.profile.age || null,
-            gender: data.profile.gender || null,
-            heightCm: data.profile.heightCm || null,
-            weightKg: data.profile.weightKg || null,
-            country: data.profile.country || null,
-            city: data.profile.city || null,
-            fitnessGoals: data.profile.fitnessGoals || [],
-          },
+        newUser = await tx.user.create({
+          data: { email: data.email, passwordHash, role: data.role },
         });
+      }
 
-        // Create encrypted medical data record if conditions provided
-        if (data.profile.conditions?.length) {
-          await tx.medicalData.create({
+      // Create role-specific profile (skip if already exists from coach invite)
+      const hasProfile = existing ? !!(data.role === "COACH"
+        ? await tx.coachProfile.findUnique({ where: { userId: newUser.id } })
+        : await tx.clientProfile.findUnique({ where: { userId: newUser.id } })) : false;
+
+      if (!hasProfile) {
+        if (data.role === "COACH") {
+          const sessionTypes = [];
+          if (data.profile.online !== false) sessionTypes.push("ONLINE");
+          if (data.profile.inPerson) sessionTypes.push("IN_PERSON");
+
+          await tx.coachProfile.create({
             data: {
-              clientId: (await tx.clientProfile.findUnique({ where: { userId: newUser.id } })).id,
-              conditionsEnc: encryptField(JSON.stringify(data.profile.conditions)),
+              userId: newUser.id,
+              displayName: data.profile.displayName,
+              phone: data.profile.phone || null,
+              country: data.profile.country || "",
+              city: data.profile.city || "",
+              specializations: data.profile.specializations || [],
+              certifications: data.profile.certifications || [],
+              languages: data.profile.languages || ["English"],
+              experienceYears: data.profile.experienceYears || 0,
+              pricePerSession: data.profile.pricePerSession || 30,
+              sessionTypes: sessionTypes.length ? sessionTypes : ["ONLINE"],
+              bio: data.profile.bio || null,
+              instagram: data.profile.instagram || null,
+              website: data.profile.website || null,
+              gymName: data.profile.gymName || null,
             },
           });
+        } else {
+          await tx.clientProfile.create({
+            data: {
+              userId: newUser.id,
+              displayName: data.profile.displayName,
+              age: data.profile.age || null,
+              gender: data.profile.gender || null,
+              heightCm: data.profile.heightCm || null,
+              weightKg: data.profile.weightKg || null,
+              country: data.profile.country || null,
+              city: data.profile.city || null,
+              fitnessGoals: data.profile.fitnessGoals || [],
+            },
+          });
+
+          // Create encrypted medical data record if conditions provided
+          if (data.profile.conditions?.length) {
+            await tx.medicalData.create({
+              data: {
+                clientId: (await tx.clientProfile.findUnique({ where: { userId: newUser.id } })).id,
+                conditionsEnc: encryptField(JSON.stringify(data.profile.conditions)),
+              },
+            });
+          }
         }
       }
 
-      // Create subscription (free tier)
-      await tx.subscription.create({
-        data: {
-          userId: newUser.id,
-          tier: data.role === "COACH" ? "STARTER" : "FREE",
-          maxClients: data.role === "COACH" ? 5 : 999,
-        },
-      });
+      // Create subscription (skip if exists)
+      const hasSub = existing ? !!(await tx.subscription.findUnique({ where: { userId: newUser.id } })) : false;
+      if (!hasSub) {
+        await tx.subscription.create({
+          data: {
+            userId: newUser.id,
+            tier: data.role === "COACH" ? "STARTER" : "FREE",
+            maxClients: data.role === "COACH" ? 5 : 999,
+          },
+        });
+      }
 
       return newUser;
     });
