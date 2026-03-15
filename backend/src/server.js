@@ -52,6 +52,7 @@ export const logger = winston.createLogger({
 // ─── Express App ─────────────────────────────────────────────────────
 
 const app = express();
+app.set("trust proxy", 1); // Trust first proxy (Railway) so rate limiters see real client IP
 const PORT = parseInt(process.env.PORT || "4000");
 
 // ─── Security Middleware ─────────────────────────────────────────────
