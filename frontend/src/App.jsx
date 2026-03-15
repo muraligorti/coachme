@@ -87,7 +87,7 @@ const Splash=()=><div style={{height:"100dvh",display:"flex",alignItems:"center"
 function AuthScreen(){const{login,register}=useAuth();const[mode,setMode]=useState("login");const[form,setForm]=useState({name:"",email:"",password:"",role:"coach"});const[error,setError]=useState("");const[busy,setBusy]=useState(false);const submit=async()=>{setError("");if(!form.email||!form.password)return setError("Email and password required");setBusy(true);try{mode==="login"?await login(form.email,form.password):await register(form);}catch(e){setError(e.message);}setBusy(false);};return<div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg,padding:20}}><Card style={{maxWidth:400,width:"100%"}}><div style={{textAlign:"center",marginBottom:28}}><div style={{width:52,height:52,borderRadius:14,background:C.gr,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:800,color:"#fff",marginBottom:12}}>C</div><h1 style={{color:C.tx,margin:0,fontSize:22,fontWeight:700}}>CoachMe.life</h1><p style={{color:C.mt,margin:"6px 0 0",fontSize:14}}>{mode==="login"?"Welcome back":"Create your account"}</p></div><div style={{display:"flex",flexDirection:"column",gap:14}}>{mode==="register"&&<><Input label="Full Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="John Doe"/><Sel label="I am a…" value={form.role} onChange={e=>setForm({...form,role:e.target.value})} options={[{value:"COACH",label:"Coach"},{value:"CLIENT",label:"Client"}]}/></>}<Input label="Email" type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="you@email.com"/><Input label="Password" type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&submit()}/>{error&&<div style={{color:C.dg,fontSize:13,padding:"8px 12px",background:C.dg+"15",borderRadius:8}}>{error}</div>}<Btn onClick={submit} disabled={busy} style={{width:"100%"}}>{busy?"Please wait…":mode==="login"?"Sign In":"Create Account"}</Btn><p style={{color:C.mt,fontSize:13,textAlign:"center",margin:0}}>{mode==="login"?"No account?":"Have an account?"}{" "}<span onClick={()=>{setMode(mode==="login"?"register":"login");setError("");}} style={{color:C.ac,cursor:"pointer",fontWeight:600}}>{mode==="login"?"Sign Up":"Sign In"}</span></p></div></Card></div>;}
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function DashboardPage(){const{user}=useAuth();const[stats,setStats]=useState({});const[up,setUp]=useState([]);const[clientCount,setClientCount]=useState(0);const[leadCount,setLeadCount]=useState(0);const[loading,setLoading]=useState(true);useEffect(()=>{Promise.all([api.get("/reports/coach/dashboard").catch(()=>({})),api.get("/bookings").catch(()=>({})),api.get("/clients").catch(()=>({})),api.get("/leads").catch(()=>({}))]).then(([s,b,c,l])=>{setStats(s?.data||s||{});const cl=unwrap(c,"clients");setClientCount(cl.length);const ld=unwrap(l,"leads");const localLeads=ls.get("local_leads",[]);setLeadCount(ld.length+localLeads.filter(ll=>!ld.some(al=>al.id===ll.id)).length);const apiBk=unwrap(b,"bookings","sessions");const localBk=ls.get("local_bookings",[]);const allBk=[...apiBk,...localBk.filter(lb=>!apiBk.some(ab=>ab.id===lb.id))];const now=new Date();setUp(allBk.filter(x=>{try{return new Date(x.date||x.startTime||x.scheduledAt)>=now&&x.status!=="cancelled";}catch{return false;}}).sort((a,b)=>new Date(a.date||a.startTime||a.scheduledAt)-new Date(b.date||b.startTime||b.scheduledAt)).slice(0,5));}).finally(()=>setLoading(false));},[]);if(loading)return<Spin/>;const g=new Date().getHours()<12?"Good morning":new Date().getHours()<17?"Good afternoon":"Good evening";return<div><div style={{marginBottom:20}}><div style={{fontSize:14,color:C.mt}}>{g},</div><h2 style={{color:C.tx,fontSize:22,margin:"4px 0 0",fontWeight:700}}>{user?.name||"Coach"} 👋</h2></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><SC label="Active Clients" value={clientCount||stats.activeClients||stats.totalClients||0} icon="👥" color={C.ac}/><SC label="Monthly Revenue" value={`₹${(stats.monthlyRevenue??stats.totalRevenue??0).toLocaleString()}`} icon="📈" color={C.ok}/><SC label="Upcoming" value={up.length||stats.upcomingBookings||0} icon="📅" color={C.a2}/><SC label="Leads" value={leadCount||stats.totalLeads||0} icon="🎯" color={C.wn}/></div><Card style={{marginTop:16}}><div style={{fontSize:15,fontWeight:600,color:C.tx,marginBottom:12}}>Upcoming Sessions</div>{up.length===0?<div style={{color:C.mt,fontSize:13}}>No upcoming sessions</div>:up.map(s=><div key={s.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.bd}`}}><div style={{width:40,height:40,borderRadius:10,background:C.ac+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>📅</div><div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{cName(s.client)||s.type||"Session"}</div><div style={{fontSize:12,color:C.mt}}>{new Date(s.date||s.startTime||s.scheduledAt).toLocaleDateString()} · {s.duration||60}min</div></div><Badge color={s.status==="confirmed"?C.ok:C.wn}>{s.status||"pending"}</Badge></div>)}</Card></div>;}
+function DashboardPage(){const{user}=useAuth();const[stats,setStats]=useState({});const[up,setUp]=useState([]);const[clientCount,setClientCount]=useState(0);const[leadCount,setLeadCount]=useState(0);const[loading,setLoading]=useState(true);useEffect(()=>{Promise.all([api.get("/reports/coach/dashboard").catch(()=>({})),api.get("/bookings").catch(()=>({})),api.get("/clients").catch(()=>({})),api.get("/leads").catch(()=>({}))]).then(([s,b,c,l])=>{setStats(s?.data||s||{});const cl=unwrap(c,"clients");setClientCount(cl.length);const ld=unwrap(l,"leads");setLeadCount(ld.length);const allBk=unwrap(b,"bookings","sessions");const now=new Date();setUp(allBk.filter(x=>{try{const st=(x.status||"").toUpperCase();return new Date(x.date||x.startTime||x.scheduledAt)>=now&&st!=="CANCELLED"&&st!=="ABSENT";}catch{return false;}}).sort((a,b)=>new Date(a.date||a.startTime||a.scheduledAt)-new Date(b.date||b.startTime||b.scheduledAt)).slice(0,5));}).finally(()=>setLoading(false));},[]);if(loading)return<Spin/>;const g=new Date().getHours()<12?"Good morning":new Date().getHours()<17?"Good afternoon":"Good evening";return<div><div style={{marginBottom:20}}><div style={{fontSize:14,color:C.mt}}>{g},</div><h2 style={{color:C.tx,fontSize:22,margin:"4px 0 0",fontWeight:700}}>{user?.name||"Coach"} 👋</h2></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><SC label="Active Clients" value={clientCount} icon="👥" color={C.ac}/><SC label="Monthly Revenue" value={`₹${(stats.monthlyRevenue??stats.totalRevenue??0).toLocaleString()}`} icon="📈" color={C.ok}/><SC label="Upcoming" value={up.length} icon="📅" color={C.a2}/><SC label="Leads" value={leadCount} icon="🎯" color={C.wn}/></div><Card style={{marginTop:16}}><div style={{fontSize:15,fontWeight:600,color:C.tx,marginBottom:12}}>Upcoming Sessions</div>{up.length===0?<div style={{color:C.mt,fontSize:13}}>No upcoming sessions</div>:up.map(s=><div key={s.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.bd}`}}><div style={{width:40,height:40,borderRadius:10,background:C.ac+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>📅</div><div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{cName(s.client)||s.type||"Session"}</div><div style={{fontSize:12,color:C.mt}}>{new Date(s.date||s.startTime||s.scheduledAt).toLocaleDateString()} · {s.duration||60}min</div></div><Badge color={(s.status||"").toLowerCase()==="confirmed"?C.ok:C.wn}>{(s.status||"pending").toLowerCase()}</Badge></div>)}</Card></div>;}
 
 // ─── CLIENTS ──────────────────────────────────────────────────────────────────
 function ClientsPage({onOpenChat}){
@@ -107,7 +107,7 @@ function ClientsPage({onOpenChat}){
   useEffect(()=>{load();},[]);
   const filtered=clients.filter(c=>(cName(c)||"").toLowerCase().includes(search.toLowerCase())||(cEmail(c)||"").toLowerCase().includes(search.toLowerCase())||(c.phone||"").includes(search));
 
-  const addClient=async()=>{try{await api.post("/clients",form);setForm(emptyForm);setShowAdd(false);load();}catch(e){alert(e.message);}};
+  const addClient=async()=>{if(!form.name||!form.email){alert("Name and email are required");return;}if(!form.phone){alert("Mobile number is required");return;}try{await api.post("/clients",form);setForm(emptyForm);setShowAdd(false);load();}catch(e){alert(e.message);}};
   const editClient=async()=>{
     const updateData={...form,displayName:form.name};
     // Try multiple update paths
@@ -217,17 +217,20 @@ function ClientsPage({onOpenChat}){
     <Input placeholder="Search by name, email, or phone…" value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:14}}/>
     {filtered.length===0?<Empty icon="👥" text="No clients found"/>:
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
-      {filtered.map(c=><Card key={c.id} onClick={()=>setSel(c)} style={{padding:14,display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}>
-        <div style={{width:42,height:42,borderRadius:12,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:"#fff",flexShrink:0}}>{(cName(c))[0].toUpperCase()}</div>
+      {filtered.map(c=>{const isOnline=c.lastLogin&&(Date.now()-new Date(c.lastLogin).getTime())<15*60*1000;const lastSeen=c.lastLogin?new Date(c.lastLogin):c.lastActive?new Date(c.lastActive):null;const lastSeenText=lastSeen?((Date.now()-lastSeen.getTime())<60*60*1000?`${Math.round((Date.now()-lastSeen.getTime())/60000)}m ago`:lastSeen.toLocaleDateString()):"Never";return<Card key={c.id} onClick={()=>setSel(c)} style={{padding:14,display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}>
+        <div style={{position:"relative",flexShrink:0}}>
+          <div style={{width:42,height:42,borderRadius:12,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:"#fff"}}>{(cName(c))[0].toUpperCase()}</div>
+          <div style={{position:"absolute",bottom:-2,right:-2,width:12,height:12,borderRadius:6,border:`2px solid ${C.sf}`,background:isOnline?C.ok:C.mt}} title={isOnline?"Online":"Offline"}/>
+        </div>
         <div style={{flex:1,minWidth:0}}>
           <div style={{color:C.tx,fontSize:14,fontWeight:600}}>{cName(c)}</div>
           <div style={{color:C.mt,fontSize:12}}>{cEmail(c)}{c.phone?` · ${c.phone}`:""}</div>
+          <div style={{color:C.mt,fontSize:10,marginTop:2}}>{isOnline?<span style={{color:C.ok}}>Online</span>:<span>Last seen: {lastSeenText}</span>}</div>
         </div>
         <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
-          <Badge color={c.sessionType==="online"?C.a2:C.ac} style={{fontSize:10}}>{c.sessionType||"offline"}</Badge>
           <Badge color={c.status==="active"?C.ok:C.mt} style={{fontSize:10}}>{c.status||"active"}</Badge>
         </div>
-      </Card>)}
+      </Card>;})}
     </div>}
 
     {/* Add Client Modal */}
@@ -641,30 +644,32 @@ function BookingsPage(){
 
   const load=()=>{Promise.all([api.get("/bookings").catch(()=>({})),api.get("/clients").catch(()=>({}))]).then(([b,c])=>{
     const apiBk=unwrap(b,"bookings","sessions");
-    const localBk=ls.get("local_bookings",[]);
-    // Merge: API bookings + local bookings (deduped)
-    const merged=[...apiBk,...localBk.filter(lb=>!apiBk.some(ab=>ab.id===lb.id))];
-    setBookings(merged);
+    setBookings(apiBk);
     setClients(unwrap(c,"clients"));
   }).finally(()=>setLoading(false));};
   useEffect(()=>{load();},[]);
 
-  // Smart booking creator — handles role errors by trying multiple approaches
+  // Create booking via API
   const createBooking=async(bookingData)=>{
-    // Try API first — catch any error and fall back to local
-    try{const r=await api.post("/bookings",bookingData);return r;}catch(e){log("Booking API failed:",e.message);}
-    // API failed (403 role error, 404, etc.) — save locally
-    const cl=clients.find(c=>c.id===bookingData.clientId);
-    const localBooking={...bookingData,id:`local_${Date.now()}`,status:"confirmed",client:cl||{displayName:"Session"},createdAt:new Date().toISOString(),_local:true};
-    const existing=ls.get("local_bookings",[]);
-    ls.set("local_bookings",[...existing,localBooking]);
-    setBookings(prev=>[...prev,localBooking]);
-    return localBooking;
+    const r=await api.post("/bookings",bookingData);
+    return r;
   };
 
   const save=async()=>{
+    if(!form.clientId){alert("Please select a client");return;}
     try{
-      await createBooking({...form,date:form.date+"T"+form.time+":00"});
+      // Get coach profile ID from /auth/me
+      const me=await api.get("/auth/me").catch(()=>null);
+      const coachId=me?.profile?.id;
+      if(!coachId){alert("Could not resolve coach profile");return;}
+      await createBooking({
+        clientId:form.clientId,
+        coachId,
+        scheduledAt:form.date+"T"+form.time+":00.000Z",
+        durationMinutes:form.duration||60,
+        sessionType:form.type==="training"||form.type==="group"?"IN_PERSON":"ONLINE",
+        notes:form.notes,
+      });
       setShowAdd(false);load();
     }catch(e){alert("Booking error: "+e.message);}
   };
@@ -673,12 +678,9 @@ function BookingsPage(){
 
   // Attendance
   const markAttendance=async(bid,status)=>{
-    try{await api.put(`/bookings/${bid}`,{status});}catch{}
-    if(String(bid).startsWith("local_")){
-      const local=ls.get("local_bookings",[]).map(b=>b.id===bid?{...b,status}:b);
-      ls.set("local_bookings",local);
-    }
+    try{await api.req(`/bookings/${bid}`,{method:"PATCH",body:JSON.stringify({status:status.toUpperCase()})});}catch(e){log("Attendance update failed:",e.message);}
     setBookings(prev=>prev.map(b=>b.id===bid?{...b,status}:b));
+    if(status==="cancelled")load(); // Refresh to remove from view
   };
 
   // Replicate schedule
@@ -808,9 +810,9 @@ function BookingsPage(){
     alert(`${dayBk.length} session(s) cancelled. WhatsApp notifications sent.`);
   };
 
-  // Helper to get bookings for a date
+  // Helper to get bookings for a date (exclude cancelled)
   const getDateBookings=(dateStr)=>bookings.filter(b=>{
-    try{return new Date(b.date||b.startTime||b.scheduledAt).toISOString().slice(0,10)===dateStr;}catch{return false;}
+    try{const st=(b.status||"").toUpperCase();return new Date(b.date||b.startTime||b.scheduledAt).toISOString().slice(0,10)===dateStr&&st!=="CANCELLED";}catch{return false;}
   });
 
   // ── MONTH CALENDAR HELPERS ──
@@ -913,6 +915,7 @@ function BookingsPage(){
       {db.sort((a,b)=>new Date(a.date||a.startTime||a.scheduledAt)-new Date(b.date||b.startTime||b.scheduledAt)).map(b=>{
         const t=new Date(b.date||b.startTime||b.scheduledAt);
         const clientName=cName(b.client)||b.type||"Session";
+        const st=(b.status||"pending").toLowerCase();
         const statusColors={present:C.ok,confirmed:C.ok,absent:C.dg,cancelled:C.mt,late:C.wn,pending:C.wn};
         return<Card key={b.id} style={{padding:14}}>
           <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:8}}>
@@ -923,11 +926,11 @@ function BookingsPage(){
               <div style={{fontSize:14,fontWeight:600,color:C.tx}}>{clientName}</div>
               <div style={{fontSize:12,color:C.mt}}>{b.duration||60}min · {b.type||"training"}{b._local?" · 📱 Local":""}</div>
             </div>
-            <Badge color={statusColors[b.status]||C.wn}>{b.status||"pending"}</Badge>
+            <Badge color={statusColors[st]||C.wn}>{st}</Badge>
           </div>
           <div style={{display:"flex",gap:4}}>
-            {[{s:"present",l:"✅ Present",c:C.ok},{s:"absent",l:"❌ Absent",c:C.dg},{s:"late",l:"⏰ Late",c:C.wn},{s:"cancelled",l:"🚫 Cancel",c:C.mt}].map(a=>
-              <button key={a.s} onClick={()=>markAttendance(b.id,a.s)} style={{flex:1,padding:"6px 2px",borderRadius:8,border:"none",cursor:"pointer",fontSize:10,fontWeight:600,background:b.status===a.s?a.c+"30":C.s2,color:b.status===a.s?a.c:C.mt}}>{a.l}</button>
+            {[{s:"confirmed",l:"✅ Confirm",c:C.ok},{s:"cancelled",l:"🚫 Cancel",c:C.dg},{s:"pending",l:"⏳ Pending",c:C.wn}].map(a=>
+              <button key={a.s} onClick={()=>markAttendance(b.id,a.s)} style={{flex:1,padding:"6px 2px",borderRadius:8,border:"none",cursor:"pointer",fontSize:10,fontWeight:600,background:st===a.s?a.c+"30":C.s2,color:st===a.s?a.c:C.mt}}>{a.l}</button>
             )}
           </div>
         </Card>;
@@ -947,7 +950,7 @@ function BookingsPage(){
           <Sel label="Type" value={form.type} onChange={e=>setForm({...form,type:e.target.value})} options={[{value:"training",label:"Training"},{value:"assessment",label:"Assessment"},{value:"consultation",label:"Consultation"},{value:"group",label:"Group Class"}]}/>
         </div>
         <TextArea label="Notes" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/>
-        <Btn onClick={save} style={{width:"100%"}}>Confirm Booking</Btn>
+        <Btn onClick={save} disabled={!form.clientId||!form.date||!form.time} style={{width:"100%"}}>Confirm Booking</Btn>
       </div>
     </Modal>
 
