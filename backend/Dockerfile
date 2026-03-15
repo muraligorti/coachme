@@ -7,4 +7,4 @@ COPY prisma ./prisma
 RUN npx prisma generate
 COPY . .
 EXPOSE 4000
-CMD ["sh", "-c", "npx prisma db push 2>&1; node src/server.js"]
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss 2>&1 && echo 'Schema synced' || echo 'Schema sync skipped'; exec node src/server.js"]
