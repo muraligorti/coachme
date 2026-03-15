@@ -194,6 +194,7 @@ model ClientProfile {
   healthData      HealthDataSync[]
   sharingConsents DataSharingConsent[]
   nutritionLogs   NutritionLog[]
+  deviceTokens    DeviceToken[]
 
   @@index([country, city])
   @@index([fitnessGoals])
@@ -509,4 +510,24 @@ model NutritionLog {
   createdAt   DateTime @default(now())
 
   @@index([clientId, date])
+}
+
+// --- DEVICE OAUTH TOKENS ---
+
+model DeviceToken {
+  id            String   @id @default(cuid())
+  clientId      String
+  client        ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  provider      String   // "fitbit", "googleFit", "strava", "huawei", "garmin", etc.
+  accessToken   String   @db.Text
+  refreshToken  String?  @db.Text
+  expiresAt     DateTime?
+  scope         String?
+  providerUserId String?
+  lastSyncAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([clientId, provider])
+  @@index([clientId])
 }

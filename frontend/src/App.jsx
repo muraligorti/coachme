@@ -2602,50 +2602,81 @@ function FitnessDevicesPage(){
   const[showManual,setShowManual]=useState(false);const[tab,setTab]=useState(isCoach?"clients":"connect");
   const[manualForm,setManualForm]=useState({date:new Date().toISOString().slice(0,10),steps:"",heartRateAvg:"",heartRateMax:"",sleepHours:"",sleepQuality:"",caloriesBurned:"",activeMinutes:"",distance:"",weight:"",spo2:"",stressLevel:""});
 
-  useEffect(()=>{if(isCoach)api.get("/clients").then(d=>setClients(unwrap(d,"clients"))).catch(()=>{});},[]);
+  // Handle OAuth callback redirect
+  useEffect(()=>{
+    const params=new URLSearchParams(window.location.search);
+    const connected=params.get("device_connected");
+    if(connected){
+      // Device just connected via OAuth — update state and fetch data
+      const updated={...connections,[connected]:true};
+      setConnections(updated);ls.set("device_connections",updated);
+      // Auto-fetch data from newly connected device
+      api.post(`/health-data/fetch/${connected}`).then(r=>{
+        if(r.data){const newData=[...syncData.filter(d=>d.source!==connected),...(r.data||[])];setSyncData(newData);ls.set("device_data",newData);}
+      }).catch(()=>{});
+      // Clean URL
+      window.history.replaceState({},document.title,window.location.pathname);
+    }
+  },[]);
+
+  useEffect(()=>{
+    if(isCoach){api.get("/clients").then(d=>setClients(unwrap(d,"clients"))).catch(()=>{});}
+    else{
+      // Client: check connected devices from backend
+      api.get("/health-data/connections").then(d=>{
+        const tokens=Array.isArray(d)?d:[];
+        const conn={...connections};
+        tokens.forEach(t=>{conn[t.provider]=true;});
+        setConnections(conn);ls.set("device_connections",conn);
+      }).catch(()=>{});
+    }
+  },[]);
 
   const devices=[
-    {id:"googleFit",name:"Google Fit",icon:"❤️",color:"#4285F4",desc:"Steps, heart rate, workouts, weight",authUrl:"https://accounts.google.com/o/oauth2/auth"},
-    {id:"appleHealth",name:"Apple Health",icon:"🍎",color:"#FF3B30",desc:"All health metrics via HealthKit",note:"Requires iOS app"},
-    {id:"fitbit",name:"Fitbit",icon:"⌚",color:"#00B0B9",desc:"Steps, heart rate, sleep, SpO2",authUrl:"https://www.fitbit.com/oauth2/authorize"},
-    {id:"samsung",name:"Samsung Health",icon:"💙",color:"#1428A0",desc:"Steps, sleep, heart rate, body composition",note:"Requires Android app"},
-    {id:"oneplus",name:"OnePlus Health",icon:"🔴",color:"#F5010C",desc:"Steps, heart rate, sleep, SpO2, stress",note:"Requires OnePlus Health app"},
-    {id:"noise",name:"Noise Fit",icon:"🟢",color:"#00C853",desc:"Steps, heart rate, sleep, SpO2",note:"Requires NoiseFit app"},
-    {id:"boat",name:"boAt Crest",icon:"🔵",color:"#1E88E5",desc:"Steps, heart rate, sleep, SpO2",note:"Requires boAt Crest app"},
-    {id:"realme",name:"Realme Link",icon:"🟡",color:"#F7B500",desc:"Steps, heart rate, sleep, SpO2",note:"Requires Realme Link app"},
-    {id:"garmin",name:"Garmin Connect",icon:"🏃",color:"#007CC3",desc:"GPS, VO2 max, training load, recovery",authUrl:"https://connect.garmin.com/oauthConfirm"},
-    {id:"miband",name:"Mi Band / Zepp",icon:"🟠",color:"#FF6900",desc:"Steps, heart rate, sleep, stress",authUrl:"https://user.huami.com/oauth"},
-    {id:"whoop",name:"WHOOP",icon:"⚫",color:"#E31937",desc:"Strain, recovery, sleep performance",authUrl:"https://api-7.whoop.com/oauth/oauth2/auth"},
-    {id:"polar",name:"Polar",icon:"⬜",color:"#D0021B",desc:"HR zones, running index, recovery",authUrl:"https://flow.polar.com/oauth2/authorization"},
-    {id:"coros",name:"COROS",icon:"🟤",color:"#E65100",desc:"Running, cycling, swimming metrics",authUrl:"https://www.coros.com/oauth"},
-    {id:"strava",name:"Strava",icon:"🧡",color:"#FC4C02",desc:"Running, cycling, swimming activities",authUrl:"https://www.strava.com/oauth/authorize"},
-    {id:"healthConnect",name:"Health Connect",icon:"💚",color:"#0F9D58",desc:"Android unified health data hub",note:"Requires Health Connect app"},
+    {id:"googleFit",name:"Google Fit",icon:"❤️",color:"#4285F4",desc:"Steps, heart rate, workouts, weight",type:"oauth"},
+    {id:"appleHealth",name:"Apple Health",icon:"🍎",color:"#FF3B30",desc:"All health metrics via HealthKit",type:"native",note:"Requires iOS app"},
+    {id:"fitbit",name:"Fitbit",icon:"⌚",color:"#00B0B9",desc:"Steps, heart rate, sleep, SpO2",type:"oauth"},
+    {id:"samsung",name:"Samsung Health",icon:"💙",color:"#1428A0",desc:"Steps, sleep, heart rate, body composition",type:"native",note:"Requires Android app"},
+    {id:"huawei",name:"Huawei Health",icon:"🔴",color:"#CF0A2C",desc:"Steps, heart rate, sleep, SpO2, stress",type:"oauth"},
+    {id:"strava",name:"Strava",icon:"🧡",color:"#FC4C02",desc:"Running, cycling, swimming activities",type:"oauth"},
+    {id:"oneplus",name:"OnePlus Health",icon:"🔴",color:"#F5010C",desc:"Steps, heart rate, sleep, SpO2, stress",type:"native",note:"Requires OnePlus Health app"},
+    {id:"noise",name:"Noise Fit",icon:"🟢",color:"#00C853",desc:"Steps, heart rate, sleep, SpO2",type:"native",note:"Requires NoiseFit app"},
+    {id:"boat",name:"boAt Crest",icon:"🔵",color:"#1E88E5",desc:"Steps, heart rate, sleep, SpO2",type:"native",note:"Requires boAt Crest app"},
+    {id:"realme",name:"Realme Link",icon:"🟡",color:"#F7B500",desc:"Steps, heart rate, sleep, SpO2",type:"native",note:"Requires Realme Link app"},
+    {id:"garmin",name:"Garmin Connect",icon:"🏃",color:"#007CC3",desc:"GPS, VO2 max, training load, recovery",type:"native",note:"Requires Garmin Connect app"},
+    {id:"miband",name:"Mi Band / Zepp",icon:"🟠",color:"#FF6900",desc:"Steps, heart rate, sleep, stress",type:"native",note:"Requires Zepp app"},
+    {id:"healthConnect",name:"Health Connect",icon:"💚",color:"#0F9D58",desc:"Android unified health data hub",type:"native",note:"Requires Health Connect app"},
+    {id:"polar",name:"Polar",icon:"⬜",color:"#D0021B",desc:"HR zones, running index, recovery",type:"native",note:"Requires Polar Flow app"},
+    {id:"coros",name:"COROS",icon:"🟤",color:"#E65100",desc:"Running, cycling, swimming metrics",type:"native",note:"Requires COROS app"},
+    {id:"whoop",name:"WHOOP",icon:"⚫",color:"#E31937",desc:"Strain, recovery, sleep performance",type:"native",note:"Requires WHOOP app"},
   ];
 
-  const genSampleData=(source,days=7)=>{
-    const data=[];for(let i=days-1;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);
-      data.push({date:d.toISOString().slice(0,10),source,steps:Math.floor(5000+Math.random()*9000),heartRateAvg:Math.floor(60+Math.random()*22),heartRateMax:Math.floor(120+Math.random()*65),sleepHours:+(5+Math.random()*3.5).toFixed(1),sleepQuality:Math.floor(55+Math.random()*40),caloriesBurned:Math.floor(1600+Math.random()*1000),activeMinutes:Math.floor(15+Math.random()*70),distance:+(1.5+Math.random()*10).toFixed(1),spo2:Math.floor(94+Math.random()*5),stressLevel:Math.floor(15+Math.random()*55),weight:+(65+Math.random()*20).toFixed(1),syncedAt:new Date().toISOString()});}
-    return data;
-  };
-
-  const toggleConnect=(id)=>{
+  const toggleConnect=async(id)=>{
     const dev=devices.find(d=>d.id===id);
-    if(!connections[id]){
-      const msg=dev.note
-        ?`Connect to ${dev.name}?\n\n${dev.note}\nFor demo, we'll generate sample data to show how sharing works.`
-        :`Connect to ${dev.name}?\n\nThis will ${isCoach?"sync your fitness data":"sync your data and, if you allow, share it with your coach"}.\n\nIn production, this opens ${dev.name}'s OAuth login.`;
-      if(!confirm(msg))return;
-      const sample=genSampleData(id);
-      const newData=[...syncData.filter(d=>d.source!==id),...sample];
-      setSyncData(newData);ls.set("device_data",newData);
-      api.post("/health-data/sync",{entries:sample}).catch(()=>{});
-      // If client and sharing is on, save to shared storage too
-      if(!isCoach&&sharing.shareWithCoach){
-        ls.set("shared_health_data",newData.filter(d=>{const m=sharing.metrics;return true;}));
-      }
+    if(connections[id]){
+      // Disconnect
+      if(!confirm(`Disconnect ${dev.name}?`))return;
+      api.del(`/health-data/disconnect/${id}`).catch(()=>{});
+      const updated={...connections};delete updated[id];
+      setConnections(updated);ls.set("device_connections",updated);
+      setSyncData(prev=>prev.filter(d=>d.source!==id));
+      ls.set("device_data",syncData.filter(d=>d.source!==id));
+      return;
     }
-    const updated={...connections,[id]:!connections[id]};
-    setConnections(updated);ls.set("device_connections",updated);
+    // Connect
+    if(dev.type==="oauth"){
+      // Real OAuth flow — get URL from backend and redirect
+      try{
+        const r=await api.get(`/health-data/oauth/${id}/start`);
+        if(r.url){window.location.href=r.url;return;}
+        else{alert(r.error||`Could not start ${dev.name} OAuth. Admin may need to configure API keys.`);}
+      }catch(e){
+        alert(`${dev.name} OAuth not configured yet.\n\n${e.message}\n\nAdmin needs to set ${id.toUpperCase()}_CLIENT_ID and ${id.toUpperCase()}_CLIENT_SECRET environment variables.`);
+      }
+    }else{
+      // Native app device — inform user
+      alert(`${dev.name}\n\n${dev.note||"Requires the native mobile app."}\n\nSync your data using the ${dev.name} app, then use the "Manual Entry" button to log your metrics here.`);
+    }
   };
 
   const updateSharing=(key,val)=>{
@@ -2774,9 +2805,13 @@ function FitnessDevicesPage(){
       {devices.map(d=><Card key={d.id} style={{padding:14,display:"flex",alignItems:"center",gap:14}}>
         <div style={{width:48,height:48,borderRadius:14,background:d.color+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>{d.icon}</div>
         <div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{d.name}</div><div style={{fontSize:12,color:C.mt}}>{d.desc}</div></div>
-        <button onClick={()=>toggleConnect(d.id)} style={{padding:"8px 16px",borderRadius:10,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:connections[d.id]?C.ok+"20":C.ac+"20",color:connections[d.id]?C.ok:C.ac}}>
-          {connections[d.id]?"✓ Connected":"Connect"}
-        </button>
+        <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
+          <button onClick={()=>toggleConnect(d.id)} style={{padding:"8px 16px",borderRadius:10,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:connections[d.id]?C.ok+"20":C.ac+"20",color:connections[d.id]?C.ok:C.ac}}>
+            {connections[d.id]?"✓ Connected":"Connect"}
+          </button>
+          {connections[d.id]&&d.type==="oauth"&&<button onClick={async()=>{try{const r=await api.post(`/health-data/fetch/${d.id}`);if(r.data){const newData=[...syncData.filter(x=>x.source!==d.id),...r.data];setSyncData(newData);ls.set("device_data",newData);alert(`Synced ${r.fetched||r.data.length} record(s) from ${d.name}`);}else{alert("No new data");}}catch(e){alert("Sync failed: "+e.message);}}} style={{padding:"4px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:C.a2+"20",color:C.a2}}>↻ Sync Now</button>}
+          {d.type==="native"&&!connections[d.id]&&<span style={{fontSize:10,color:C.mt}}>Native app</span>}
+        </div>
       </Card>)}
     </div>}
 
