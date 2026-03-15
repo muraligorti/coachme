@@ -2605,14 +2605,21 @@ function FitnessDevicesPage(){
   useEffect(()=>{if(isCoach)api.get("/clients").then(d=>setClients(unwrap(d,"clients"))).catch(()=>{});},[]);
 
   const devices=[
-    {id:"fitbit",name:"Fitbit",icon:"⌚",color:"#00B0B9",desc:"Steps, heart rate, sleep, SpO2",authUrl:"https://www.fitbit.com/oauth2/authorize"},
     {id:"googleFit",name:"Google Fit",icon:"❤️",color:"#4285F4",desc:"Steps, heart rate, workouts, weight",authUrl:"https://accounts.google.com/o/oauth2/auth"},
     {id:"appleHealth",name:"Apple Health",icon:"🍎",color:"#FF3B30",desc:"All health metrics via HealthKit",note:"Requires iOS app"},
-    {id:"garmin",name:"Garmin Connect",icon:"🏃",color:"#007CC3",desc:"GPS, VO2 max, training load, recovery",authUrl:"https://connect.garmin.com/oauthConfirm"},
+    {id:"fitbit",name:"Fitbit",icon:"⌚",color:"#00B0B9",desc:"Steps, heart rate, sleep, SpO2",authUrl:"https://www.fitbit.com/oauth2/authorize"},
     {id:"samsung",name:"Samsung Health",icon:"💙",color:"#1428A0",desc:"Steps, sleep, heart rate, body composition",note:"Requires Android app"},
-    {id:"whoop",name:"WHOOP",icon:"🔴",color:"#E31937",desc:"Strain, recovery, sleep performance",authUrl:"https://api-7.whoop.com/oauth/oauth2/auth"},
+    {id:"oneplus",name:"OnePlus Health",icon:"🔴",color:"#F5010C",desc:"Steps, heart rate, sleep, SpO2, stress",note:"Requires OnePlus Health app"},
+    {id:"noise",name:"Noise Fit",icon:"🟢",color:"#00C853",desc:"Steps, heart rate, sleep, SpO2",note:"Requires NoiseFit app"},
+    {id:"boat",name:"boAt Crest",icon:"🔵",color:"#1E88E5",desc:"Steps, heart rate, sleep, SpO2",note:"Requires boAt Crest app"},
+    {id:"realme",name:"Realme Link",icon:"🟡",color:"#F7B500",desc:"Steps, heart rate, sleep, SpO2",note:"Requires Realme Link app"},
+    {id:"garmin",name:"Garmin Connect",icon:"🏃",color:"#007CC3",desc:"GPS, VO2 max, training load, recovery",authUrl:"https://connect.garmin.com/oauthConfirm"},
     {id:"miband",name:"Mi Band / Zepp",icon:"🟠",color:"#FF6900",desc:"Steps, heart rate, sleep, stress",authUrl:"https://user.huami.com/oauth"},
-    {id:"polar",name:"Polar",icon:"🔵",color:"#D0021B",desc:"HR zones, running index, recovery",authUrl:"https://flow.polar.com/oauth2/authorization"},
+    {id:"whoop",name:"WHOOP",icon:"⚫",color:"#E31937",desc:"Strain, recovery, sleep performance",authUrl:"https://api-7.whoop.com/oauth/oauth2/auth"},
+    {id:"polar",name:"Polar",icon:"⬜",color:"#D0021B",desc:"HR zones, running index, recovery",authUrl:"https://flow.polar.com/oauth2/authorization"},
+    {id:"coros",name:"COROS",icon:"🟤",color:"#E65100",desc:"Running, cycling, swimming metrics",authUrl:"https://www.coros.com/oauth"},
+    {id:"strava",name:"Strava",icon:"🧡",color:"#FC4C02",desc:"Running, cycling, swimming activities",authUrl:"https://www.strava.com/oauth/authorize"},
+    {id:"healthConnect",name:"Health Connect",icon:"💚",color:"#0F9D58",desc:"Android unified health data hub",note:"Requires Health Connect app"},
   ];
 
   const genSampleData=(source,days=7)=>{
@@ -2624,8 +2631,10 @@ function FitnessDevicesPage(){
   const toggleConnect=(id)=>{
     const dev=devices.find(d=>d.id===id);
     if(!connections[id]){
-      if(dev.note){alert(`${dev.name}: ${dev.note}\n\nRequires the native mobile app.`);return;}
-      if(!confirm(`Connect to ${dev.name}?\n\nThis will ${isCoach?"sync your fitness data":"sync your data and, if you allow, share it with your coach"}.\n\nIn production, this opens ${dev.name}'s OAuth login.`))return;
+      const msg=dev.note
+        ?`Connect to ${dev.name}?\n\n${dev.note}\nFor demo, we'll generate sample data to show how sharing works.`
+        :`Connect to ${dev.name}?\n\nThis will ${isCoach?"sync your fitness data":"sync your data and, if you allow, share it with your coach"}.\n\nIn production, this opens ${dev.name}'s OAuth login.`;
+      if(!confirm(msg))return;
       const sample=genSampleData(id);
       const newData=[...syncData.filter(d=>d.source!==id),...sample];
       setSyncData(newData);ls.set("device_data",newData);
