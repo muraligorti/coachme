@@ -15,7 +15,10 @@ router.get("/", authenticate, authorize("COACH", "ADMIN"), async (req, res) => {
     });
     res.json(links.map(l => ({
       id: l.client.id, name: l.client.displayName, email: l.client.user?.email,
-      status: l.status, startDate: l.startDate, age: l.client.age, goals: l.client.fitnessGoals,
+      phone: l.client.phone, status: l.status, startDate: l.startDate, age: l.client.age,
+      gender: l.client.gender, goals: l.client.fitnessGoals, notes: l.client.notes,
+      emergencyContact: l.client.emergencyContact, address: l.client.address,
+      dob: l.client.dob, injuries: l.client.injuries,
       lastActive: l.client.workoutSessions[0]?.completedAt || null, lastLogin: l.client.user?.lastLogin,
     })));
   } catch (err) { res.status(500).json({ error: "Failed to load clients" }); }
@@ -34,9 +37,13 @@ router.post("/", authenticate, authorize("COACH"), checkClientLimit, sanitizeBod
       let clientProfile;
       if (user) {
         clientProfile = await tx.clientProfile.findUnique({ where: { userId: user.id } });
+        // Update phone if provided and client exists
+        if (clientProfile && phone) {
+          clientProfile = await tx.clientProfile.update({ where: { id: clientProfile.id }, data: { phone } });
+        }
       } else {
         user = await tx.user.create({ data: { email, passwordHash: "PENDING_INVITE", role: "CLIENT" } });
-        clientProfile = await tx.clientProfile.create({ data: { userId: user.id, displayName: name, age, fitnessGoals: goals || [] } });
+        clientProfile = await tx.clientProfile.create({ data: { userId: user.id, displayName: name, phone: phone || null, age, fitnessGoals: goals || [] } });
         await tx.subscription.create({ data: { userId: user.id, tier: "FREE" } });
       }
       const link = await tx.clientCoach.create({ data: { clientId: clientProfile.id, coachId: coachProfile.id } });

@@ -165,6 +165,7 @@ model ClientProfile {
   userId          String    @unique
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   displayName     String
+  phone           String?
   age             Int?
   gender          String?
   heightCm        Float?
@@ -174,6 +175,11 @@ model ClientProfile {
   fitnessGoals    String[]
   experience      String?   @default("beginner")
   avatar          String?
+  notes           String?   @db.Text
+  emergencyContact String?
+  address         String?
+  dob             String?
+  injuries        String?   @db.Text
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
