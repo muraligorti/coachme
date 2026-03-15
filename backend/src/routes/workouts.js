@@ -75,11 +75,16 @@ router.post("/sessions", authenticate, authorize("CLIENT", "COACH"), sanitizeBod
   } catch (err) { res.status(500).json({ error: "Failed to log session" }); }
 });
 
-// GET /api/workouts/sessions — Client's history
+// GET /api/workouts/sessions — Client's history (also works for coach viewing a client)
 router.get("/sessions", authenticate, async (req, res) => {
   try {
-    const clientProfile = await prisma.clientProfile.findUnique({ where: { userId: req.user.id } });
-    if (!clientProfile) return res.status(404).json({ error: "Client profile not found" });
+    let clientProfile;
+    if (req.user.role === "COACH" && req.query.clientId) {
+      clientProfile = await prisma.clientProfile.findUnique({ where: { id: req.query.clientId } });
+    } else {
+      clientProfile = await prisma.clientProfile.findUnique({ where: { userId: req.user.id } });
+    }
+    if (!clientProfile) return res.json([]);
     const sessions = await prisma.workoutSession.findMany({
       where: { clientId: clientProfile.id }, orderBy: { completedAt: "desc" }, take: parseInt(req.query.limit) || 50,
     });

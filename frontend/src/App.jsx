@@ -2907,7 +2907,7 @@ export default function App(){return<ThemeProvider><AuthProvider><AuthGate/></Au
 function ClientSchedulePage(){
   const[bookings,setBookings]=useState([]);const[loading,setLoading]=useState(true);
   const[cancelId,setCancelId]=useState(null);const[cancelReason,setCancelReason]=useState("");
-  useEffect(()=>{api.get("/bookings").then(d=>{setBookings(unwrap(d,"bookings","sessions"));}).catch(()=>{}).finally(()=>setLoading(false));},[]);
+  useEffect(()=>{api.get("/bookings").then(d=>{const bk=unwrap(d,"bookings","sessions");log("Client bookings loaded:",bk.length);setBookings(bk);}).catch(e=>{log("Client bookings error:",e.message);}).finally(()=>setLoading(false));},[]);
   const requestCancel=async()=>{
     if(!cancelId)return;
     try{await api.post(`/bookings/${cancelId}/cancel-request`,{reason:cancelReason||"Schedule conflict"});

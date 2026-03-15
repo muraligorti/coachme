@@ -26,7 +26,7 @@ router.post("/sync", authenticate, authorize("CLIENT"), sanitizeBody, audit("syn
 router.get("/mine", authenticate, authorize("CLIENT"), async (req, res) => {
   try {
     const clientProfile = await prisma.clientProfile.findUnique({ where: { userId: req.user.id } });
-    if (!clientProfile) return res.status(404).json({ error: "Client profile not found" });
+    if (!clientProfile) return res.json([]);
     const data = await prisma.healthDataSync.findMany({
       where: { clientId: clientProfile.id }, orderBy: { date: "desc" }, take: parseInt(req.query.limit) || 30,
     });

@@ -34,15 +34,34 @@ router.post("/", authenticate, authorize("CLIENT", "COACH", "ADMIN"), sanitizeBo
 // GET /api/bookings — List bookings
 router.get("/", authenticate, async (req, res) => {
   try {
-    const coachProfile = req.user.role === "COACH" ? await prisma.coachProfile.findUnique({ where: { userId: req.user.id } }) : null;
-    const clientProfile = req.user.role === "CLIENT" ? await prisma.clientProfile.findUnique({ where: { userId: req.user.id } }) : null;
-    const where = coachProfile ? { coachId: coachProfile.id } : clientProfile ? { clientId: clientProfile.id } : {};
+    let where = {};
+    if (req.user.role === "COACH") {
+      const coachProfile = await prisma.coachProfile.findUnique({ where: { userId: req.user.id } });
+      if (coachProfile) where = { coachId: coachProfile.id };
+    } else if (req.user.role === "CLIENT") {
+      // Find client profile — try by userId first, then by email match
+      let clientProfile = await prisma.clientProfile.findUnique({ where: { userId: req.user.id } });
+      if (!clientProfile) {
+        // Fallback: find by email via User table (handles coach-invited accounts)
+        const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+        if (user) {
+          const allProfiles = await prisma.clientProfile.findMany({ where: { user: { email: user.email } } });
+          if (allProfiles.length > 0) clientProfile = allProfiles[0];
+        }
+      }
+      if (clientProfile) where = { clientId: clientProfile.id };
+      else {
+        logger.warn("Client has no profile, cannot load bookings", { userId: req.user.id });
+        return res.json([]);
+      }
+    }
+    // ADMIN sees all
     const bookings = await prisma.booking.findMany({
       where, orderBy: { scheduledAt: "desc" }, take: 50,
-      include: { client: { select: { displayName: true } }, coach: { select: { displayName: true } } },
+      include: { client: { select: { displayName: true, phone: true } }, coach: { select: { displayName: true, phone: true } } },
     });
     res.json(bookings);
-  } catch (err) { res.status(500).json({ error: "Failed to load bookings" }); }
+  } catch (err) { logger.error("Load bookings error", { error: err.message, userId: req.user.id }); res.status(500).json({ error: "Failed to load bookings" }); }
 });
 
 // POST /api/bookings/:id/cancel-request — Client requests cancellation (coach must approve)
