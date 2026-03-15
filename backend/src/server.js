@@ -22,7 +22,8 @@ import bookingRoutes from "./routes/bookings.js";
 import reportRoutes from "./routes/reports.js";
 import adminRoutes from "./routes/admin.js";
 import aiRoutes from "./routes/ai.js";
-import messageRoutes from "./routes/messages.js";
+import healthDataRoutes from "./routes/health-data.js";
+import nutritionRoutes from "./routes/nutrition.js";
 
 // ─── Initialize Services ────────────────────────────────────────────
 
@@ -154,7 +155,8 @@ app.use("/api/bookings", bookingRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/ai", aiRoutes);
-app.use("/api/messages", messageRoutes);
+app.use("/api/health-data", healthDataRoutes);
+app.use("/api/nutrition", nutritionRoutes);
 
 // Health check
 app.get("/api/health", async (req, res) => {

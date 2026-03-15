@@ -25,6 +25,33 @@ router.get("/plans", authenticate, authorize("COACH", "ADMIN"), async (req, res)
   } catch (err) { res.status(500).json({ error: "Failed to load plans" }); }
 });
 
+// PUT /api/workouts/plans/:id — Update workout plan (coach)
+router.put("/plans/:id", authenticate, authorize("COACH"), sanitizeBody, audit("update_plan", "workout"), async (req, res) => {
+  try {
+    const coachProfile = await prisma.coachProfile.findUnique({ where: { userId: req.user.id } });
+    const plan = await prisma.workoutPlan.findUnique({ where: { id: req.params.id } });
+    if (!plan || plan.coachId !== coachProfile.id) return res.status(404).json({ error: "Plan not found" });
+    const updated = await prisma.workoutPlan.update({
+      where: { id: req.params.id },
+      data: { name: req.body.name ?? req.body.title ?? plan.name, description: req.body.description ?? plan.description, intensity: req.body.intensity ?? plan.intensity, durationWeeks: req.body.durationWeeks ?? plan.durationWeeks, focus: req.body.focus ?? plan.focus, exercises: req.body.exercises ?? plan.exercises, weeklySchedule: req.body.weeklySchedule ?? plan.weeklySchedule, isTemplate: req.body.isTemplate ?? plan.isTemplate },
+    });
+    res.json(updated);
+  } catch (err) { logger.error("Plan update error", { error: err.message }); res.status(500).json({ error: "Failed to update plan" }); }
+});
+
+// DELETE /api/workouts/plans/:id — Delete workout plan (coach)
+router.delete("/plans/:id", authenticate, authorize("COACH"), audit("delete_plan", "workout"), async (req, res) => {
+  try {
+    const coachProfile = await prisma.coachProfile.findUnique({ where: { userId: req.user.id } });
+    const plan = await prisma.workoutPlan.findUnique({ where: { id: req.params.id } });
+    if (!plan || plan.coachId !== coachProfile.id) return res.status(404).json({ error: "Plan not found" });
+    // Unlink any sessions first
+    await prisma.workoutSession.updateMany({ where: { planId: req.params.id }, data: { planId: null } });
+    await prisma.workoutPlan.delete({ where: { id: req.params.id } });
+    res.json({ deleted: true });
+  } catch (err) { logger.error("Plan delete error", { error: err.message }); res.status(500).json({ error: "Failed to delete plan" }); }
+});
+
 // POST /api/workouts/sessions — Log completed session (client or coach on behalf of client)
 router.post("/sessions", authenticate, authorize("CLIENT", "COACH"), sanitizeBody, audit("log_session", "workout"), async (req, res) => {
   try {

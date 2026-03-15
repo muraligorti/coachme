@@ -150,6 +150,7 @@ model CoachProfile {
   reviews           Review[]
   leads             Lead[]
   reports           Report[]     @relation("CoachReports")
+  dataConsents    DataSharingConsent[]
 
   @@index([country, city])
   @@index([specializations])
@@ -189,6 +190,9 @@ model ClientProfile {
   workoutSessions WorkoutSession[]
   bookings        Booking[]
   reviews         Review[]
+  healthData      HealthDataSync[]
+  sharingConsents DataSharingConsent[]
+  nutritionLogs   NutritionLog[]
 
   @@index([country, city])
   @@index([fitnessGoals])
@@ -442,4 +446,65 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
   @@index([resource, resourceId])
+}
+
+// --- HEALTH DATA SYNC (Device data from clients) ---
+
+model HealthDataSync {
+  id              String   @id @default(cuid())
+  clientId        String
+  client          ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  source          String   // "fitbit", "garmin", "manual", etc.
+  date            String   // "2026-03-15"
+  steps           Int?
+  heartRateAvg    Int?
+  heartRateMax    Int?
+  sleepHours      Float?
+  sleepQuality    Int?
+  caloriesBurned  Int?
+  activeMinutes   Int?
+  distance        Float?
+  weight          Float?
+  spo2            Int?
+  stressLevel     Int?
+  syncedAt        DateTime @default(now())
+
+  @@unique([clientId, date, source])
+  @@index([clientId])
+  @@index([date])
+}
+
+// --- DATA SHARING CONSENT ---
+
+model DataSharingConsent {
+  id              String   @id @default(cuid())
+  clientId        String
+  coachId         String
+  client          ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  coach           CoachProfile  @relation(fields: [coachId], references: [id], onDelete: Cascade)
+  shareWithCoach  Boolean  @default(true)
+  metrics         Json     // { steps: true, heartRate: true, sleep: true, ... }
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([clientId, coachId])
+}
+
+// --- NUTRITION LOG ---
+
+model NutritionLog {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  date        String   // "2026-03-15"
+  meal        String   // "breakfast", "lunch", "dinner", "snack"
+  name        String
+  calories    Int      @default(0)
+  protein     Float    @default(0)
+  carbs       Float    @default(0)
+  fat         Float    @default(0)
+  source      String?  // "manual", "ai_meal_plan"
+  createdAt   DateTime @default(now())
+
+  @@index([clientId, date])
 }
