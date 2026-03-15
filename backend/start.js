@@ -1,20 +1,36 @@
-import { execSync } from "child_process";
+import { PrismaClient } from "@prisma/client";
 
-// Run prisma db push before starting the server
-try {
-  console.log("Running prisma db push...");
-  const output = execSync("npx prisma db push --force-reset=false --accept-data-loss", {
-    encoding: "utf8",
-    timeout: 30000,
-    env: { ...process.env, PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK: "true" },
-  });
-  console.log("Prisma db push output:", output);
-} catch (err) {
-  console.error("Prisma db push failed (non-fatal):", err.message);
-  if (err.stdout) console.log("stdout:", err.stdout);
-  if (err.stderr) console.log("stderr:", err.stderr);
+// Run raw SQL migration to add missing columns, then start the server
+const prisma = new PrismaClient();
+
+async function migrate() {
+  const columns = [
+    { name: "phone", type: "TEXT" },
+    { name: "notes", type: "TEXT" },
+    { name: "emergencyContact", type: "TEXT" },
+    { name: "address", type: "TEXT" },
+    { name: "dob", type: "TEXT" },
+    { name: "injuries", type: "TEXT" },
+  ];
+
+  for (const col of columns) {
+    try {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "ClientProfile" ADD COLUMN IF NOT EXISTS "${col.name}" ${col.type}`
+      );
+      console.log(`Column ${col.name}: OK`);
+    } catch (err) {
+      console.log(`Column ${col.name}: ${err.message.includes("already exists") ? "exists" : err.message}`);
+    }
+  }
+
+  await prisma.$disconnect();
+  console.log("Migration done. Starting server...");
 }
 
-// Now start the server
-console.log("Starting server...");
-import("./src/server.js");
+migrate()
+  .then(() => import("./src/server.js"))
+  .catch((err) => {
+    console.error("Migration failed:", err.message);
+    import("./src/server.js");
+  });
