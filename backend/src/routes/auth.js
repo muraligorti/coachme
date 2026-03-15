@@ -341,6 +341,89 @@ router.get("/me", authenticate, async (req, res) => {
   res.json({ user, profile, subscription: { tier: subscription?.tier, maxClients: subscription?.maxClients } });
 });
 
+// ─── POST /api/auth/forgot-password ──────────────────────────────────
+
+router.post("/forgot-password", sanitizeBody, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Email required" });
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    // Always return success to prevent email enumeration
+    if (!user) return res.json({ message: "If this email exists, a reset code has been sent." });
+
+    // Generate a 6-digit code + random token
+    const crypto = await import("crypto");
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetCode = String(Math.floor(100000 + Math.random() * 900000)); // 6-digit code
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { resetToken: resetToken + ":" + resetCode, resetExpires: new Date(Date.now() + 30 * 60 * 1000) }, // 30 min
+    });
+
+    // In production, send email with the code. For now, log it.
+    logger.info("Password reset code generated", { email, resetCode, resetToken: resetToken.slice(0, 8) + "..." });
+
+    // If EMAIL_API_KEY is configured, send email (placeholder)
+    // For dev/demo: the code is logged above and also returned in response
+    if (process.env.NODE_ENV === "development" || !process.env.EMAIL_API_KEY) {
+      return res.json({ message: "Reset code generated. Check server logs.", code: resetCode });
+    }
+
+    res.json({ message: "If this email exists, a reset code has been sent." });
+  } catch (err) {
+    logger.error("Forgot password error", { error: err.message });
+    res.status(500).json({ error: "Failed to process request" });
+  }
+});
+
+// ─── POST /api/auth/reset-password ──────────────────────────────────
+
+router.post("/reset-password", sanitizeBody, async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: "Token and password required" });
+
+    // Validate new password
+    if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+    if (!/[A-Z]/.test(password)) return res.status(400).json({ error: "Password must contain an uppercase letter" });
+    if (!/[a-z]/.test(password)) return res.status(400).json({ error: "Password must contain a lowercase letter" });
+    if (!/\d/.test(password)) return res.status(400).json({ error: "Password must contain a number" });
+
+    // Find user by reset token (token can be the full token, the 6-digit code, or token:code)
+    const users = await prisma.user.findMany({
+      where: { resetExpires: { gt: new Date() } },
+    });
+
+    const user = users.find(u => {
+      if (!u.resetToken) return false;
+      const parts = u.resetToken.split(":");
+      const fullToken = parts[0];
+      const code = parts[1];
+      return token === u.resetToken || token === fullToken || token === code;
+    });
+
+    if (!user) return res.status(400).json({ error: "Invalid or expired reset code" });
+
+    // Update password
+    const passwordHash = await bcrypt.hash(password, 12);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash, resetToken: null, resetExpires: null, loginAttempts: 0, lockedUntil: null },
+    });
+
+    // Invalidate all sessions
+    await prisma.session.deleteMany({ where: { userId: user.id } });
+
+    logger.info("Password reset successful", { userId: user.id, email: user.email });
+    res.json({ message: "Password reset successful. You can now sign in." });
+  } catch (err) {
+    logger.error("Reset password error", { error: err.message });
+    res.status(500).json({ error: "Password reset failed" });
+  }
+});
+
 // ─── Helper: Encrypt medical data field ──────────────────────────────
 // In production, use proper AES-256-GCM with the ENCRYPTION_KEY env var
 
