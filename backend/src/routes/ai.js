@@ -10,7 +10,8 @@ router.post("/chat", authenticate, aiLimiter, sanitizeBody, async (req, res) => 
   try {
     if (!ANTHROPIC_KEY) return res.status(503).json({ error: "AI service not configured" });
     const { system, message, search } = req.body;
-    const body = { model: "claude-sonnet-4-20250514", max_tokens: 1000, system: system || "", messages: [{ role: "user", content: message }] };
+    const body = { model: "claude-sonnet-4-20250514", max_tokens: system ? 2048 : 1000, messages: [{ role: "user", content: message }] };
+    if (system) body.system = system;
     if (search) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",

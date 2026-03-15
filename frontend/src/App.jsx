@@ -676,14 +676,22 @@ function LiveSessionPage({ booking, clients, onBack, onComplete }) {
     const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = lang; // hi-IN understands Hindi + Hinglish + English code-switching
+    recognition.lang = lang;
+    recognition.maxAlternatives = 3; // Capture alternative interpretations for AI to resolve
     recognition.onresult = (e) => {
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) {
-          finalTranscriptRef.current += e.results[i][0].transcript + " ";
+        const result = e.results[i];
+        if (result.isFinal) {
+          const best = result[0].transcript;
+          // Collect alternatives for ambiguous words (helps AI disambiguate)
+          const alts = [];
+          for (let a = 1; a < result.length; a++) {
+            if (result[a].transcript !== best) alts.push(result[a].transcript);
+          }
+          finalTranscriptRef.current += best + (alts.length ? ` [alt: ${alts.join(" | ")}] ` : " ");
         } else {
-          interim += e.results[i][0].transcript;
+          interim += result[0].transcript;
         }
       }
       setTranscript(finalTranscriptRef.current + interim);
@@ -713,39 +721,62 @@ function LiveSessionPage({ booking, clients, onBack, onComplete }) {
       return;
     }
     try {
-      const prompt = `You are a fitness session parser. Extract exercises from a live coaching session transcript. The transcript may be in Hindi, English, or a mix (Hinglish). Return ONLY valid JSON, no markdown.
+      const systemPrompt = `You are an expert fitness session transcript parser for Indian gym coaches. Your job is to extract structured exercise data from noisy, multilingual voice transcripts.
 
-IMPORTANT — Multiple people may be talking (coach, client, bystanders). The COACH is the one giving instructions, calling out exercises, sets, reps, and weights. Ignore client responses, small talk, and chatter from others. Focus ONLY on the coach's exercise instructions and cues.
+KEY RULES:
+1. The transcript is from a LIVE gym session. It will be messy — speech recognition errors, multiple speakers, background noise artifacts.
+2. The COACH is the person GIVING instructions (exercises, sets, reps, weights). IGNORE everything else — client questions, acknowledgments ("ok", "haan", "theek hai"), small talk, greetings, rest period chatter.
+3. The transcript may be in Hindi, English, Hinglish (code-switching mid-sentence), or Hindi written in English script (transliterated). Handle ALL of these.
+4. Exercise names should ALWAYS be output in standard English (e.g. "Bench Press" not "bench press karo").
+5. Be AGGRESSIVE about finding exercises — even partial or garbled mentions. If you see something that looks like an exercise name near numbers, extract it.
 
-Examples of coach instructions (Hindi/English mix):
-- "ab bench press karo, 3 sets 10 reps, 60 kg" → Bench Press, 3 sets, 10 reps, 60kg
-- "ok next exercise squats, 4 sets of 12 at 80 kilos" → Squats, 4 sets, 12 reps, 80kg
-- "deadlift lagao 3 sets 8 reps 100 kg se" → Deadlift, 3 sets, 8 reps, 100kg
-- "bicep curl karo 3 set 15 rep 10 kg dumbbell" → Bicep Curl, 3 sets, 15 reps, 10kg
+HINDI NUMBER WORDS TO RECOGNIZE:
+ek/एक=1, do/दो=2, teen/तीन=3, chaar/चार=4, paanch/पांच=5, chhe/छह=6, saat/सात=7, aath/आठ=8, nau/नौ=9, das/दस=10, baara/बारा=12, pandrah/पंद्रह=15, bees/बीस=20, pachees/पच्चीस=25, tees/तीस=30, saath/साठ=60, assi/अस्सी=80, sau/सौ=100
 
-Session: ${booking.sessionType || "training"}, Client: ${clientName}, Duration: ${formatTime(timer)}
+COMMON HINDI GYM VOCABULARY:
+karo/करो = do it, lagao/लगाओ = apply/do, set/सेट = set, baar/बार = reps/times, uthao/उठाओ = lift, daalo/डालो = put/add, weight/वज़न = weight, kg/kilo/किलो = kilograms, dumbbell/डम्बल, barbell/बारबेल, machine/मशीन, plate/प्लेट, aur/और = more/and, next/अगला, rest/आराम = rest, badha/बढ़ा = increase, kam/कम = reduce
 
-Transcript:
+EXAMPLES OF REAL TRANSCRIPTS AND EXPECTED PARSING:
+- "bench press karo teen set das das rep 60 kilo" → Bench Press, 3 sets, 10 reps, 60kg
+- "अब squats लगाओ 4 set 12 rep 80 kg" → Squats, 4 sets, 12 reps, 80kg
+- "ok next exercise shoulder press hai 3 sets of 15 at 20 kg" → Shoulder Press, 3 sets, 15 reps, 20kg
+- "bicep curl karo 3 set 15 baar 10 kg dumbbell se" → Bicep Curl, 3 sets, 15 reps, 10kg
+- "lat pulldown do set chaar rep baara 40 kilo" → Lat Pulldown, 4 sets, 12 reps, 40kg
+- "ab deadlift lagao teen set aath rep sau kilo" → Deadlift, 3 sets, 8 reps, 100kg
+- "plank karo 3 set 30 second" → Plank, 3 sets, 30 reps, notes: "30 seconds hold"
+- "leg press pe 4 set 15 rep" → Leg Press, 4 sets, 15 reps (no weight mentioned)
+- "push ups maar do teen set bees bees" → Push Ups, 3 sets, 20 reps
+- "cable fly karo 3 set 12 rep 15 kg" → Cable Fly, 3 sets, 12 reps, 15kg
+
+GARBLED/NOISY EXAMPLES (speech recognition errors):
+- "bench breast 3 said 10 rap 60 key" → likely "Bench Press, 3 sets, 10 reps, 60kg"
+- "should a press kar lo" → likely "Shoulder Press"
+- "dead lift laga of 3 set at reps" → likely "Deadlift, 3 sets, 8 reps"
+
+When a number appears repeated like "das das" or "10 10", it usually means that many reps per set.
+When weight is not mentioned, leave weight as empty string.
+When sets/reps are ambiguous, use common gym defaults (3 sets, 10-12 reps).
+
+Return ONLY valid JSON. No markdown, no backticks, no explanation.`;
+
+      const userMsg = `Parse this coaching session transcript. Session type: ${booking.sessionType || "training"}, Client: ${clientName}, Duration: ${formatTime(timer)}
+
+TRANSCRIPT:
 """
 ${fullText}
 """
 
-Return JSON format (exercise names always in English):
-{
-  "exercises": [
-    { "name": "Exercise Name", "sets": 3, "reps": 10, "weight": "60kg", "notes": "" }
-  ],
-  "sessionNotes": "Brief session summary in English"
-}
+Return this exact JSON structure:
+{"exercises":[{"name":"Exercise Name","sets":3,"reps":10,"weight":"60kg","notes":""}],"sessionNotes":"Brief session summary in English"}`;
 
-If no exercises found, return {"exercises": [], "sessionNotes": "General session"}.`;
-      const r = await api.post("/ai/chat", { message: prompt });
-      const reply = r.reply || r.message || r.response || "";
+      const r = await api.post("/ai/chat", { system: systemPrompt, message: userMsg });
+      const reply = r.text || r.reply || r.message || r.response || "";
       // Try to extract JSON from response
       let parsed;
       try {
-        const jsonMatch = reply.match(/\{[\s\S]*\}/);
-        parsed = JSON.parse(jsonMatch ? jsonMatch[0] : reply);
+        const cleaned = reply.replace(/```json|```/g, "").trim();
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
       } catch {
         parsed = { exercises: [], sessionNotes: reply.slice(0, 200) };
       }
