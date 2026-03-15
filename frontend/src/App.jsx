@@ -1472,11 +1472,12 @@ function SettingsPage(){const{user,logout}=useAuth();const{themeName,switchTheme
   };
 
   const swapTab=(idx,newId)=>{
+    if(newId==="more")return; // Can't put "more" in a slot
     const arr=[...bottomTabs];arr[idx]=newId;
     setBottomTabs(arr);ls.set("bottom_tabs",arr);
   };
 
-  const resetTabs=()=>{setBottomTabs([...DEFAULT_BOTTOM]);ls.set("bottom_tabs",DEFAULT_BOTTOM);};
+  const resetTabs=()=>{const d=[...DEFAULT_BOTTOM];setBottomTabs(d);ls.set("bottom_tabs",d);};
 
   return<div><ST>Settings</ST><Card style={{marginBottom:12}}><div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20}}><div style={{width:56,height:56,borderRadius:16,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff"}}>{(user?.name||"U")[0].toUpperCase()}</div><div><div style={{color:C.tx,fontSize:16,fontWeight:600}}>{user?.name}</div><Badge>{user?.role||"coach"}</Badge></div></div><div style={{display:"flex",flexDirection:"column",gap:12}}><Input label="Name" value={profile.name} onChange={e=>setProfile({...profile,name:e.target.value})}/><Input label="Email" value={profile.email} onChange={e=>setProfile({...profile,email:e.target.value})}/><Btn onClick={save} style={{width:"100%"}}>{saved?"✓ Saved!":"Update Profile"}</Btn></div></Card>
     {/* Theme Switcher */}
@@ -1498,10 +1499,10 @@ function SettingsPage(){const{user,logout}=useAuth();const{themeName,switchTheme
           <button onClick={resetTabs} style={{padding:"4px 10px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:C.s2,color:C.mt}}>Reset</button>
         </div>
       </div>
-      <div style={{fontSize:12,color:C.mt,marginBottom:10}}>Drag to reorder. Tap a slot to change which tab appears there.</div>
+      <div style={{fontSize:12,color:C.mt,marginBottom:10}}>Choose which 4 tabs appear in the bottom bar. "More" is always available.</div>
       {bottomTabs.map((tabId,i)=>{
         const tabDef=ALL_TABS.find(t=>t.id===tabId);
-        const available=ALL_TABS.filter(t=>!bottomTabs.includes(t.id)||t.id===tabId);
+        const available=ALL_TABS.filter(t=>t.id!=="more"&&(!bottomTabs.includes(t.id)||t.id===tabId));
         return<div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.bd}`}}>
           <div style={{display:"flex",flexDirection:"column",gap:2}}>
             <button onClick={()=>moveTab(i,-1)} disabled={i===0} style={{background:"none",border:"none",cursor:i>0?"pointer":"default",fontSize:14,color:i>0?C.tx:C.bd,padding:0}}>▲</button>
@@ -1514,6 +1515,12 @@ function SettingsPage(){const{user,logout}=useAuth();const{themeName,switchTheme
           <span style={{fontSize:12,color:C.mt,fontWeight:600}}>Slot {i+1}</span>
         </div>;
       })}
+      <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",opacity:0.5}}>
+        <div style={{width:28}}/>
+        <span style={{fontSize:18,width:28,textAlign:"center"}}>⚙️</span>
+        <span style={{flex:1,fontSize:13,color:C.mt,fontStyle:"italic"}}>More — always visible</span>
+        <span style={{fontSize:12,color:C.mt,fontWeight:600}}>Fixed</span>
+      </div>
     </Card>
 
     <Card><Btn variant="danger" onClick={logout} style={{width:"100%"}}>🚪 Sign Out</Btn></Card></div>;}
@@ -1530,14 +1537,17 @@ const ALL_TABS=[
   {id:"reports",icon:"📊",label:"Analytics"},
   {id:"more",icon:"⚙️",label:"More"},
 ];
-const DEFAULT_BOTTOM=["dashboard","workouts","bookings","chat","more"];
+const DEFAULT_BOTTOM=["dashboard","workouts","bookings","chat"];
 function getBottomTabs(){
   const saved=ls.get("bottom_tabs",null);
-  if(saved&&Array.isArray(saved)&&saved.length===5)return saved;
+  if(saved&&Array.isArray(saved)&&saved.length===4&&!saved.includes("more"))return saved;
   return DEFAULT_BOTTOM;
 }
 function TABS(){return getBottomTabs().map(id=>ALL_TABS.find(t=>t.id===id)).filter(Boolean);}
-function BNav({active,onChange}){const tabs=TABS();return<nav style={{position:"fixed",bottom:0,left:0,right:0,zIndex:100,background:C.sf,borderTop:`1px solid ${C.bd}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>{tabs.map(t=>{const a=active===t.id;return<button key={t.id} onClick={()=>onChange(t.id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"10px 0 8px",border:"none",cursor:"pointer",background:"transparent"}}><div style={{padding:"4px 16px",borderRadius:12,background:a?C.ac+"20":"transparent",fontSize:18}}>{t.icon}</div><span style={{fontSize:10,fontWeight:a?700:500,color:a?C.ac:C.mt}}>{t.label}</span></button>;})}</nav>;}
+function BNav({active,onChange}){const tabs=TABS();return<nav style={{position:"fixed",bottom:0,left:0,right:0,zIndex:100,background:C.sf,borderTop:`1px solid ${C.bd}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>{tabs.map(t=>{const a=active===t.id||(active==="more"&&false);return<button key={t.id} onClick={()=>onChange(t.id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"10px 0 8px",border:"none",cursor:"pointer",background:"transparent"}}><div style={{padding:"4px 16px",borderRadius:12,background:a?C.ac+"20":"transparent",fontSize:18}}>{t.icon}</div><span style={{fontSize:10,fontWeight:a?700:500,color:a?C.ac:C.mt}}>{t.label}</span></button>;})}
+  {/* More button — always last, not movable */}
+  <button onClick={()=>onChange("more")} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"10px 0 8px",border:"none",cursor:"pointer",background:"transparent"}}><div style={{padding:"4px 16px",borderRadius:12,background:active==="more"?C.ac+"20":"transparent",fontSize:18}}>⚙️</div><span style={{fontSize:10,fontWeight:active==="more"?700:500,color:active==="more"?C.ac:C.mt}}>More</span></button>
+  </nav>;}
 function MediaLibrary({clientId,clientName}){
   const key=`media_${clientId||"all"}`;
   const[items,setItems]=useState(ls.get(key,[]));
