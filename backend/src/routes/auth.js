@@ -387,16 +387,39 @@ router.post("/forgot-password", sanitizeBody, async (req, res) => {
       data: { resetToken: resetToken + ":" + resetCode, resetExpires: new Date(Date.now() + 30 * 60 * 1000) }, // 30 min
     });
 
-    // In production, send email with the code. For now, log it.
-    logger.info("Password reset code generated", { email, resetCode, resetToken: resetToken.slice(0, 8) + "..." });
+    logger.info("Password reset code generated", { email, resetCode });
 
-    // If EMAIL_API_KEY is configured, send email (placeholder)
-    // For dev/demo: the code is logged above and also returned in response
-    if (process.env.NODE_ENV === "development" || !process.env.EMAIL_API_KEY) {
-      return res.json({ message: "Reset code generated. Check server logs.", code: resetCode });
+    // Send email via Resend if configured
+    const emailApiKey = process.env.EMAIL_API_KEY || process.env.RESEND_API_KEY;
+    if (emailApiKey) {
+      try {
+        const { Resend } = await import("resend");
+        const resend = new Resend(emailApiKey);
+        await resend.emails.send({
+          from: process.env.EMAIL_FROM || "CoachMe <noreply@coachme.life>",
+          to: email,
+          subject: "CoachMe — Password Reset Code",
+          html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px;">
+            <h2 style="color:#6c5ce7;">CoachMe.life</h2>
+            <p>Hi,</p>
+            <p>You requested a password reset. Use this code within 30 minutes:</p>
+            <div style="background:#f0f0f5;padding:20px;border-radius:12px;text-align:center;margin:20px 0;">
+              <span style="font-size:32px;font-weight:700;letter-spacing:8px;color:#333;">${resetCode}</span>
+            </div>
+            <p>If you didn't request this, you can safely ignore this email.</p>
+            <p style="color:#888;font-size:13px;">— CoachMe.life Team</p>
+          </div>`,
+        });
+        logger.info("Password reset email sent", { email });
+        return res.json({ message: "Reset code sent to your email." });
+      } catch (emailErr) {
+        logger.error("Email send failed, returning code in response", { error: emailErr.message });
+        // Fall through to return code directly
+      }
     }
 
-    res.json({ message: "If this email exists, a reset code has been sent." });
+    // No email service configured or email failed — return code directly (dev/demo mode)
+    res.json({ message: "Reset code generated (no email service configured).", code: resetCode });
   } catch (err) {
     logger.error("Forgot password error", { error: err.message });
     res.status(500).json({ error: "Failed to process request" });
