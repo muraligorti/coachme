@@ -54,8 +54,20 @@ function AuthProvider({ children }) {
   return <AuthCtx.Provider value={{user,login,register,logout}}>{children}</AuthCtx.Provider>;
 }
 
-// ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
-const C={bg:"#0a0a0f",sf:"#12121a",s2:"#1a1a25",bd:"#1e1e2e",tx:"#e4e4ef",mt:"#7a7a8e",ac:"#6c5ce7",a2:"#00cec9",gr:"linear-gradient(135deg,#6c5ce7 0%,#a29bfe 50%,#00cec9 100%)",dg:"#ff4757",wn:"#ffa502",ok:"#2ed573",or:"#ff6348",pk:"#ff6b81"};
+// ─── THEMES & DESIGN SYSTEM ───────────────────────────────────────────────────
+const THEMES = {
+  dark: {name:"Midnight",bg:"#0a0a0f",sf:"#12121a",s2:"#1a1a25",bd:"#1e1e2e",tx:"#e4e4ef",mt:"#7a7a8e",ac:"#6c5ce7",a2:"#00cec9",gr:"linear-gradient(135deg,#6c5ce7 0%,#a29bfe 50%,#00cec9 100%)",dg:"#ff4757",wn:"#ffa502",ok:"#2ed573",or:"#ff6348",pk:"#ff6b81"},
+  light: {name:"Clean Light",bg:"#f0f2f5",sf:"#ffffff",s2:"#e4e6eb",bd:"#ced0d4",tx:"#1c1e21",mt:"#65676b",ac:"#5b5fc7",a2:"#0ea5e9",gr:"linear-gradient(135deg,#5b5fc7 0%,#8b5cf6 50%,#0ea5e9 100%)",dg:"#ef4444",wn:"#f59e0b",ok:"#22c55e",or:"#f97316",pk:"#ec4899"},
+  sunset: {name:"Sunset Warm",bg:"#141018",sf:"#1e1726",s2:"#2a2033",bd:"#3d2e4a",tx:"#f8e8d4",mt:"#a89080",ac:"#f97316",a2:"#eab308",gr:"linear-gradient(135deg,#f97316 0%,#ef4444 50%,#eab308 100%)",dg:"#ef4444",wn:"#f59e0b",ok:"#22c55e",or:"#f97316",pk:"#ec4899"},
+};
+const C = {...THEMES[ls.get("theme","dark")||"dark"]};
+function applyTheme(name) { const t=THEMES[name]||THEMES.dark; Object.keys(t).forEach(k=>{C[k]=t[k];}); }
+const ThemeCtx = createContext(null); const useTheme = () => useContext(ThemeCtx);
+function ThemeProvider({children}) {
+  const [themeName,setThemeName] = useState(ls.get("theme","dark")||"dark");
+  const switchTheme = useCallback((name)=>{ applyTheme(name); ls.set("theme",name); setThemeName(name); },[]);
+  return <ThemeCtx.Provider value={{themeName,switchTheme,themes:THEMES}}>{children}</ThemeCtx.Provider>;
+}
 const Card=({children,style,onClick,...p})=><div onClick={onClick} style={{background:C.sf,border:`1px solid ${C.bd}`,borderRadius:16,padding:20,...style}} {...p}>{children}</div>;
 const Badge=({children,color=C.ac,style})=><span style={{display:"inline-block",padding:"4px 12px",borderRadius:20,fontSize:12,fontWeight:600,background:color+"22",color,...style}}>{children}</span>;
 const Btn=({children,variant="primary",style,disabled,...p})=>{const v={primary:{background:C.gr,color:"#fff"},secondary:{background:C.s2,color:C.tx,border:`1px solid ${C.bd}`},danger:{background:C.dg+"22",color:C.dg},ghost:{background:"transparent",color:C.mt}};return<button style={{padding:"12px 24px",borderRadius:12,border:"none",fontWeight:600,fontSize:14,cursor:disabled?"not-allowed":"pointer",opacity:disabled?.5:1,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:8,justifyContent:"center",transition:"all .2s",...v[variant],...style}} disabled={disabled}{...p}>{children}</button>;};
@@ -1443,7 +1455,7 @@ function MessagingPage({initialClient,onBack}){const{user}=useAuth();const[convo
 function InvoicesPage(){const[inv,setInv]=useState(ls.get("invoices",[]));const[showAdd,setShowAdd]=useState(false);const[clients,setClients]=useState([]);const[form,setForm]=useState({clientId:"",amount:"",description:"",dueDate:""});useEffect(()=>{api.get("/clients").then(d=>setClients(unwrap(d,"clients"))).catch(()=>{});},[]);const save=()=>{const cl=clients.find(c=>c.id===form.clientId);const e={...form,id:Date.now(),clientName:cl?.name||cl?.user?.name||"Client",date:new Date().toISOString().slice(0,10),amount:+form.amount,status:"pending"};const u=[...inv,e];setInv(u);ls.set("invoices",u);setShowAdd(false);setForm({clientId:"",amount:"",description:"",dueDate:""});};const markPaid=id=>{const u=inv.map(i=>i.id===id?{...i,status:"paid"}:i);setInv(u);ls.set("invoices",u);};const tp=inv.filter(i=>i.status==="pending").reduce((s,i)=>s+i.amount,0);const tc=inv.filter(i=>i.status==="paid").reduce((s,i)=>s+i.amount,0);return<div><ST right={<Btn onClick={()=>setShowAdd(true)} style={{padding:"8px 16px",fontSize:13}}>+ Invoice</Btn>}>Invoices</ST><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}><SC label="Pending" value={`₹${tp.toLocaleString()}`} icon="⏳" color={C.wn}/><SC label="Collected" value={`₹${tc.toLocaleString()}`} icon="✅" color={C.ok}/></div>{inv.length===0?<Empty icon="🧾" text="No invoices"/>:inv.slice().reverse().map(i=><Card key={i.id} style={{padding:14,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{i.clientName}</div><div style={{fontSize:12,color:C.mt}}>{i.description} · {i.date}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:16,fontWeight:700,color:C.tx}}>₹{i.amount.toLocaleString()}</div>{i.status==="pending"?<button onClick={()=>markPaid(i.id)} style={{padding:"3px 10px",borderRadius:6,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:C.ok+"20",color:C.ok,marginTop:4}}>Mark Paid</button>:<Badge color={C.ok}>Paid</Badge>}</div></Card>)}<Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Create Invoice"><div style={{display:"flex",flexDirection:"column",gap:12}}>{clients.length>0&&<Sel label="Client" value={form.clientId} onChange={e=>setForm({...form,clientId:e.target.value})} options={[{value:"",label:"— Select —"},...clients.map(c=>({value:c.id,label:cName(c)}))]}/>}<Input label="Amount (₹)" type="number" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/><Input label="Description" value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="Monthly coaching - March"/><Input label="Due Date" type="date" value={form.dueDate} onChange={e=>setForm({...form,dueDate:e.target.value})}/><Btn onClick={save} style={{width:"100%"}}>Create</Btn></div></Modal></div>;}
 
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
-function SettingsPage(){const{user,logout}=useAuth();const[profile,setProfile]=useState({name:user?.name||"",email:user?.email||""});const[saved,setSaved]=useState(false);
+function SettingsPage(){const{user,logout}=useAuth();const{themeName,switchTheme,themes}=useTheme();const[profile,setProfile]=useState({name:user?.name||"",email:user?.email||""});const[saved,setSaved]=useState(false);
   const[bottomTabs,setBottomTabs]=useState(getBottomTabs());
   const[showTabEdit,setShowTabEdit]=useState(false);
 
@@ -1464,6 +1476,17 @@ function SettingsPage(){const{user,logout}=useAuth();const[profile,setProfile]=u
   const resetTabs=()=>{setBottomTabs([...DEFAULT_BOTTOM]);ls.set("bottom_tabs",DEFAULT_BOTTOM);};
 
   return<div><ST>Settings</ST><Card style={{marginBottom:12}}><div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20}}><div style={{width:56,height:56,borderRadius:16,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff"}}>{(user?.name||"U")[0].toUpperCase()}</div><div><div style={{color:C.tx,fontSize:16,fontWeight:600}}>{user?.name}</div><Badge>{user?.role||"coach"}</Badge></div></div><div style={{display:"flex",flexDirection:"column",gap:12}}><Input label="Name" value={profile.name} onChange={e=>setProfile({...profile,name:e.target.value})}/><Input label="Email" value={profile.email} onChange={e=>setProfile({...profile,email:e.target.value})}/><Btn onClick={save} style={{width:"100%"}}>{saved?"✓ Saved!":"Update Profile"}</Btn></div></Card>
+    {/* Theme Switcher */}
+    <Card style={{marginBottom:12}}>
+      <div style={{fontSize:14,fontWeight:600,color:C.tx,marginBottom:12}}>Theme</div>
+      <div style={{display:"flex",gap:8}}>
+        {Object.entries(themes).map(([id,t])=><button key={id} onClick={()=>switchTheme(id)} style={{flex:1,padding:"14px 8px",borderRadius:14,border:themeName===id?`2px solid ${C.ac}`:`1px solid ${C.bd}`,background:t.sf,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:8,transition:"all .2s",transform:themeName===id?"scale(1.03)":"scale(1)",boxShadow:themeName===id?`0 4px 16px ${t.ac}30`:"none"}}>
+          <div style={{display:"flex",gap:3}}><div style={{width:14,height:14,borderRadius:4,background:t.ac}}/><div style={{width:14,height:14,borderRadius:4,background:t.a2}}/><div style={{width:14,height:14,borderRadius:4,background:t.ok}}/></div>
+          <span style={{fontSize:11,fontWeight:700,color:t.tx}}>{t.name}</span>
+          <div style={{width:"100%",height:4,borderRadius:2,background:t.gr}}/>
+        </button>)}
+      </div>
+    </Card>
     {/* Tab customization */}
     <Card style={{marginBottom:12}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -2149,5 +2172,5 @@ function MainApp(){const[tab,setTab]=useState("dashboard");const[sub,setSub]=use
 
 function useVoice(onCmd){const[listening,setListening]=useState(false);const speak=useCallback(t=>{if("speechSynthesis"in window){const u=new SpeechSynthesisUtterance(t);u.rate=1.05;speechSynthesis.speak(u);}},[]);const toggle=useCallback(()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return speak("Voice not supported");if(listening)return setListening(false);const r=new SR();r.continuous=false;r.lang="en-US";r.onresult=e=>{onCmd(e.results[0][0].transcript.toLowerCase().trim(),speak);setListening(false);};r.onerror=()=>setListening(false);r.onend=()=>setListening(false);r.start();setListening(true);},[listening,onCmd,speak]);return{listening,toggle,speak};}
 
-export default function App(){return<AuthProvider><AuthGate/></AuthProvider>;}
+export default function App(){return<ThemeProvider><AuthProvider><AuthGate/></AuthProvider></ThemeProvider>;}
 function AuthGate(){const{user}=useAuth();return user?<MainApp/>:<AuthScreen/>;}
