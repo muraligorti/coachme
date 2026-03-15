@@ -76,6 +76,33 @@ router.post("/bulk", authenticate, authorize("COACH"), sanitizeBody, audit("bulk
   } catch (err) { res.status(500).json({ error: "Bulk upload failed" }); }
 });
 
+// PUT /api/clients/:id — Edit client
+router.put("/:id", authenticate, authorize("COACH", "ADMIN"), sanitizeBody, audit("edit_client", "client"), async (req, res) => {
+  try {
+    const { name, email, phone, age, goals, conditions, notes, emergencyContact, address, dob, gender, injuries } = req.body;
+    const updated = await prisma.clientProfile.update({
+      where: { id: req.params.id },
+      data: {
+        ...(name && { displayName: name }),
+        ...(age !== undefined && { age }),
+        ...(goals && { fitnessGoals: Array.isArray(goals) ? goals : [goals] }),
+        ...(conditions && { medicalConditions: Array.isArray(conditions) ? conditions : [conditions] }),
+        ...(notes !== undefined && { notes }),
+        ...(phone !== undefined && { phone }),
+        ...(emergencyContact !== undefined && { emergencyContact }),
+        ...(address !== undefined && { address }),
+        ...(dob !== undefined && { dob }),
+        ...(gender !== undefined && { gender }),
+        ...(injuries !== undefined && { injuries }),
+      },
+    });
+    res.json(updated);
+  } catch (err) {
+    logger.error("Edit client error", { error: err.message });
+    res.status(500).json({ error: "Failed to update client" });
+  }
+});
+
 // DELETE /api/clients/:id — Remove client link
 router.delete("/:id", authenticate, authorize("COACH", "ADMIN"), audit("remove_client", "client"), async (req, res) => {
   try {

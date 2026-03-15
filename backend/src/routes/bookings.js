@@ -4,7 +4,7 @@ import { authenticate, authorize, ownsResource, sanitizeBody, audit } from "../m
 const router = Router();
 
 // POST /api/bookings — Create booking (client)
-router.post("/", authenticate, authorize("CLIENT"), sanitizeBody, audit("create_booking", "booking"), async (req, res) => {
+router.post("/", authenticate, authorize("CLIENT", "COACH", "ADMIN"), sanitizeBody, audit("create_booking", "booking"), async (req, res) => {
   try {
     const clientProfile = await prisma.clientProfile.findUnique({ where: { userId: req.user.id } });
     const coach = await prisma.coachProfile.findUnique({ where: { id: req.body.coachId } });

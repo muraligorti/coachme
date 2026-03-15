@@ -22,6 +22,7 @@ import bookingRoutes from "./routes/bookings.js";
 import reportRoutes from "./routes/reports.js";
 import adminRoutes from "./routes/admin.js";
 import aiRoutes from "./routes/ai.js";
+import messageRoutes from "./routes/messages.js";
 
 // ─── Initialize Services ────────────────────────────────────────────
 
@@ -72,7 +73,11 @@ app.use(helmet({
 
 // CORS: Only allow configured origins
 app.use(cors({
-  origin: (process.env.CORS_ORIGIN || "http://localhost:5173").split(","),
+  origin: [
+    ...(process.env.CORS_ORIGIN || "http://localhost:5173").split(","),
+    "https://coachme.life",
+    "https://www.coachme.life",
+  ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token"],
@@ -130,6 +135,7 @@ app.use("/api/bookings", bookingRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/messages", messageRoutes);
 
 // Health check
 app.get("/api/health", async (req, res) => {

@@ -3,6 +3,26 @@ import { prisma, logger } from "../server.js";
 import { authenticate, authorize, requireFeature, sanitizeBody, audit } from "../middleware/auth.js";
 const router = Router();
 
+// POST /api/leads — Create a lead
+router.post("/", authenticate, authorize("COACH", "ADMIN"), sanitizeBody, audit("create_lead", "lead"), async (req, res) => {
+  try {
+    const coachProfile = await prisma.coachProfile.findUnique({ where: { userId: req.user.id } });
+    if (!coachProfile) return res.status(404).json({ error: "Coach profile not found" });
+    const { name, email, phone, location, fitnessGoal, source, notes, matchScore } = req.body;
+    if (!name) return res.status(400).json({ error: "Name is required" });
+    const lead = await prisma.lead.create({
+      data: {
+        coachId: coachProfile.id, name, email, phone, location, fitnessGoal,
+        source: source || "manual", notes, matchScore: matchScore || 0,
+      },
+    });
+    res.status(201).json(lead);
+  } catch (err) {
+    logger.error("Create lead error", { error: err.message });
+    res.status(500).json({ error: "Failed to create lead" });
+  }
+});
+
 // GET /api/leads — Coach's leads
 router.get("/", authenticate, authorize("COACH", "ADMIN"), requireFeature("leadScoring"), async (req, res) => {
   try {
