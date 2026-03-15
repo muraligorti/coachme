@@ -643,9 +643,11 @@ function LiveSessionPage({ booking, clients, onBack, onComplete }) {
   const [attended, setAttended] = useState(true);
   const [error, setError] = useState("");
   const [showTranscript, setShowTranscript] = useState(false);
+  const [lang, setLang] = useState("hi-IN"); // hi-IN for Hindi+English mix, en-IN for English-India
   const recognitionRef = useRef(null);
   const timerRef = useRef(null);
   const wakeLockRef = useRef(null);
+  const finalTranscriptRef = useRef("");
 
   const clientName = cName(booking.client) || clients?.find(c => c.id === booking.clientId)?.displayName || "Client";
 
@@ -674,18 +676,17 @@ function LiveSessionPage({ booking, clients, onBack, onComplete }) {
     const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
-    let finalTranscript = "";
+    recognition.lang = lang; // hi-IN understands Hindi + Hinglish + English code-switching
     recognition.onresult = (e) => {
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
-          finalTranscript += e.results[i][0].transcript + " ";
+          finalTranscriptRef.current += e.results[i][0].transcript + " ";
         } else {
           interim += e.results[i][0].transcript;
         }
       }
-      setTranscript(finalTranscript + interim);
+      setTranscript(finalTranscriptRef.current + interim);
     };
     recognition.onend = () => {
       // Auto-restart on silence
@@ -697,7 +698,7 @@ function LiveSessionPage({ booking, clients, onBack, onComplete }) {
     try { recognition.start(); } catch {}
     recognitionRef.current = recognition;
     return () => { try { recognition.stop(); } catch {} };
-  }, [phase]);
+  }, [phase, lang]);
 
   const formatTime = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
@@ -712,7 +713,15 @@ function LiveSessionPage({ booking, clients, onBack, onComplete }) {
       return;
     }
     try {
-      const prompt = `You are a fitness session parser. Extract exercises from this coaching session transcript. Return ONLY valid JSON, no markdown.
+      const prompt = `You are a fitness session parser. Extract exercises from a live coaching session transcript. The transcript may be in Hindi, English, or a mix (Hinglish). Return ONLY valid JSON, no markdown.
+
+IMPORTANT — Multiple people may be talking (coach, client, bystanders). The COACH is the one giving instructions, calling out exercises, sets, reps, and weights. Ignore client responses, small talk, and chatter from others. Focus ONLY on the coach's exercise instructions and cues.
+
+Examples of coach instructions (Hindi/English mix):
+- "ab bench press karo, 3 sets 10 reps, 60 kg" → Bench Press, 3 sets, 10 reps, 60kg
+- "ok next exercise squats, 4 sets of 12 at 80 kilos" → Squats, 4 sets, 12 reps, 80kg
+- "deadlift lagao 3 sets 8 reps 100 kg se" → Deadlift, 3 sets, 8 reps, 100kg
+- "bicep curl karo 3 set 15 rep 10 kg dumbbell" → Bicep Curl, 3 sets, 15 reps, 10kg
 
 Session: ${booking.sessionType || "training"}, Client: ${clientName}, Duration: ${formatTime(timer)}
 
@@ -721,12 +730,12 @@ Transcript:
 ${fullText}
 """
 
-Return JSON format:
+Return JSON format (exercise names always in English):
 {
   "exercises": [
     { "name": "Exercise Name", "sets": 3, "reps": 10, "weight": "60kg", "notes": "" }
   ],
-  "sessionNotes": "Brief session summary"
+  "sessionNotes": "Brief session summary in English"
 }
 
 If no exercises found, return {"exercises": [], "sessionNotes": "General session"}.`;
@@ -799,6 +808,11 @@ If no exercises found, return {"exercises": [], "sessionNotes": "General session
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 8 }}>
         <div style={{ width: 10, height: 10, borderRadius: 5, background: C.dg, animation: "pulse 1.5s ease infinite" }} />
         <span style={{ fontSize: 13, color: C.dg, fontWeight: 600 }}>Recording</span>
+      </div>
+      <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 10 }}>
+        {[{ code: "hi-IN", label: "हिं Hindi" }, { code: "en-IN", label: "EN English" }].map(l =>
+          <button key={l.code} onClick={() => { setLang(l.code); if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} } }} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: lang === l.code ? C.ac + "30" : C.s2, color: lang === l.code ? C.ac : C.mt }}>{l.label}</button>
+        )}
       </div>
     </Card>
     <Card style={{ flex: 1, marginBottom: 16, overflow: "auto", maxHeight: 200 }}>
