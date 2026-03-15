@@ -83,6 +83,37 @@ const Tabs=({tabs,active,onChange})=><div style={{display:"flex",gap:4,marginBot
 const PBar=({value,max=100,color=C.ac})=><div style={{height:6,borderRadius:3,background:C.bd,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min((value/max)*100,100)}%`,borderRadius:3,background:color,transition:"width .5s"}}/></div>;
 const Splash=()=><div style={{height:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg,flexDirection:"column",gap:16}}><div style={{width:56,height:56,borderRadius:16,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,fontWeight:800,color:"#fff"}}>C</div><Spin/></div>;
 
+// Country codes — India first, then US, UK, then rest alphabetical
+const COUNTRY_CODES=[
+  {code:"+91",flag:"🇮🇳",name:"India"},{code:"+1",flag:"🇺🇸",name:"US"},{code:"+44",flag:"🇬🇧",name:"UK"},
+  {code:"+61",flag:"🇦🇺",name:"Australia"},{code:"+880",flag:"🇧🇩",name:"Bangladesh"},{code:"+55",flag:"🇧🇷",name:"Brazil"},
+  {code:"+1",flag:"🇨🇦",name:"Canada"},{code:"+86",flag:"🇨🇳",name:"China"},{code:"+20",flag:"🇪🇬",name:"Egypt"},
+  {code:"+33",flag:"🇫🇷",name:"France"},{code:"+49",flag:"🇩🇪",name:"Germany"},{code:"+62",flag:"🇮🇩",name:"Indonesia"},
+  {code:"+353",flag:"🇮🇪",name:"Ireland"},{code:"+972",flag:"🇮🇱",name:"Israel"},{code:"+39",flag:"🇮🇹",name:"Italy"},
+  {code:"+81",flag:"🇯🇵",name:"Japan"},{code:"+254",flag:"🇰🇪",name:"Kenya"},{code:"+60",flag:"🇲🇾",name:"Malaysia"},
+  {code:"+52",flag:"🇲🇽",name:"Mexico"},{code:"+977",flag:"🇳🇵",name:"Nepal"},{code:"+234",flag:"🇳🇬",name:"Nigeria"},
+  {code:"+92",flag:"🇵🇰",name:"Pakistan"},{code:"+63",flag:"🇵🇭",name:"Philippines"},{code:"+7",flag:"🇷🇺",name:"Russia"},
+  {code:"+966",flag:"🇸🇦",name:"Saudi Arabia"},{code:"+65",flag:"🇸🇬",name:"Singapore"},{code:"+27",flag:"🇿🇦",name:"South Africa"},
+  {code:"+82",flag:"🇰🇷",name:"South Korea"},{code:"+94",flag:"🇱🇰",name:"Sri Lanka"},{code:"+971",flag:"🇦🇪",name:"UAE"},
+];
+const PhoneInput=({label,value,onChange,placeholder})=>{
+  // Parse existing value to detect country code
+  const detectCode=()=>{for(const c of COUNTRY_CODES){if(value&&value.startsWith(c.code))return c.code;}return "+91";};
+  const[cc,setCc]=useState(detectCode);
+  const numOnly=(value||"").replace(/^\+\d+\s*/,"");
+  const handleCodeChange=(e)=>{const newCc=e.target.value;setCc(newCc);onChange({target:{value:newCc+" "+numOnly}});};
+  const handleNumChange=(e)=>{const num=e.target.value.replace(/[^\d\s]/g,"");onChange({target:{value:cc+" "+num}});};
+  return<div style={{display:"flex",flexDirection:"column",gap:6,width:"100%"}}>
+    {label&&<label style={{fontSize:13,color:C.mt,fontWeight:500}}>{label}</label>}
+    <div style={{display:"flex",gap:4}}>
+      <select value={cc} onChange={handleCodeChange} style={{background:C.s2,border:`1px solid ${C.bd}`,borderRadius:10,padding:"12px 4px 12px 8px",color:C.tx,fontSize:13,outline:"none",fontFamily:"inherit",minWidth:90,cursor:"pointer"}}>
+        {COUNTRY_CODES.map((c,i)=><option key={`${c.code}_${c.name}`} value={c.code}>{c.flag} {c.code}</option>)}
+      </select>
+      <input value={numOnly} onChange={handleNumChange} placeholder={placeholder||"98765 43210"} style={{background:C.s2,border:`1px solid ${C.bd}`,borderRadius:10,padding:"12px 16px",color:C.tx,fontSize:14,outline:"none",fontFamily:"inherit",flex:1,width:"100%",boxSizing:"border-box"}}/>
+    </div>
+  </div>;
+};
+
 // ─── AUTH SCREEN ──────────────────────────────────────────────────────────────
 function AuthScreen(){const{login,register}=useAuth();const[mode,setMode]=useState("login");const[form,setForm]=useState({name:"",email:"",password:"",role:"coach"});const[error,setError]=useState("");const[busy,setBusy]=useState(false);const submit=async()=>{setError("");if(!form.email||!form.password)return setError("Email and password required");setBusy(true);try{mode==="login"?await login(form.email,form.password):await register(form);}catch(e){setError(e.message);}setBusy(false);};return<div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg,padding:20}}><Card style={{maxWidth:400,width:"100%"}}><div style={{textAlign:"center",marginBottom:28}}><div style={{width:52,height:52,borderRadius:14,background:C.gr,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:800,color:"#fff",marginBottom:12}}>C</div><h1 style={{color:C.tx,margin:0,fontSize:22,fontWeight:700}}>CoachMe.life</h1><p style={{color:C.mt,margin:"6px 0 0",fontSize:14}}>{mode==="login"?"Welcome back":"Create your account"}</p></div><div style={{display:"flex",flexDirection:"column",gap:14}}>{mode==="register"&&<><Input label="Full Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="John Doe"/><Sel label="I am a…" value={form.role} onChange={e=>setForm({...form,role:e.target.value})} options={[{value:"COACH",label:"Coach"},{value:"CLIENT",label:"Client"}]}/></>}<Input label="Email" type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="you@email.com"/><Input label="Password" type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&submit()}/>{error&&<div style={{color:C.dg,fontSize:13,padding:"8px 12px",background:C.dg+"15",borderRadius:8}}>{error}</div>}<Btn onClick={submit} disabled={busy} style={{width:"100%"}}>{busy?"Please wait…":mode==="login"?"Sign In":"Create Account"}</Btn><p style={{color:C.mt,fontSize:13,textAlign:"center",margin:0}}>{mode==="login"?"No account?":"Have an account?"}{" "}<span onClick={()=>{setMode(mode==="login"?"register":"login");setError("");}} style={{color:C.ac,cursor:"pointer",fontWeight:600}}>{mode==="login"?"Sign Up":"Sign In"}</span></p></div></Card></div>;}
 
@@ -196,7 +227,7 @@ function ClientsPage(){
     <Modal open={showEdit} onClose={()=>setShowEdit(false)} title="Edit Client" wide>
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Name *" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/><Input label="Email *" type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Mobile *" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="+91 98765 43210"/><Sel label="Session Type" value={form.sessionType} onChange={e=>setForm({...form,sessionType:e.target.value})} options={[{value:"offline",label:"Offline (In-person)"},{value:"online",label:"Online (Virtual)"},{value:"hybrid",label:"Hybrid"}]}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><PhoneInput label="Mobile *" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/><Sel label="Session Type" value={form.sessionType} onChange={e=>setForm({...form,sessionType:e.target.value})} options={[{value:"offline",label:"Offline (In-person)"},{value:"online",label:"Online (Virtual)"},{value:"hybrid",label:"Hybrid"}]}/></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Date of Birth" type="date" value={form.dob} onChange={e=>setForm({...form,dob:e.target.value})}/><Sel label="Gender" value={form.gender||""} onChange={e=>setForm({...form,gender:e.target.value})} options={[{value:"",label:"— Select —"},{value:"male",label:"Male"},{value:"female",label:"Female"},{value:"other",label:"Other"}]}/></div>
         <Input label="Address" value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/>
         <TextArea label="Goals" value={form.goals} onChange={e=>setForm({...form,goals:e.target.value})} placeholder="e.g. Lose 10kg, Build muscle"/>
@@ -236,7 +267,7 @@ function ClientsPage(){
     <Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Add New Client" wide>
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Full Name *" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="John Doe"/><Input label="Email *" type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="john@email.com"/></div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Mobile *" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="+91 98765 43210"/><Sel label="Session Type *" value={form.sessionType} onChange={e=>setForm({...form,sessionType:e.target.value})} options={[{value:"offline",label:"Offline (In-person)"},{value:"online",label:"Online (Virtual)"},{value:"hybrid",label:"Hybrid"}]}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><PhoneInput label="Mobile *" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/><Sel label="Session Type *" value={form.sessionType} onChange={e=>setForm({...form,sessionType:e.target.value})} options={[{value:"offline",label:"Offline (In-person)"},{value:"online",label:"Online (Virtual)"},{value:"hybrid",label:"Hybrid"}]}/></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Input label="Date of Birth" type="date" value={form.dob} onChange={e=>setForm({...form,dob:e.target.value})}/><Sel label="Gender" value={form.gender||""} onChange={e=>setForm({...form,gender:e.target.value})} options={[{value:"",label:"— Select —"},{value:"male",label:"Male"},{value:"female",label:"Female"},{value:"other",label:"Other"}]}/></div>
         <Input label="Address" value={form.address} onChange={e=>setForm({...form,address:e.target.value})}/>
         <TextArea label="Goals" value={form.goals} onChange={e=>setForm({...form,goals:e.target.value})} placeholder="e.g. Lose 10kg in 3 months"/>
@@ -1089,7 +1120,7 @@ function BookingsPage(){
       await createBooking({
         clientId:form.clientId,
         coachId,
-        scheduledAt:form.date+"T"+form.time+":00.000Z",
+        scheduledAt:new Date(form.date+"T"+form.time).toISOString(),
         durationMinutes:form.duration||60,
         sessionType:form.type==="training"||form.type==="group"?"IN_PERSON":"ONLINE",
         notes:form.notes,
@@ -1124,7 +1155,7 @@ function BookingsPage(){
         try{
           let coachId=bk.coachId||bk.coach?.id;
           if(!coachId){try{const me=await api.get("/auth/me");coachId=me?.profile?.id;}catch{}}
-          await createBooking({clientId:bk.clientId||bk.client?.id,coachId,scheduledAt:iso+"T"+timeStr+":00.000Z",durationMinutes:bk.durationMinutes||bk.duration||60,sessionType:bk.sessionType||(bk.type==="training"||bk.type==="group"?"IN_PERSON":"ONLINE"),notes:bk.notes||""});
+          await createBooking({clientId:bk.clientId||bk.client?.id,coachId,scheduledAt:new Date(iso+"T"+timeStr).toISOString(),durationMinutes:bk.durationMinutes||bk.duration||60,sessionType:bk.sessionType||(bk.type==="training"||bk.type==="group"?"IN_PERSON":"ONLINE"),notes:bk.notes||""});
           created++;
         }catch{}
       }
@@ -1711,7 +1742,8 @@ function AIChatPage(){
           if(timeParsed[3]?.toLowerCase()==="pm"&&hours<12)hours+=12;
           if(timeParsed[3]?.toLowerCase()==="am"&&hours===12)hours=0;
         }
-        const scheduledAt=bookDate.toISOString().slice(0,10)+`T${String(hours).padStart(2,"0")}:${String(minutes).padStart(2,"0")}:00`;
+        const localDate=new Date(bookDate.getFullYear(),bookDate.getMonth(),bookDate.getDate(),hours,minutes);
+        const scheduledAt=localDate.toISOString();
 
         // Book via API
         try{
