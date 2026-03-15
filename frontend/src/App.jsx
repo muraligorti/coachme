@@ -741,13 +741,20 @@ function WorkoutsPage(){const[tab,setTab]=useState("plans");const[plans,setPlans
 // ─── BOOKINGS ─────────────────────────────────────────────────────────────────
 // ─── LIVE SESSION TRACKER ──────────────────────────────────────────────────────
 function LiveSessionPage({ booking, clients, onBack, onComplete }) {
+  // Support single booking or array of bookings (group session)
+  const bookings = Array.isArray(booking) ? booking : [booking];
+  const isGroup = bookings.length > 1;
   const [phase, setPhase] = useState("recording"); // recording → processing → review → done
   const [transcript, setTranscript] = useState("");
   const [manualNotes, setManualNotes] = useState("");
   const [timer, setTimer] = useState(0);
   const [exercises, setExercises] = useState([]);
   const [sessionNotes, setSessionNotes] = useState("");
-  const [attended, setAttended] = useState(true);
+  const [attendance, setAttendance] = useState(() => {
+    const att = {};
+    bookings.forEach(b => { att[b.id] = true; });
+    return att;
+  });
   const [error, setError] = useState("");
   const [showTranscript, setShowTranscript] = useState(false);
   const [lang, setLang] = useState("hi-IN"); // hi-IN for Hindi+English mix, en-IN for English-India
@@ -756,7 +763,8 @@ function LiveSessionPage({ booking, clients, onBack, onComplete }) {
   const wakeLockRef = useRef(null);
   const finalTranscriptRef = useRef("");
 
-  const clientName = cName(booking.client) || clients?.find(c => c.id === booking.clientId)?.displayName || "Client";
+  const getClientName = (b) => cName(b.client) || clients?.find(c => c.id === b.clientId)?.displayName || "Client";
+  const clientName = isGroup ? `Group (${bookings.length} clients)` : getClientName(bookings[0]);
 
   // Timer
   useEffect(() => {
@@ -866,7 +874,8 @@ When sets/reps are ambiguous, use common gym defaults (3 sets, 10-12 reps).
 
 Return ONLY valid JSON. No markdown, no backticks, no explanation.`;
 
-      const userMsg = `Parse this coaching session transcript. Session type: ${booking.sessionType || "training"}, Client: ${clientName}, Duration: ${formatTime(timer)}
+      const clientList = bookings.map(b => getClientName(b)).join(", ");
+      const userMsg = `Parse this coaching session transcript. Session type: ${bookings[0].sessionType || "training"}, ${isGroup ? `GROUP SESSION with clients: ${clientList}` : `Client: ${clientName}`}, Duration: ${formatTime(timer)}
 
 TRANSCRIPT:
 """
@@ -906,27 +915,30 @@ Return this exact JSON structure:
   const saveSession = async () => {
     setPhase("done");
     try {
-      // 1. Mark booking as COMPLETED with transcript in notes
       const fullTranscript = (transcript + (manualNotes ? "\n\nManual Notes:\n" + manualNotes : "")).trim();
-      await api.req(`/bookings/${booking.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          status: attended ? "COMPLETED" : "ABSENT",
-          notes: (fullTranscript ? "Session Transcript:\n" + fullTranscript + "\n\n" : "") + (sessionNotes ? "AI Summary:\n" + sessionNotes : "")
-        })
-      });
-      // 2. Log each exercise as a workout session
-      const validExercises = exercises.filter(ex => ex.name.trim());
-      for (const ex of validExercises) {
-        await api.post("/workouts/sessions", {
-          clientId: booking.clientId || booking.client?.id,
-          exerciseName: ex.name,
-          sets: parseInt(ex.sets) || 0,
-          reps: parseInt(ex.reps) || 0,
-          intensity: ex.weight || null,
-          durationSeconds: timer,
-          notes: ex.notes || null,
+      const notesText = (fullTranscript ? "Session Transcript:\n" + fullTranscript + "\n\n" : "") + (sessionNotes ? "AI Summary:\n" + sessionNotes : "");
+      // 1. Mark each booking as COMPLETED/ABSENT based on per-client attendance
+      for (const b of bookings) {
+        await api.req(`/bookings/${b.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: attendance[b.id] ? "COMPLETED" : "ABSENT", notes: notesText })
         });
+      }
+      // 2. Log exercises for each attending client
+      const validExercises = exercises.filter(ex => ex.name.trim());
+      const attendingBookings = bookings.filter(b => attendance[b.id]);
+      for (const b of attendingBookings) {
+        for (const ex of validExercises) {
+          await api.post("/workouts/sessions", {
+            clientId: b.clientId || b.client?.id,
+            exerciseName: ex.name,
+            sets: parseInt(ex.sets) || 0,
+            reps: parseInt(ex.reps) || 0,
+            intensity: ex.weight || null,
+            durationSeconds: timer,
+            notes: ex.notes || null,
+          });
+        }
       }
       onComplete?.();
     } catch (e) {
@@ -976,7 +988,7 @@ Return this exact JSON structure:
     <div style={{ fontSize: 48 }}>✅</div>
     <div style={{ color: C.tx, fontSize: 18, fontWeight: 700 }}>Session Saved!</div>
     <div style={{ color: C.mt, fontSize: 13, textAlign: "center" }}>
-      {exercises.filter(e => e.name.trim()).length} exercise(s) logged for {clientName}
+      {exercises.filter(e => e.name.trim()).length} exercise(s) logged for {isGroup ? `${bookings.filter(b => attendance[b.id]).length} client(s)` : clientName}
     </div>
     <Btn onClick={onBack} style={{ marginTop: 12 }}>Back to Schedule</Btn>
   </div>;
@@ -989,10 +1001,17 @@ Return this exact JSON structure:
     </div>
     {error && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10, marginBottom: 12 }}>{error}</div>}
 
-    {/* Attendance toggle */}
-    <Card style={{ marginBottom: 12, padding: 14, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-      <div><div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{clientName}</div><div style={{ fontSize: 12, color: C.mt }}>Attendance</div></div>
-      <button onClick={() => setAttended(!attended)} style={{ padding: "8px 16px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, background: attended ? C.ok + "20" : C.dg + "20", color: attended ? C.ok : C.dg }}>{attended ? "✅ Present" : "❌ Absent"}</button>
+    {/* Attendance toggle(s) */}
+    <Card style={{ marginBottom: 12, padding: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: C.mt, marginBottom: 8 }}>Attendance{isGroup ? ` (${bookings.length} clients)` : ""}</div>
+      {bookings.map(b => {
+        const name = getClientName(b);
+        const present = attendance[b.id];
+        return <div key={b.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.bd}` }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{name}</div>
+          <button onClick={() => setAttendance(a => ({ ...a, [b.id]: !a[b.id] }))} style={{ padding: "6px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: present ? C.ok + "20" : C.dg + "20", color: present ? C.ok : C.dg }}>{present ? "✅ Present" : "❌ Absent"}</button>
+        </div>;
+      })}
     </Card>
 
     {/* Exercises table */}
@@ -1031,7 +1050,7 @@ Return this exact JSON structure:
     {/* Actions */}
     <div style={{ display: "flex", gap: 8 }}>
       <Btn variant="secondary" onClick={onBack} style={{ flex: 1 }}>Discard</Btn>
-      <Btn onClick={saveSession} disabled={!attended && exercises.filter(e => e.name.trim()).length === 0} style={{ flex: 2 }}>Save & Complete</Btn>
+      <Btn onClick={saveSession} style={{ flex: 2 }}>Save & Complete</Btn>
     </div>
   </div>;
 }
@@ -1102,7 +1121,12 @@ function BookingsPage(){
       for(const bk of dayBk){
         const origTime=new Date(bk.date||bk.startTime||bk.scheduledAt);
         const timeStr=origTime.toTimeString().slice(0,5);
-        try{await createBooking({clientId:bk.clientId||bk.client?.id,date:iso+"T"+timeStr+":00",duration:bk.duration||60,type:bk.type||"training"});created++;}catch{}
+        try{
+          let coachId=bk.coachId||bk.coach?.id;
+          if(!coachId){try{const me=await api.get("/auth/me");coachId=me?.profile?.id;}catch{}}
+          await createBooking({clientId:bk.clientId||bk.client?.id,coachId,scheduledAt:iso+"T"+timeStr+":00.000Z",durationMinutes:bk.durationMinutes||bk.duration||60,sessionType:bk.sessionType||(bk.type==="training"||bk.type==="group"?"IN_PERSON":"ONLINE"),notes:bk.notes||""});
+          created++;
+        }catch{}
       }
     }
     alert(`Created ${created} sessions!`);setShowRepeat(false);load();
@@ -1330,7 +1354,10 @@ function BookingsPage(){
         {new Date(selDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}
         {isHoliday&&<Badge color={C.dg} style={{marginLeft:8}}>Holiday</Badge>}
       </span>
-      <span style={{fontSize:12,color:C.mt}}>{db.length} session(s)</span>
+      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+        {db.filter(b=>(b.status||"").toLowerCase()==="confirmed").length>1&&<button onClick={()=>setActiveSession(db.filter(b=>(b.status||"").toLowerCase()==="confirmed"))} style={{padding:"4px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:C.ac+"25",color:C.ac}}>🎙️ Group Session</button>}
+        <span style={{fontSize:12,color:C.mt}}>{db.length} session(s)</span>
+      </div>
     </div>
 
     {/* ── DAY BOOKINGS WITH ATTENDANCE ── */}
@@ -1447,7 +1474,7 @@ function ReportsPage(){const[data,setData]=useState({});const[loading,setLoading
 // ─── AI CHAT ──────────────────────────────────────────────────────────────────
 function AIChatPage(){
   const{user}=useAuth();
-  const[msgs,setMsgs]=useState([{role:"assistant",content:"Hey! I'm **CoachMe AI** — your intelligent fitness coaching assistant.\n\nI have full access to your real-time data. Here's what I can do:\n\n- **Add/find/delete clients**\n- **Book or cancel sessions**\n- **Show your schedule**\n- **Create workout plans**\n- **Show revenue & stats**\n\nTry asking me anything!",ts:new Date().toISOString()}]);
+  const[msgs,setMsgs]=useState([{role:"assistant",content:"Hey! I'm **CoachMe AI** — your intelligent fitness coaching assistant.\n\nI have full access to your data and can search the web. Here's what I can do:\n\n- **Add/edit/find/delete clients**\n- **Book or cancel sessions**\n- **Create & edit workout plans**\n- **Search for new exercises, nutrition plans & fitness research**\n- **Show your schedule & revenue stats**\n\nAsk me anything — from managing clients to finding the best HIIT workouts!",ts:new Date().toISOString()}]);
   const[input,setInput]=useState("");const[loading,setLoading]=useState(false);
   const[voiceOn,setVoiceOn]=useState(true);const[isListening,setIsListening]=useState(false);
   const br=useRef(null);const recognitionRef=useRef(null);const inputRef=useRef(null);const textareaRef=useRef(null);
@@ -1689,8 +1716,8 @@ function AIChatPage(){
         // Book via API
         try{
           // Get coach profile ID
-          let coachId=user?.id;
-          try{const me=await api.get("/auth/me");coachId=(me?.user||me)?.id||coachId;}catch{}
+          let coachId;
+          try{const me=await api.get("/auth/me");coachId=me?.profile?.id;}catch{}
           await api.post("/bookings",{
             clientId:matchedClient.id,
             coachId,
@@ -1729,9 +1756,11 @@ function AIChatPage(){
       else if(isFull){title="Full Body";exercises=[{name:"Barbell Squat",sets:3,reps:8},{name:"Bench Press",sets:3,reps:8},{name:"Barbell Row",sets:3,reps:8},{name:"Overhead Press",sets:3,reps:10},{name:"Romanian Deadlift",sets:3,reps:10},{name:"Pull-ups",sets:3,reps:8}];}
       else{title="General Strength";exercises=[{name:"Barbell Squat",sets:3,reps:10},{name:"Bench Press",sets:3,reps:10},{name:"Barbell Row",sets:3,reps:10},{name:"Overhead Press",sets:3,reps:10},{name:"Deadlift",sets:3,reps:8}];}
 
-      // Save locally (workouts don't have a backend route yet)
+      // Save to backend, fallback to localStorage
       const plan={id:`workout_${Date.now()}`,title,description:"Created by AI Coach",exercises,status:"active",createdAt:new Date().toISOString()};
-      const localW=ls.get("local_workouts",[]);localW.push(plan);ls.set("local_workouts",localW);
+      try{await api.post("/workouts/plans",{name:title,description:"Created by AI Coach",exercises,intensity:"moderate",durationWeeks:4});}catch{
+        const localW=ls.get("local_workouts",[]);localW.push(plan);ls.set("local_workouts",localW);
+      }
 
       let txt=`**Workout Created: ${title}**\n`;
       exercises.forEach((e,i)=>{txt+=`\n${i+1}. **${e.name}** — ${e.sets}x${e.reps}`;});
@@ -1759,7 +1788,7 @@ function AIChatPage(){
           const b=await api.get("/bookings");const bk=unwrap(b,"bookings","sessions");
           const dayBk=bk.filter(x=>{try{const st=(x.status||"").toUpperCase();return new Date(x.date||x.startTime||x.scheduledAt).toISOString().slice(0,10)===dateStr&&st!=="CANCELLED";}catch{return false;}});
           for(const booking of dayBk){
-            try{await api.put(`/bookings/${booking.id}`,{status:"cancelled"});count++;}catch{}
+            try{await api.req(`/bookings/${booking.id}`,{method:"PATCH",body:JSON.stringify({status:"CANCELLED"})});count++;}catch{}
           }
         }catch{}
 
@@ -1800,6 +1829,58 @@ function AIChatPage(){
       }catch{results.push("Could not search clients");}
     }
 
+    // ─ EDIT CLIENT ─
+    const editClientMatch=msg.match(/(?:edit|update|change|modify)\s+(?:client\s+)?([a-zA-Z]+?)(?:'?s?)?\s+(?:phone|mobile|number|email|name|session\s*type|type|goals?)/i);
+    if(editClientMatch&&!addClientMatch&&!deleteMatch){
+      const name=editClientMatch[1].trim();
+      try{
+        const c=await api.get("/clients");const cl=unwrap(c,"clients");
+        const match=cl.find(x=>cName(x).toLowerCase().includes(name.toLowerCase()));
+        if(match){
+          const updateData={};
+          const phoneM=userMsg.match(/(?:phone|mobile|number)[:\s]+(\+?\d[\d\s\-]{6,})/i);
+          const emailM=userMsg.match(/(?:email)[:\s]+([^\s,]+@[^\s,]+)/i);
+          const nameM=userMsg.match(/(?:name\s+(?:to|as|=)\s+)([a-zA-Z\s]+?)(?:\s*,|\s*$)/i);
+          const typeM=userMsg.match(/(?:type|session\s*type)\s+(?:to|as|=)\s+(online|offline|hybrid)/i);
+          const goalsM=userMsg.match(/(?:goals?)\s+(?:to|as|=)\s+(.+?)(?:\s*,|\s*$)/i);
+          if(phoneM)updateData.phone=phoneM[1].replace(/[\s\-]/g,"");
+          if(emailM)updateData.email=emailM[1];
+          if(nameM)updateData.displayName=nameM[1].trim();
+          if(typeM)updateData.sessionType=typeM[1].toLowerCase();
+          if(goalsM)updateData.goals=goalsM[1].trim();
+          if(Object.keys(updateData).length>0){
+            try{await api.put(`/clients/${match.id}`,updateData);results.push(`**Client "${cName(match)}" updated:**\n${Object.entries(updateData).map(([k,v])=>`- **${k}:** ${v}`).join("\n")}`);}
+            catch(e){results.push(`Could not update: ${e.message}`);}
+          }else{results.push(`Found **${cName(match)}** but couldn't parse what to update. Try: "edit ${name} phone 9876543210" or "edit ${name} type online"`);}
+        }else{results.push(`No client found matching "**${name}**"`);}
+      }catch{results.push("Could not fetch clients");}
+    }
+
+    // ─ EDIT WORKOUT ─
+    const editWorkoutMatch=msg.match(/(?:edit|update|rename|modify)\s+(?:workout|plan)\s+(?:named?\s+)?["']?(.+?)["']?\s+(?:to|title|name|add|remove)/i);
+    if(editWorkoutMatch){
+      const planName=editWorkoutMatch[1].trim();
+      try{
+        const w=await api.get("/workouts/plans").catch(()=>null);
+        const plans=w?unwrap(w,"workouts","plans"):[];
+        const localPlans=ls.get("local_workouts",[]);
+        const allPlans=[...plans,...localPlans];
+        const match=allPlans.find(p=>(p.title||p.name||"").toLowerCase().includes(planName.toLowerCase()));
+        if(match){
+          const titleM=userMsg.match(/(?:title|name|rename)\s+(?:to|as|=)\s+["']?(.+?)["']?(?:\s*$|\s*,)/i);
+          if(titleM){
+            if(String(match.id).startsWith("workout_")){
+              const local=ls.get("local_workouts",[]).map(p=>p.id===match.id?{...p,title:titleM[1].trim()}:p);
+              ls.set("local_workouts",local);
+              results.push(`**Workout renamed** to "${titleM[1].trim()}"`);
+            }else{
+              try{await api.put(`/workouts/plans/${match.id}`,{name:titleM[1].trim()});results.push(`**Workout "${match.title||match.name}" renamed** to "${titleM[1].trim()}"`);}catch(e){results.push(`Could not update: ${e.message}`);}
+            }
+          }else{results.push(`Found workout "**${match.title||match.name}**" but couldn't parse edit. Try: "rename workout X to Y"`);}
+        }else{results.push(`No workout found matching "**${planName}**"`);}
+      }catch{results.push("Could not search workouts");}
+    }
+
     return results;
   };
 
@@ -1819,7 +1900,7 @@ function AIChatPage(){
       const context=await gatherContext();
 
       // 3. Create a SINGLE message with embedded context
-      const enrichedMessage=`[SYSTEM CONTEXT — You are CoachMe AI — a world-class fitness coaching assistant. You have full access to the coach's real-time data (clients, bookings, leads, revenue). Answer questions precisely using the actual data provided. Be concise, use bullet points, and always reference specific names and numbers from the data. When actions are performed, confirm them clearly. You can: add/find/delete clients, book/cancel sessions, create workouts, show schedules, show revenue stats. Current date: ${new Date().toLocaleString()}. Coach: ${user?.name||"Coach"} (${user?.email}).
+      const enrichedMessage=`[APP DATA CONTEXT — Coach's real-time data is below. Use it to answer questions precisely. You can also search the web for fitness research, new workout ideas, exercise form guides, nutrition plans, and trending fitness content.
 
 APP DATA:${context}
 
@@ -1828,9 +1909,10 @@ END CONTEXT]
 
 User question: ${msg}`;
 
-      // 4. Send to AI with context packed into the message
-      const r=await api.post("/ai/chat",{message:enrichedMessage});
-      let reply=r.reply||r.message||r.response||"";
+      // 4. Send to AI with system prompt and web search enabled for best results
+      const sysPrompt=`You are CoachMe AI — a world-class fitness coaching assistant with deep expertise in exercise science, nutrition, and coaching business. You have full access to the coach's real-time data. Answer precisely using actual data. Be concise, use bullet points. When the coach asks about new workouts, exercises, nutrition plans, videos, or fitness research — provide detailed, actionable answers drawing from your training knowledge. You can search the web for latest fitness research and trends when needed. Current date: ${new Date().toLocaleString()}. Coach: ${user?.name||"Coach"} (${user?.email}).`;
+      const r=await api.post("/ai/chat",{system:sysPrompt,message:enrichedMessage,search:true});
+      let reply=r.text||r.reply||r.message||r.response||"";
 
       // 5. If AI gave a generic/empty response, use our action results instead
       const isGeneric=!reply||reply.length<20||reply.toLowerCase().includes("let me help")||reply.toLowerCase().includes("i'll help")||reply.toLowerCase().includes("i can help")||reply.toLowerCase().includes("sure, i");
@@ -1892,7 +1974,7 @@ User question: ${msg}`;
     return"I processed your request. Try asking about:\n- Your schedule (\"show today's sessions\")\n- Clients (\"list my clients\")\n- Revenue (\"show my stats\")\n- Add data (\"add client Ravi, phone 98765\")\n- Workouts (\"create a push day workout\")\n- Bookings (\"book session for Priya tomorrow 7am\")";
   };
 
-  const suggestions=["Show today's schedule","List my clients","What's my revenue?","Add a new client","Create a push workout","Book a session"];
+  const suggestions=["Show today's schedule","List my clients","Best exercises for fat loss","Create a push workout","Suggest a nutrition plan","Edit client phone number","New HIIT workout ideas","What's my revenue?"];
 
   return<div style={{display:"flex",flexDirection:"column",height:"calc(100dvh - 120px)",maxHeight:"calc(100dvh - 120px)",position:"relative"}}>
     {/* ── Header ── */}
