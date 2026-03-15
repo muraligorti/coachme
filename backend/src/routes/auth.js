@@ -141,6 +141,7 @@ router.post("/register", registerLimiter, sanitizeBody, audit("register", "user"
             data: {
               userId: newUser.id,
               displayName: data.profile.displayName,
+              phone: data.profile.phone || null,
               age: data.profile.age || null,
               gender: data.profile.gender || null,
               heightCm: data.profile.heightCm || null,
@@ -370,12 +371,25 @@ router.get("/me", authenticate, async (req, res) => {
 
 router.post("/forgot-password", sanitizeBody, async (req, res) => {
   try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: "Email required" });
+    const { email, phone } = req.body;
+    if (!email && !phone) return res.status(400).json({ error: "Email or phone required" });
 
-    const user = await prisma.user.findUnique({ where: { email } });
-    // Always return success to prevent email enumeration
-    if (!user) return res.json({ message: "If this email exists, a reset code has been sent." });
+    let user;
+    if (email) {
+      user = await prisma.user.findUnique({ where: { email } });
+    }
+    if (!user && phone) {
+      // Look up by phone in ClientProfile or CoachProfile
+      const cleanPhone = phone.replace(/[\s\-\(\)]/g, "");
+      const clientProfile = await prisma.clientProfile.findFirst({ where: { phone: { contains: cleanPhone.slice(-10) } } });
+      if (clientProfile) user = await prisma.user.findUnique({ where: { id: clientProfile.userId } });
+      if (!user) {
+        const coachProfile = await prisma.coachProfile.findFirst({ where: { phone: { contains: cleanPhone.slice(-10) } } });
+        if (coachProfile) user = await prisma.user.findUnique({ where: { id: coachProfile.userId } });
+      }
+    }
+    // Always return success to prevent enumeration
+    if (!user) return res.json({ message: "If this account exists, a reset code has been sent." });
 
     // Generate a 6-digit code + random token
     const crypto = await import("crypto");
@@ -418,8 +432,29 @@ router.post("/forgot-password", sanitizeBody, async (req, res) => {
       }
     }
 
-    // No email service configured or email failed — return code directly (dev/demo mode)
-    res.json({ message: "Reset code generated (no email service configured).", code: resetCode });
+    // Try SMS via Twilio if phone was provided
+    if (phone && (process.env.TWILIO_ACCOUNT_SID || process.env.TWILIO_SID)) {
+      try {
+        const accountSid = process.env.TWILIO_ACCOUNT_SID || process.env.TWILIO_SID;
+        const authToken = process.env.TWILIO_AUTH_TOKEN;
+        const fromPhone = process.env.TWILIO_PHONE_NUMBER;
+        if (accountSid && authToken && fromPhone) {
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+          const cleanTo = phone.replace(/[\s\-\(\)]/g, "");
+          const toPhone = cleanTo.startsWith("+") ? cleanTo : `+${cleanTo}`;
+          await fetch(twilioUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64") },
+            body: new URLSearchParams({ To: toPhone, From: fromPhone, Body: `CoachMe.life - Your password reset code is: ${resetCode}\n\nValid for 30 minutes. Do not share this code.` }).toString(),
+          });
+          logger.info("Password reset SMS sent", { phone: toPhone.slice(0, 6) + "***" });
+          return res.json({ message: "Reset code sent via SMS." });
+        }
+      } catch (smsErr) { logger.error("SMS send failed", { error: smsErr.message }); }
+    }
+
+    // No email/SMS service configured or both failed — return code directly (dev/demo mode)
+    res.json({ message: "Reset code generated (no email/SMS service configured).", code: resetCode });
   } catch (err) {
     logger.error("Forgot password error", { error: err.message });
     res.status(500).json({ error: "Failed to process request" });

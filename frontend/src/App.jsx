@@ -50,7 +50,8 @@ function AuthProvider({ children }) {
   const login = async (email, password) => { const d=await api.post("/auth/login",{email,password}); const tk=xToken(d); if(!tk) throw new Error("No token"); api.setToken(tk); const u=xUser(d); if(u) setUser(u); else { try{const m=await api.get("/auth/me");setUser(xUser(m)||{email});}catch{setUser({email,name:email.split("@")[0]});} } };
   const register = async (pl) => {
     // Transform frontend form to backend's expected shape
-    const payload = { email: pl.email, password: pl.password, role: (pl.role||"CLIENT").toUpperCase(), profile: { displayName: pl.name||pl.displayName||pl.email.split("@")[0], phone: pl.phone||undefined, country: pl.country||undefined, city: pl.city||undefined } };
+    const phone = (pl.phone||"").trim();
+    const payload = { email: pl.email, password: pl.password, role: (pl.role||"CLIENT").toUpperCase(), profile: { displayName: pl.name||pl.displayName||pl.email.split("@")[0], phone: phone||undefined, country: pl.country||undefined, city: pl.city||undefined } };
     const d=await api.post("/auth/register",payload); const tk=xToken(d); if(!tk) throw new Error("No token"); api.setToken(tk);
     const u=xUser(d); if(u){u.role=u.role||payload.role;u.name=u.name||payload.profile.displayName;setUser(u);}else{setUser({email:pl.email,name:payload.profile.displayName,role:payload.role});}
   };
@@ -120,15 +121,21 @@ const PhoneInput=({label,value,onChange,placeholder})=>{
 };
 
 // ─── AUTH SCREEN ──────────────────────────────────────────────────────────────
-function AuthScreen(){const{login,register}=useAuth();const[mode,setMode]=useState("login");const[form,setForm]=useState({name:"",email:"",password:"",role:"CLIENT"});const[error,setError]=useState("");const[success,setSuccess]=useState("");const[busy,setBusy]=useState(false);const[resetToken,setResetToken]=useState("");const[newPassword,setNewPassword]=useState("");
+function AuthScreen(){const{login,register}=useAuth();const[mode,setMode]=useState("login");const[form,setForm]=useState({name:"",email:"",password:"",role:"CLIENT",phone:""});const[error,setError]=useState("");const[success,setSuccess]=useState("");const[busy,setBusy]=useState(false);const[resetToken,setResetToken]=useState("");const[newPassword,setNewPassword]=useState("");const[resetMethod,setResetMethod]=useState("email");
   const submit=async()=>{setError("");setSuccess("");
-    if(mode==="forgot"){if(!form.email)return setError("Enter your email");setBusy(true);try{const r=await api.post("/auth/forgot-password",{email:form.email});if(r.code){setResetToken(r.code);setSuccess(`Your reset code is: ${r.code}`);}else{setSuccess(r.message||"Reset code sent to your email.");}setMode("reset");}catch(e){setError(e.message);}setBusy(false);return;}
+    if(mode==="forgot"){
+      const contact=resetMethod==="sms"?form.phone:form.email;
+      if(!contact)return setError(resetMethod==="sms"?"Enter your mobile number":"Enter your email");
+      setBusy(true);try{const r=await api.post("/auth/forgot-password",{email:resetMethod==="email"?form.email:undefined,phone:resetMethod==="sms"?form.phone:undefined});if(r.code){setResetToken(r.code);setSuccess(`Your reset code is: ${r.code}`);}else{setSuccess(r.message||`Reset code sent via ${resetMethod==="sms"?"SMS":"email"}.`);}setMode("reset");}catch(e){setError(e.message);}setBusy(false);return;
+    }
     if(mode==="reset"){if(!resetToken||!newPassword)return setError("Enter reset code and new password");setBusy(true);try{await api.post("/auth/reset-password",{token:resetToken,password:newPassword});setSuccess("Password reset! You can now sign in.");setMode("login");}catch(e){setError(e.message);}setBusy(false);return;}
     if(!form.email||!form.password)return setError("Email and password required");setBusy(true);try{mode==="login"?await login(form.email,form.password):await register(form);}catch(e){setError(e.message);}setBusy(false);
   };
   return<div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg,padding:20}}><Card style={{maxWidth:400,width:"100%"}}><div style={{textAlign:"center",marginBottom:28}}><div style={{width:52,height:52,borderRadius:14,background:C.gr,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:800,color:"#fff",marginBottom:12}}>C</div><h1 style={{color:C.tx,margin:0,fontSize:22,fontWeight:700}}>CoachMe.life</h1><p style={{color:C.mt,margin:"6px 0 0",fontSize:14}}>{mode==="login"?"Welcome back":mode==="register"?"Create your account":mode==="forgot"?"Reset your password":"Enter reset code"}</p></div><div style={{display:"flex",flexDirection:"column",gap:14}}>
-    {mode==="register"&&<><Input label="Full Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Murali Gorti"/><Sel label="I am a…" value={form.role} onChange={e=>setForm({...form,role:e.target.value})} options={[{value:"COACH",label:"Coach"},{value:"CLIENT",label:"Client"}]}/></>}
-    {(mode==="login"||mode==="register"||mode==="forgot")&&<Input label="Email" type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="you@email.com"/>}
+    {mode==="register"&&<><Input label="Full Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Murali Gorti"/><PhoneInput label="Mobile Number" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/><Sel label="I am a…" value={form.role} onChange={e=>setForm({...form,role:e.target.value})} options={[{value:"COACH",label:"Coach"},{value:"CLIENT",label:"Client"}]}/></>}
+    {mode==="forgot"&&<div style={{display:"flex",gap:4,marginBottom:4}}>{[{id:"sms",label:"📱 SMS"},{id:"email",label:"📧 Email"}].map(m=><button key={m.id} onClick={()=>setResetMethod(m.id)} style={{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:resetMethod===m.id?C.ac+"20":C.s2,color:resetMethod===m.id?C.ac:C.mt}}>{m.label}</button>)}</div>}
+    {mode==="forgot"&&resetMethod==="sms"&&<PhoneInput label="Mobile Number" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/>}
+    {(mode==="login"||mode==="register"||(mode==="forgot"&&resetMethod==="email"))&&<Input label="Email" type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="you@email.com"/>}
     {(mode==="login"||mode==="register")&&<Input label="Password" type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&submit()}/>}
     {mode==="reset"&&<><Input label="Reset Code" value={resetToken} onChange={e=>setResetToken(e.target.value)} placeholder="Paste the code from your email"/><Input label="New Password" type="password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="Min 8 chars, uppercase, lowercase, number"/></>}
     {error&&<div style={{color:C.dg,fontSize:13,padding:"8px 12px",background:C.dg+"15",borderRadius:8}}>{error}</div>}
