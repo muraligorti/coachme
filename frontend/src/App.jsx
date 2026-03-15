@@ -720,6 +720,13 @@ function BookingsPage(){
     window.open(`https://wa.me/${intlPhone}?text=${encodeURIComponent(message)}`,"_blank");
   };
 
+  // WhatsApp call — opens WhatsApp chat (user taps call icon there)
+  const whatsAppCall=(phone)=>{
+    const cleanPhone=String(phone||"").replace(/[\s\-\+\(\)]/g,"");
+    const intlPhone=cleanPhone.startsWith("91")?cleanPhone:cleanPhone.startsWith("0")?`91${cleanPhone.slice(1)}`:`91${cleanPhone}`;
+    window.open(`https://wa.me/${intlPhone}`,"_blank");
+  };
+
   // Resolve client phone — look up from full clients list by ID
   const resolveClientPhone=(booking)=>{
     // Try the embedded client object first
@@ -778,12 +785,21 @@ function BookingsPage(){
     const selected=dayBk.filter(b=>callSelections[b.id]);
     if(selected.length===0){alert("Select at least one client");return;}
 
+    if(selected.length===1){
+      // Single client — open WhatsApp directly (user taps call icon)
+      const phone=resolveClientPhone(selected[0]);
+      if(phone)whatsAppCall(phone);
+      setShowCallSelect(false);
+      return;
+    }
+
+    // Multiple clients — send a message with call prompt
     const timeSlots=selected.map(b=>{
       const t=new Date(b.date||b.startTime||b.scheduledAt);
       return`${t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} — ${resolveClientName(b)} (${b.duration||60}min)`;
     }).join("\n");
 
-    const msg=`🏋️ *CoachMe Session — ${new Date(selDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}*\n\n📅 Schedule:\n${timeSlots}\n\n📞 Join the group video call:\n(Coach will start the call at session time)\n\nSee you! 💪`;
+    const msg=`🏋️ *CoachMe Session — ${new Date(selDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}*\n\n📅 Schedule:\n${timeSlots}\n\n📞 Joining the call at your session time.\nPlease be ready!\n\nSee you! 💪`;
 
     selected.forEach((b,i)=>{
       const phone=resolveClientPhone(b);
@@ -926,7 +942,10 @@ function BookingsPage(){
               <div style={{fontSize:14,fontWeight:600,color:C.tx}}>{clientName}</div>
               <div style={{fontSize:12,color:C.mt}}>{b.duration||60}min · {b.type||"training"}{b._local?" · 📱 Local":""}</div>
             </div>
-            <Badge color={statusColors[st]||C.wn}>{st}</Badge>
+            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              {resolveClientPhone(b)&&<button onClick={(e)=>{e.stopPropagation();whatsAppCall(resolveClientPhone(b));}} style={{width:32,height:32,borderRadius:8,border:"none",cursor:"pointer",background:"#25D366"+"20",color:"#25D366",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}} title="WhatsApp Call">📞</button>}
+              <Badge color={statusColors[st]||C.wn}>{st}</Badge>
+            </div>
           </div>
           <div style={{display:"flex",gap:4}}>
             {[{s:"confirmed",l:"✅ Confirm",c:C.ok},{s:"cancelled",l:"🚫 Cancel",c:C.dg},{s:"pending",l:"⏳ Pending",c:C.wn}].map(a=>
@@ -1019,12 +1038,16 @@ function ReportsPage(){const[data,setData]=useState({});const[loading,setLoading
 // ─── AI CHAT ──────────────────────────────────────────────────────────────────
 function AIChatPage(){
   const{user}=useAuth();
-  const[msgs,setMsgs]=useState([{role:"assistant",content:"Hey! I'm your AI coach with full app control. Try:\n\n• \"Add client Ravi, phone 9876543210\"\n• \"Show my schedule for today\"\n• \"Book session for Priya tomorrow 7am\"\n• \"How many clients do I have?\"\n• \"Create a push day workout\"\n• \"What's my revenue?\"\n• \"Cancel all sessions on Friday\"\n\n🎙️ Tap mic for voice commands!"}]);
+  const[msgs,setMsgs]=useState([{role:"assistant",content:"Hey! I'm **CoachMe AI** — your intelligent fitness coaching assistant.\n\nI have full access to your real-time data. Here's what I can do:\n\n- **Add/find/delete clients**\n- **Book or cancel sessions**\n- **Show your schedule**\n- **Create workout plans**\n- **Show revenue & stats**\n\nTry asking me anything!",ts:new Date().toISOString()}]);
   const[input,setInput]=useState("");const[loading,setLoading]=useState(false);
   const[voiceOn,setVoiceOn]=useState(true);const[isListening,setIsListening]=useState(false);
-  const br=useRef(null);const recognitionRef=useRef(null);
+  const br=useRef(null);const recognitionRef=useRef(null);const inputRef=useRef(null);const textareaRef=useRef(null);
 
-  useEffect(()=>{br.current?.scrollIntoView({behavior:"smooth"});},[msgs]);
+  // Auto-scroll to bottom
+  useEffect(()=>{setTimeout(()=>{br.current?.scrollIntoView({behavior:"smooth"});},50);},[msgs,loading]);
+
+  // Auto-focus input on mount
+  useEffect(()=>{textareaRef.current?.focus();},[]);
 
   // Voice output
   const speakText=(text)=>{
@@ -1053,6 +1076,57 @@ function AIChatPage(){
     recognitionRef.current=r;r.start();setIsListening(true);
   };
 
+  // Clear chat
+  const clearChat=()=>{
+    setMsgs([{role:"assistant",content:"Chat cleared. How can I help you?",ts:new Date().toISOString()}]);
+    if("speechSynthesis"in window)speechSynthesis.cancel();
+  };
+
+  // Auto-grow textarea
+  const handleInputChange=(e)=>{
+    setInput(e.target.value);
+    const el=e.target;
+    el.style.height="auto";
+    const maxH=4*22; // ~4 lines
+    el.style.height=Math.min(el.scrollHeight,maxH)+"px";
+  };
+
+  // Format AI message with markdown-like rendering
+  const formatMessage=(text)=>{
+    if(!text)return null;
+    const lines=text.split("\n");
+    return lines.map((line,i)=>{
+      // Bold: **text**
+      const parts=[];
+      let remaining=line;
+      let keyIdx=0;
+      while(remaining.includes("**")){
+        const start=remaining.indexOf("**");
+        if(start>0)parts.push(<span key={keyIdx++}>{remaining.slice(0,start)}</span>);
+        remaining=remaining.slice(start+2);
+        const end=remaining.indexOf("**");
+        if(end===-1){parts.push(<span key={keyIdx++}>**{remaining}</span>);remaining="";break;}
+        parts.push(<strong key={keyIdx++} style={{fontWeight:700}}>{remaining.slice(0,end)}</strong>);
+        remaining=remaining.slice(end+2);
+      }
+      if(remaining)parts.push(<span key={keyIdx++}>{remaining}</span>);
+
+      // Bullet points
+      const isBullet=/^[\s]*[-•]\s+/.test(line);
+      const isNumbered=/^[\s]*\d+\.\s+/.test(line);
+
+      if(isBullet){
+        const content=line.replace(/^[\s]*[-•]\s+/,"");
+        return <div key={i} style={{display:"flex",gap:8,paddingLeft:4,marginTop:2}}><span style={{color:C.ac,flexShrink:0}}>&#8226;</span><span>{parts.length>1?parts:content}</span></div>;
+      }
+      if(isNumbered){
+        return <div key={i} style={{paddingLeft:4,marginTop:2}}>{parts.length>1?parts:line}</div>;
+      }
+      if(line.trim()==="")return <div key={i} style={{height:8}}/>;
+      return <div key={i}>{parts.length>1?parts:line}</div>;
+    });
+  };
+
   // ── GATHER ALL APP DATA ────────────────────────────────────────────────
   const gatherContext=async()=>{
     let ctx="";
@@ -1068,21 +1142,19 @@ function AIChatPage(){
     // Bookings
     try{
       const b=await api.get("/bookings");const bk=unwrap(b,"bookings","sessions");
-      const localBk=ls.get("local_bookings",[]);
-      const allBk=[...bk,...localBk.filter(lb=>!bk.some(ab=>ab.id===lb.id))];
       const today=new Date().toISOString().slice(0,10);
-      const todayBk=allBk.filter(x=>{try{return new Date(x.date||x.startTime||x.scheduledAt).toISOString().slice(0,10)===today;}catch{return false;}});
-      const upcoming=allBk.filter(x=>{try{return new Date(x.date||x.startTime||x.scheduledAt)>=new Date();}catch{return false;}}).sort((a,b)=>new Date(a.date||a.startTime)-new Date(b.date||b.startTime)).slice(0,10);
+      const todayBk=bk.filter(x=>{try{return new Date(x.date||x.startTime||x.scheduledAt).toISOString().slice(0,10)===today;}catch{return false;}});
+      const upcoming=bk.filter(x=>{try{return new Date(x.date||x.startTime||x.scheduledAt)>=new Date();}catch{return false;}}).sort((a,b)=>new Date(a.date||a.startTime)-new Date(b.date||b.startTime)).slice(0,10);
       ctx+=`\n\nTODAY'S SCHEDULE (${today}, ${todayBk.length} sessions):`;
       todayBk.forEach(x=>{
         const t=new Date(x.date||x.startTime||x.scheduledAt);
-        ctx+=`\n- ${t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} | ${cName(x.client)||x.type||"Session"} | ${x.duration||60}min | Status: ${x.status||"pending"}${x._local?" [LOCAL]":""}`;
+        ctx+=`\n- ${t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} | ${cName(x.client)||x.type||"Session"} | ${x.duration||60}min | Status: ${x.status||"pending"} | ID: ${x.id}`;
       });
       if(todayBk.length===0)ctx+="\n- No sessions scheduled today";
       ctx+=`\n\nUPCOMING SESSIONS (next ${upcoming.length}):`;
       upcoming.slice(0,5).forEach(x=>{
         const t=new Date(x.date||x.startTime||x.scheduledAt);
-        ctx+=`\n- ${t.toLocaleDateString()} ${t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} | ${cName(x.client)||x.type||"Session"}`;
+        ctx+=`\n- ${t.toLocaleDateString()} ${t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} | ${cName(x.client)||x.type||"Session"} | ID: ${x.id}`;
       });
     }catch{ctx+="\n\nBOOKINGS: Could not fetch";}
 
@@ -1100,13 +1172,11 @@ function AIChatPage(){
     // Leads
     try{
       const l=await api.get("/leads");const ld=unwrap(l,"leads");
-      const localLeads=ls.get("local_leads",[]);
-      const allLeads=[...ld,...localLeads];
-      ctx+=`\n\nLEADS (${allLeads.length}):`;
-      allLeads.slice(0,10).forEach(x=>ctx+=`\n- ${x.name} [${x.status||"new"}] ${x.email||""}`);
+      ctx+=`\n\nLEADS (${ld.length}):`;
+      ld.slice(0,10).forEach(x=>ctx+=`\n- ${x.name} [${x.status||"new"}] ${x.email||""}`);
     }catch{}
 
-    // Local data
+    // Local supplementary data (holidays, check-ins — these are coach preferences, not stale data)
     const holidays=ls.get("holidays",[]);
     if(holidays.length)ctx+=`\n\nHOLIDAYS: ${holidays.join(", ")}`;
     const checkins=ls.get("checkins",[]);
@@ -1133,8 +1203,8 @@ function AIChatPage(){
         try{
           const r=await api.post("/clients",{name,email,phone,sessionType});
           const created=r?.client||r;
-          results.push(`✅ Client added!\n   Name: ${cName(created)||name}\n   Email: ${email}\n   Phone: ${phone||"not set"}\n   Type: ${sessionType}`);
-        }catch(e){results.push(`⚠️ Could not add client "${name}": ${e.message}`);}
+          results.push(`**Client added!**\n- **Name:** ${cName(created)||name}\n- **Email:** ${email}\n- **Phone:** ${phone||"not set"}\n- **Type:** ${sessionType}`);
+        }catch(e){results.push(`Could not add client "${name}": ${e.message}`);}
       }
     }
 
@@ -1142,33 +1212,31 @@ function AIChatPage(){
     if(msg.match(/(?:show|list|how many|my)\s*(?:all\s+)?clients|client\s*list|number of clients/i)&&!addClientMatch){
       try{
         const c=await api.get("/clients");const cl=unwrap(c,"clients");
-        let txt=`👥 You have ${cl.length} client(s):\n`;
-        cl.forEach((x,i)=>{txt+=`\n${i+1}. ${cName(x)} — ${cEmail(x)}${cPhone(x)?` — 📱${cPhone(x)}`:""} — ${x.sessionType||"offline"}`});
+        let txt=`**${cl.length} Client(s):**\n`;
+        cl.forEach((x,i)=>{txt+=`\n${i+1}. **${cName(x)}** — ${cEmail(x)}${cPhone(x)?` — ${cPhone(x)}`:""} — ${x.sessionType||"offline"}`});
         results.push(txt);
-      }catch(e){results.push("⚠️ Could not fetch clients: "+e.message);}
+      }catch(e){results.push("Could not fetch clients: "+e.message);}
     }
 
     // ─ SHOW SCHEDULE ─
     if(msg.match(/(?:show|what|my|today|tomorrow)\s*(?:'?s?\s*)?(?:schedule|sessions?|bookings?|calendar)/i)||msg.match(/schedule\s+(?:for\s+)?(?:today|tomorrow|this week)/i)){
       try{
         const b=await api.get("/bookings");const bk=unwrap(b,"bookings","sessions");
-        const localBk=ls.get("local_bookings",[]);
-        const allBk=[...bk,...localBk.filter(lb=>!bk.some(ab=>ab.id===lb.id))];
         const isTomorrow=msg.includes("tomorrow");
         const targetDate=new Date();
         if(isTomorrow)targetDate.setDate(targetDate.getDate()+1);
         const dateStr=targetDate.toISOString().slice(0,10);
         const dayName=targetDate.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
-        const dayBk=allBk.filter(x=>{try{return new Date(x.date||x.startTime||x.scheduledAt).toISOString().slice(0,10)===dateStr;}catch{return false;}}).sort((a,b)=>new Date(a.date||a.startTime)-new Date(b.date||b.startTime));
+        const dayBk=bk.filter(x=>{try{return new Date(x.date||x.startTime||x.scheduledAt).toISOString().slice(0,10)===dateStr;}catch{return false;}}).sort((a,b)=>new Date(a.date||a.startTime)-new Date(b.date||b.startTime));
 
-        let txt=`📅 Schedule for ${dayName} (${dayBk.length} session${dayBk.length!==1?"s":""}):\n`;
+        let txt=`**Schedule for ${dayName}** (${dayBk.length} session${dayBk.length!==1?"s":""}):\n`;
         if(dayBk.length===0)txt+="\nNo sessions scheduled. Your day is free!";
         else dayBk.forEach((x,i)=>{
           const t=new Date(x.date||x.startTime||x.scheduledAt);
-          txt+=`\n${i+1}. ${t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} — ${cName(x.client)||x.type||"Session"} (${x.duration||60}min) [${x.status||"pending"}]`;
+          txt+=`\n${i+1}. **${t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}** — ${cName(x.client)||x.type||"Session"} (${x.duration||60}min) [${x.status||"pending"}]`;
         });
         results.push(txt);
-      }catch(e){results.push("⚠️ Could not fetch schedule: "+e.message);}
+      }catch(e){results.push("Could not fetch schedule: "+e.message);}
     }
 
     // ─ BOOK SESSION ─
@@ -1183,47 +1251,61 @@ function AIChatPage(){
       try{const c=await api.get("/clients");clients2=unwrap(c,"clients");}catch{}
       const matchedClient=clients2.find(c=>cName(c).toLowerCase().includes(clientName.toLowerCase()));
 
-      // Resolve date
-      let bookDate=new Date();
-      if(dayWord==="tomorrow")bookDate.setDate(bookDate.getDate()+1);
-      else if(dayWord!=="today"){
-        const days=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
-        const targetDay=days.indexOf(dayWord);
-        if(targetDay>=0){
-          const current=bookDate.getDay();
-          const diff=(targetDay-current+7)%7||7;
-          bookDate.setDate(bookDate.getDate()+diff);
+      if(!matchedClient){
+        results.push(`Could not find a client matching "**${clientName}**". Please add them first or check the name.`);
+      }else{
+        // Resolve date
+        let bookDate=new Date();
+        if(dayWord==="tomorrow")bookDate.setDate(bookDate.getDate()+1);
+        else if(dayWord!=="today"){
+          const days=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+          const targetDay=days.indexOf(dayWord);
+          if(targetDay>=0){
+            const current=bookDate.getDay();
+            const diff=(targetDay-current+7)%7||7;
+            bookDate.setDate(bookDate.getDate()+diff);
+          }
+        }
+
+        // Parse time
+        let hours=9,minutes=0;
+        const timeParsed=timeStr.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+        if(timeParsed){
+          hours=parseInt(timeParsed[1]);minutes=parseInt(timeParsed[2]||"0");
+          if(timeParsed[3]?.toLowerCase()==="pm"&&hours<12)hours+=12;
+          if(timeParsed[3]?.toLowerCase()==="am"&&hours===12)hours=0;
+        }
+        const scheduledAt=bookDate.toISOString().slice(0,10)+`T${String(hours).padStart(2,"0")}:${String(minutes).padStart(2,"0")}:00`;
+
+        // Book via API
+        try{
+          // Get coach profile ID
+          let coachId=user?.id;
+          try{const me=await api.get("/auth/me");coachId=(me?.user||me)?.id||coachId;}catch{}
+          await api.post("/bookings",{
+            clientId:matchedClient.id,
+            coachId,
+            scheduledAt,
+            date:scheduledAt,
+            durationMinutes:60,
+            duration:60,
+            sessionType:"training",
+            type:"training",
+            status:"confirmed"
+          });
+          results.push(`**Session booked!**\n- **Client:** ${cName(matchedClient)}\n- **Date:** ${bookDate.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}\n- **Time:** ${String(hours).padStart(2,"0")}:${String(minutes).padStart(2,"0")}\n- **Duration:** 60min\n- **Status:** Confirmed`);
+        }catch(e){
+          results.push(`Could not book session: ${e.message}`);
         }
       }
-
-      // Parse time
-      let hours=9,minutes=0;
-      const timeParsed=timeStr.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
-      if(timeParsed){
-        hours=parseInt(timeParsed[1]);minutes=parseInt(timeParsed[2]||"0");
-        if(timeParsed[3]?.toLowerCase()==="pm"&&hours<12)hours+=12;
-        if(timeParsed[3]?.toLowerCase()==="am"&&hours===12)hours=0;
-      }
-      const dateISO=bookDate.toISOString().slice(0,10)+`T${String(hours).padStart(2,"0")}:${String(minutes).padStart(2,"0")}:00`;
-
-      // Create booking (local)
-      const localBooking={
-        id:`local_${Date.now()}`,date:dateISO,duration:60,type:"training",status:"confirmed",
-        client:matchedClient||{displayName:clientName},clientId:matchedClient?.id,
-        createdAt:new Date().toISOString(),_local:true
-      };
-      const existing=ls.get("local_bookings",[]);
-      ls.set("local_bookings",[...existing,localBooking]);
-
-      results.push(`✅ Session booked!\n   Client: ${cName(matchedClient)||clientName}${!matchedClient?" (not found in system — saved anyway)":""}\n   Date: ${bookDate.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}\n   Time: ${String(hours).padStart(2,"0")}:${String(minutes).padStart(2,"0")}\n   Duration: 60min\n   Status: Confirmed`);
     }
 
     // ─ REVENUE / STATS ─
     if(msg.match(/revenue|earnings|income|how much.*(?:made|earned)|stats|business|overview|dashboard/i)&&!addClientMatch&&!bookMatch){
       try{
         const r=await api.get("/reports/coach/dashboard");const d=r?.data||r||{};
-        results.push(`📊 Business Overview:\n\n💰 Revenue: ₹${(d.totalRevenue||d.monthlyRevenue||0).toLocaleString()}\n👥 Active Clients: ${d.activeClients||d.totalClients||0}\n📅 Upcoming Sessions: ${d.upcomingBookings||0}\n🎯 Conversion Rate: ${d.conversionRate||0}%\n🔄 Retention Rate: ${d.retentionRate||0}%`);
-      }catch{results.push("⚠️ Could not fetch business stats");}
+        results.push(`**Business Overview:**\n\n- **Revenue:** ₹${(d.totalRevenue||d.monthlyRevenue||0).toLocaleString()}\n- **Active Clients:** ${d.activeClients||d.totalClients||0}\n- **Upcoming Sessions:** ${d.upcomingBookings||0}\n- **Conversion Rate:** ${d.conversionRate||0}%\n- **Retention Rate:** ${d.retentionRate||0}%`);
+      }catch{results.push("Could not fetch business stats");}
     }
 
     // ─ CREATE WORKOUT ─
@@ -1238,13 +1320,13 @@ function AIChatPage(){
       else if(isFull){title="Full Body";exercises=[{name:"Barbell Squat",sets:3,reps:8},{name:"Bench Press",sets:3,reps:8},{name:"Barbell Row",sets:3,reps:8},{name:"Overhead Press",sets:3,reps:10},{name:"Romanian Deadlift",sets:3,reps:10},{name:"Pull-ups",sets:3,reps:8}];}
       else{title="General Strength";exercises=[{name:"Barbell Squat",sets:3,reps:10},{name:"Bench Press",sets:3,reps:10},{name:"Barbell Row",sets:3,reps:10},{name:"Overhead Press",sets:3,reps:10},{name:"Deadlift",sets:3,reps:8}];}
 
-      // Save locally
+      // Save locally (workouts don't have a backend route yet)
       const plan={id:`workout_${Date.now()}`,title,description:"Created by AI Coach",exercises,status:"active",createdAt:new Date().toISOString()};
       const localW=ls.get("local_workouts",[]);localW.push(plan);ls.set("local_workouts",localW);
 
-      let txt=`💪 Workout Created: ${title}\n`;
-      exercises.forEach((e,i)=>{txt+=`\n${i+1}. ${e.name} — ${e.sets}×${e.reps}`;});
-      txt+=`\n\n✅ Saved! View it in the Workouts tab → My Plans.`;
+      let txt=`**Workout Created: ${title}**\n`;
+      exercises.forEach((e,i)=>{txt+=`\n${i+1}. **${e.name}** — ${e.sets}x${e.reps}`;});
+      txt+=`\n\nSaved! View it in the Workouts tab.`;
       results.push(txt);
     }
 
@@ -1262,20 +1344,21 @@ function AIChatPage(){
         }
         const dateStr=targetDate.toISOString().slice(0,10);
 
-        // Cancel local bookings for that day
-        const localBk=ls.get("local_bookings",[]);
+        // Cancel via API — fetch bookings for that day and PATCH each
         let count=0;
-        const updated=localBk.map(b=>{
-          try{if(new Date(b.date||b.startTime||b.scheduledAt).toISOString().slice(0,10)===dateStr){count++;return{...b,status:"cancelled"};}}catch{}
-          return b;
-        });
-        ls.set("local_bookings",updated);
+        try{
+          const b=await api.get("/bookings");const bk=unwrap(b,"bookings","sessions");
+          const dayBk=bk.filter(x=>{try{const st=(x.status||"").toUpperCase();return new Date(x.date||x.startTime||x.scheduledAt).toISOString().slice(0,10)===dateStr&&st!=="CANCELLED";}catch{return false;}});
+          for(const booking of dayBk){
+            try{await api.put(`/bookings/${booking.id}`,{status:"cancelled"});count++;}catch{}
+          }
+        }catch{}
 
         // Mark as holiday
         const holidays=ls.get("holidays",[]);
         if(!holidays.includes(dateStr)){ls.set("holidays",[...holidays,dateStr]);}
 
-        results.push(`🚫 ${count} session(s) cancelled for ${targetDate.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}.\n📅 Day marked as holiday.`);
+        results.push(`**${count} session(s) cancelled** for ${targetDate.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}.\nDay marked as holiday.`);
       }
     }
 
@@ -1287,10 +1370,10 @@ function AIChatPage(){
         const c=await api.get("/clients");const cl=unwrap(c,"clients");
         const match=cl.find(x=>cName(x).toLowerCase().includes(name.toLowerCase()));
         if(match){
-          try{await api.del(`/clients/${match.id}`);results.push(`✅ Client "${cName(match)}" deleted.`);}
-          catch(e){results.push(`⚠️ Could not delete: ${e.message}`);}
-        }else{results.push(`❌ No client found matching "${name}"`);}
-      }catch{results.push("⚠️ Could not fetch clients");}
+          try{await api.del(`/clients/${match.id}`);results.push(`**Client "${cName(match)}" deleted.**`);}
+          catch(e){results.push(`Could not delete: ${e.message}`);}
+        }else{results.push(`No client found matching "**${name}**"`);}
+      }catch{results.push("Could not fetch clients");}
     }
 
     // ─ FIND CLIENT ─
@@ -1301,11 +1384,11 @@ function AIChatPage(){
         const c=await api.get("/clients");const cl=unwrap(c,"clients");
         const matches=cl.filter(x=>cName(x).toLowerCase().includes(name.toLowerCase()));
         if(matches.length>0){
-          let txt=`🔍 Found ${matches.length} match(es) for "${name}":\n`;
-          matches.forEach(x=>{txt+=`\n• ${cName(x)} — ${cEmail(x)} — 📱${cPhone(x)||"no phone"} — ${x.sessionType||"offline"}`});
+          let txt=`**Found ${matches.length} match(es) for "${name}":**\n`;
+          matches.forEach(x=>{txt+=`\n- **${cName(x)}** — ${cEmail(x)} — ${cPhone(x)||"no phone"} — ${x.sessionType||"offline"}`});
           results.push(txt);
-        }else{results.push(`❌ No clients found matching "${name}"`);}
-      }catch{results.push("⚠️ Could not search clients");}
+        }else{results.push(`No clients found matching "**${name}**"`);}
+      }catch{results.push("Could not search clients");}
     }
 
     return results;
@@ -1315,7 +1398,9 @@ function AIChatPage(){
   const send=async(text)=>{
     const msg=(text||input).trim();if(!msg||loading)return;
     if(!text)setInput("");
-    setMsgs(p=>[...p,{role:"user",content:msg}]);setLoading(true);
+    // Reset textarea height
+    if(textareaRef.current)textareaRef.current.style.height="auto";
+    setMsgs(p=>[...p,{role:"user",content:msg,ts:new Date().toISOString()}]);setLoading(true);
 
     try{
       // 1. Execute any detected actions
@@ -1325,7 +1410,7 @@ function AIChatPage(){
       const context=await gatherContext();
 
       // 3. Create a SINGLE message with embedded context
-      const enrichedMessage=`[SYSTEM CONTEXT — You are CoachMe AI assistant. Use the data below to answer. Be specific and use actual names/numbers from the data. Current date: ${new Date().toLocaleString()}. Coach: ${user?.name||"Coach"} (${user?.email}).
+      const enrichedMessage=`[SYSTEM CONTEXT — You are CoachMe AI — a world-class fitness coaching assistant. You have full access to the coach's real-time data (clients, bookings, leads, revenue). Answer questions precisely using the actual data provided. Be concise, use bullet points, and always reference specific names and numbers from the data. When actions are performed, confirm them clearly. You can: add/find/delete clients, book/cancel sessions, create workouts, show schedules, show revenue stats. Current date: ${new Date().toLocaleString()}. Coach: ${user?.name||"Coach"} (${user?.email}).
 
 APP DATA:${context}
 
@@ -1342,97 +1427,112 @@ User question: ${msg}`;
       const isGeneric=!reply||reply.length<20||reply.toLowerCase().includes("let me help")||reply.toLowerCase().includes("i'll help")||reply.toLowerCase().includes("i can help")||reply.toLowerCase().includes("sure, i");
 
       if(actionResults.length>0){
-        // We have action results — show them (optionally with AI commentary)
         reply=actionResults.join("\n\n")+(isGeneric?"":"\n\n"+reply);
       }else if(isGeneric){
-        // AI gave generic response and no actions — try to answer from context
         reply=await generateLocalResponse(msg,context);
       }
 
-      setMsgs(p=>[...p,{role:"assistant",content:reply}]);
+      setMsgs(p=>[...p,{role:"assistant",content:reply,ts:new Date().toISOString()}]);
       speakText(reply);
     }catch(e){
-      // Even if AI fails, action results may have worked
-      const fallback="I couldn't reach the AI service, but your app data is accessible. Try asking about your schedule, clients, or stats — I can look those up directly.";
-      setMsgs(p=>[...p,{role:"assistant",content:fallback}]);
+      const fallback="I couldn't reach the AI service, but your app data is accessible. Try asking about your schedule, clients, or stats.";
+      setMsgs(p=>[...p,{role:"assistant",content:fallback,ts:new Date().toISOString()}]);
     }
     setLoading(false);
+    // Re-focus input
+    setTimeout(()=>textareaRef.current?.focus(),100);
   };
 
   // ── LOCAL RESPONSE GENERATOR (when AI gives generic answers) ───────────
   const generateLocalResponse=async(msg,context)=>{
     const lower=msg.toLowerCase();
 
-    // Schedule queries
     if(lower.match(/schedule|session|booking|calendar|today|tomorrow/)){
       try{
         const b=await api.get("/bookings");const bk=unwrap(b,"bookings","sessions");
-        const localBk=ls.get("local_bookings",[]);
-        const allBk=[...bk,...localBk.filter(lb=>!bk.some(ab=>ab.id===lb.id))];
         const today=new Date().toISOString().slice(0,10);
-        const todayBk=allBk.filter(x=>{try{return new Date(x.date||x.startTime||x.scheduledAt).toISOString().slice(0,10)===today;}catch{return false;}});
-        if(todayBk.length===0)return"📅 You have no sessions scheduled today. Your day is free!";
-        let txt=`📅 Today's schedule (${todayBk.length} session${todayBk.length>1?"s":""}):\n`;
-        todayBk.forEach((x,i)=>{const t=new Date(x.date||x.startTime||x.scheduledAt);txt+=`\n${i+1}. ${t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} — ${cName(x.client)||x.type||"Session"} (${x.duration||60}min)`;});
+        const todayBk=bk.filter(x=>{try{return new Date(x.date||x.startTime||x.scheduledAt).toISOString().slice(0,10)===today;}catch{return false;}});
+        if(todayBk.length===0)return"No sessions scheduled today. Your day is free!";
+        let txt=`**Today's schedule** (${todayBk.length} session${todayBk.length>1?"s":""}):\n`;
+        todayBk.forEach((x,i)=>{const t=new Date(x.date||x.startTime||x.scheduledAt);txt+=`\n${i+1}. **${t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}** — ${cName(x.client)||x.type||"Session"} (${x.duration||60}min)`;});
         return txt;
       }catch{}
     }
 
-    // Client queries
     if(lower.match(/client|how many/)){
       try{
         const c=await api.get("/clients");const cl=unwrap(c,"clients");
-        return`👥 You have ${cl.length} client(s).${cl.length>0?"\n\nTop clients:\n"+cl.slice(0,5).map((x,i)=>`${i+1}. ${cName(x)} — ${cEmail(x)}`).join("\n"):""}`;
+        return`**${cl.length} client(s):**${cl.length>0?"\n"+cl.slice(0,5).map((x,i)=>`\n${i+1}. **${cName(x)}** — ${cEmail(x)}`).join(""):""}`;
       }catch{}
     }
 
-    // Revenue/stats
     if(lower.match(/revenue|money|earned|income|stats|business/)){
       try{
         const r=await api.get("/reports/coach/dashboard");const d=r?.data||r||{};
-        return`📊 Business Stats:\n\n💰 Revenue: ₹${(d.totalRevenue||d.monthlyRevenue||0).toLocaleString()}\n👥 Clients: ${d.activeClients||d.totalClients||0}\n📅 Upcoming: ${d.upcomingBookings||0} sessions\n🎯 Conversion: ${d.conversionRate||0}%`;
+        return`**Business Stats:**\n\n- **Revenue:** ₹${(d.totalRevenue||d.monthlyRevenue||0).toLocaleString()}\n- **Clients:** ${d.activeClients||d.totalClients||0}\n- **Upcoming:** ${d.upcomingBookings||0} sessions\n- **Conversion:** ${d.conversionRate||0}%`;
       }catch{}
     }
 
-    // Leads
     if(lower.match(/lead/)){
       try{
         const l=await api.get("/leads");const ld=unwrap(l,"leads");
-        const localLeads=ls.get("local_leads",[]);
-        const all=[...ld,...localLeads];
-        return`🎯 You have ${all.length} lead(s):\n\n${all.slice(0,10).map((x,i)=>`${i+1}. ${x.name} — [${x.status||"new"}]`).join("\n")}`;
+        return`**${ld.length} lead(s):**\n\n${ld.slice(0,10).map((x,i)=>`${i+1}. **${x.name}** — [${x.status||"new"}]`).join("\n")}`;
       }catch{}
     }
 
-    // Fallback
-    return"I processed your request. You can try asking about:\n• Your schedule (\"show today's sessions\")\n• Clients (\"list my clients\")\n• Revenue (\"show my stats\")\n• Add data (\"add client Ravi, phone 98765\")\n• Workouts (\"create a push day workout\")\n• Bookings (\"book session for Priya tomorrow 7am\")";
+    return"I processed your request. Try asking about:\n- Your schedule (\"show today's sessions\")\n- Clients (\"list my clients\")\n- Revenue (\"show my stats\")\n- Add data (\"add client Ravi, phone 98765\")\n- Workouts (\"create a push day workout\")\n- Bookings (\"book session for Priya tomorrow 7am\")";
   };
 
-  const suggestions=["Show today's schedule","List my clients","What's my revenue?","Add client Ravi, phone 9876543210","Create a push day workout","Book session for Priya tomorrow 7am"];
+  const suggestions=["Show today's schedule","List my clients","What's my revenue?","Add a new client","Create a push workout","Book a session"];
 
-  return<div style={{display:"flex",flexDirection:"column",height:"calc(100dvh - 160px)"}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexShrink:0}}>
-      <h2 style={{color:C.tx,fontSize:20,fontWeight:700,margin:0}}>AI Coach</h2>
+  return<div style={{display:"flex",flexDirection:"column",height:"calc(100dvh - 120px)",maxHeight:"calc(100dvh - 120px)",position:"relative"}}>
+    {/* ── Header ── */}
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:10,flexShrink:0,borderBottom:`1px solid ${C.bd}`,marginBottom:8}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <div style={{width:36,height:36,borderRadius:12,background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff",fontWeight:700}}>AI</div>
+        <div>
+          <h2 style={{color:C.tx,fontSize:17,fontWeight:700,margin:0}}>CoachMe AI</h2>
+          <div style={{fontSize:11,color:C.ok,fontWeight:500}}>Online</div>
+        </div>
+      </div>
       <div style={{display:"flex",gap:6}}>
-        <button onClick={()=>{setVoiceOn(!voiceOn);if(voiceOn)speechSynthesis.cancel();}} style={{padding:"6px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:voiceOn?C.ok+"20":C.s2,color:voiceOn?C.ok:C.mt}}>{voiceOn?"🔊 On":"🔇 Off"}</button>
+        <button onClick={clearChat} style={{padding:"6px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:C.s2,color:C.mt}} title="Clear chat">Clear</button>
+        <button onClick={()=>{setVoiceOn(!voiceOn);if(voiceOn)speechSynthesis.cancel();}} style={{padding:"6px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:voiceOn?C.ok+"20":C.s2,color:voiceOn?C.ok:C.mt}}>{voiceOn?"Sound On":"Sound Off"}</button>
       </div>
     </div>
 
-    <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:10,paddingBottom:12}}>
-      {msgs.map((m,i)=><div key={i} style={{maxWidth:"85%",alignSelf:m.role==="user"?"flex-end":"flex-start",padding:"12px 16px",borderRadius:16,borderBottomRightRadius:m.role==="user"?4:16,borderBottomLeftRadius:m.role==="user"?16:4,background:m.role==="user"?C.ac:C.s2,color:m.role==="user"?"#fff":C.tx,fontSize:14,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{m.content}</div>)}
-      {loading&&<div style={{alignSelf:"flex-start",padding:"12px 20px",borderRadius:16,background:C.s2}}><div style={{display:"flex",gap:4}}>{[0,1,2].map(i=><div key={i} style={{width:8,height:8,borderRadius:"50%",background:C.mt,animation:`pulse 1.2s ease-in-out ${i*.2}s infinite`}}/>)}</div></div>}
+    {/* ── Chat Messages ── */}
+    <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:6,paddingBottom:8,WebkitOverflowScrolling:"touch"}}>
+      {msgs.map((m,i)=><div key={i} style={{display:"flex",flexDirection:"column",alignItems:m.role==="user"?"flex-end":"flex-start",gap:2}}>
+        <div style={{maxWidth:"82%",padding:"10px 14px",borderRadius:18,borderBottomRightRadius:m.role==="user"?4:18,borderBottomLeftRadius:m.role==="user"?18:4,background:m.role==="user"?C.ac:C.s2,color:m.role==="user"?"#fff":C.tx,fontSize:14,lineHeight:1.6}}>
+          {m.role==="assistant"?formatMessage(m.content):<span style={{whiteSpace:"pre-wrap"}}>{m.content}</span>}
+        </div>
+        <span style={{fontSize:10,color:C.mt,padding:"0 4px"}}>{m.ts?new Date(m.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""}</span>
+      </div>)}
+      {loading&&<div style={{alignSelf:"flex-start",padding:"12px 20px",borderRadius:18,background:C.s2}}>
+        <div style={{display:"flex",gap:5,alignItems:"center"}}>
+          {[0,1,2].map(i=><div key={i} style={{width:8,height:8,borderRadius:"50%",background:C.mt,animation:`pulse 1.4s ease-in-out ${i*.15}s infinite`,opacity:.7}}/>)}
+        </div>
+      </div>}
       <div ref={br}/>
     </div>
 
-    {/* Quick suggestions */}
-    {msgs.length<=2&&<div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,flexShrink:0}}>
-      {suggestions.map(s=><button key={s} onClick={()=>send(s)} style={{padding:"8px 14px",borderRadius:20,border:`1px solid ${C.bd}`,background:C.s2,color:C.tx,fontSize:12,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit"}}>{s}</button>)}
+    {/* ── Suggestion Chips (2-column grid, always visible after AI response) ── */}
+    {!loading&&msgs.length>0&&msgs[msgs.length-1].role==="assistant"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,paddingBottom:8,flexShrink:0}}>
+      {suggestions.map(s=><button key={s} onClick={()=>send(s)} style={{padding:"10px 12px",borderRadius:14,border:`1px solid ${C.bd}`,background:C.s2,color:C.tx,fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",lineHeight:1.3}}>{s}</button>)}
     </div>}
 
-    <div style={{display:"flex",gap:8,flexShrink:0,paddingTop:8}}>
-      <button onClick={toggleListening} style={{width:48,height:48,borderRadius:14,border:"none",cursor:"pointer",background:isListening?C.dg:C.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:isListening?`0 0 20px ${C.dg}40`:"none",animation:isListening?"pulse 1s infinite":"none",transition:"all .2s"}}>🎙️</button>
-      <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} placeholder={isListening?"Listening…":"Type or speak a command…"} style={{flex:1,background:C.s2,border:`1px solid ${isListening?C.dg:C.bd}`,borderRadius:14,padding:"12px 16px",color:C.tx,fontSize:14,outline:"none",fontFamily:"inherit",transition:"border-color .2s"}}/>
-      <button onClick={()=>send()} disabled={loading} style={{width:48,height:48,borderRadius:14,border:"none",cursor:"pointer",background:C.gr,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff"}}>➤</button>
+    {/* ── Input Area (ChatGPT/WhatsApp style) ── */}
+    <div style={{display:"flex",gap:8,flexShrink:0,paddingTop:8,alignItems:"flex-end"}}>
+      <button onClick={toggleListening} style={{width:44,height:44,borderRadius:22,border:"none",cursor:"pointer",background:isListening?C.dg:"transparent",border:isListening?"none":`2px solid ${C.bd}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0,boxShadow:isListening?`0 0 16px ${C.dg}40`:"none",animation:isListening?"pulse 1s infinite":"none",transition:"all .2s",color:isListening?"#fff":C.mt}}>
+        {isListening?"...":"Mic"}
+      </button>
+      <div style={{flex:1,position:"relative"}}>
+        <textarea ref={textareaRef} value={input} onChange={handleInputChange} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}} placeholder={isListening?"Listening...":"Message CoachMe AI..."} rows={1} style={{width:"100%",background:C.s2,border:`2px solid ${isListening?C.dg:C.bd}`,borderRadius:22,padding:"11px 16px",color:C.tx,fontSize:14,outline:"none",fontFamily:"inherit",resize:"none",lineHeight:"22px",maxHeight:4*22,overflow:"auto",boxSizing:"border-box",transition:"border-color .2s"}}/>
+      </div>
+      <button onClick={()=>send()} disabled={loading||!input.trim()} style={{width:44,height:44,borderRadius:22,border:"none",cursor:loading||!input.trim()?"default":"pointer",background:input.trim()?C.gr:C.s2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:input.trim()?"#fff":C.mt,flexShrink:0,transition:"all .2s",opacity:loading?.5:1}}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
     </div>
   </div>;
 }
