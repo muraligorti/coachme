@@ -36,6 +36,7 @@ enum BookingStatus {
   CONFIRMED
   COMPLETED
   CANCELLED
+  CANCEL_REQUESTED
   NO_SHOW
 }
 
@@ -207,11 +208,12 @@ model ClientCoach {
   client      ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
   coach       CoachProfile  @relation(fields: [coachId], references: [id], onDelete: Cascade)
   status      String   @default("active") // active, paused, ended
+  coachingType String   @default("training") // training, yoga, nutrition, physiotherapy, etc.
   startDate   DateTime @default(now())
   endDate     DateTime?
   notes       String?  @db.Text
 
-  @@unique([clientId, coachId])
+  @@unique([clientId, coachId, coachingType])
   @@index([coachId])
   @@index([status])
 }

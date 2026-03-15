@@ -1398,7 +1398,7 @@ function BookingsPage(){
         const t=new Date(b.date||b.startTime||b.scheduledAt);
         const clientName=cName(b.client)||b.type||"Session";
         const st=(b.status||"pending").toLowerCase();
-        const statusColors={present:C.ok,confirmed:C.ok,absent:C.dg,cancelled:C.mt,late:C.wn,pending:C.wn};
+        const statusColors={present:C.ok,confirmed:C.ok,absent:C.dg,cancelled:C.mt,cancel_requested:C.or,late:C.wn,pending:C.wn};
         return<Card key={b.id} style={{padding:14}}>
           <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:8}}>
             <div style={{width:50,padding:"6px 0",borderRadius:8,background:C.ac+"15",textAlign:"center"}}>
@@ -1410,9 +1410,14 @@ function BookingsPage(){
             </div>
             <div style={{display:"flex",gap:6,alignItems:"center"}}>
               {resolveClientPhone(b)&&<button onClick={(e)=>{e.stopPropagation();whatsAppCall(resolveClientPhone(b));}} style={{width:32,height:32,borderRadius:8,border:"none",cursor:"pointer",background:"#25D366"+"20",color:"#25D366",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}} title="WhatsApp Call">📞</button>}
-              <Badge color={statusColors[st]||C.wn}>{st}</Badge>
+              <Badge color={statusColors[st]||C.wn}>{st==="cancel_requested"?"⚠️ Cancel Request":st}</Badge>
             </div>
           </div>
+          {/* Cancel request approval buttons for coach */}
+          {st==="cancel_requested"&&<div style={{display:"flex",gap:4,marginBottom:6}}>
+            <button onClick={()=>markAttendance(b.id,"cancelled")} style={{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:C.ok+"20",color:C.ok}}>✅ Approve Cancel</button>
+            <button onClick={()=>markAttendance(b.id,"confirmed")} style={{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:C.dg+"20",color:C.dg}}>❌ Deny</button>
+          </div>}
           <div style={{display:"flex",gap:4}}>
             {st==="confirmed"&&<button onClick={()=>setActiveSession(b)} style={{flex:1,padding:"6px 2px",borderRadius:8,border:"none",cursor:"pointer",fontSize:10,fontWeight:600,background:C.ac+"30",color:C.ac}}>🎙️ Live Session</button>}
             {[{s:"confirmed",l:"✅ Confirm",c:C.ok},{s:"cancelled",l:"🚫 Cancel",c:C.dg},{s:"pending",l:"⏳ Pending",c:C.wn}].map(a=>
@@ -2826,4 +2831,180 @@ function MainApp(){const[tab,setTab]=useState("dashboard");const[sub,setSub]=use
 function useVoice(onCmd){const[listening,setListening]=useState(false);const speak=useCallback(t=>{if("speechSynthesis"in window){const u=new SpeechSynthesisUtterance(t);u.rate=1.05;speechSynthesis.speak(u);}},[]);const toggle=useCallback(()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return speak("Voice not supported");if(listening)return setListening(false);const r=new SR();r.continuous=false;r.lang="en-US";r.onresult=e=>{onCmd(e.results[0][0].transcript.toLowerCase().trim(),speak);setListening(false);};r.onerror=()=>setListening(false);r.onend=()=>setListening(false);r.start();setListening(true);},[listening,onCmd,speak]);return{listening,toggle,speak};}
 
 export default function App(){return<ThemeProvider><AuthProvider><AuthGate/></AuthProvider></ThemeProvider>;}
-function AuthGate(){const{user}=useAuth();return user?<MainApp/>:<AuthScreen/>;}
+// ─── CLIENT APP ──────────────────────────────────────────────────────────────
+function ClientSchedulePage(){
+  const[bookings,setBookings]=useState([]);const[loading,setLoading]=useState(true);
+  const[cancelId,setCancelId]=useState(null);const[cancelReason,setCancelReason]=useState("");
+  useEffect(()=>{api.get("/bookings").then(d=>{setBookings(unwrap(d,"bookings","sessions"));}).catch(()=>{}).finally(()=>setLoading(false));},[]);
+  const requestCancel=async()=>{
+    if(!cancelId)return;
+    try{await api.post(`/bookings/${cancelId}/cancel-request`,{reason:cancelReason||"Schedule conflict"});
+      setBookings(prev=>prev.map(b=>b.id===cancelId?{...b,status:"CANCEL_REQUESTED"}:b));
+      setCancelId(null);setCancelReason("");
+    }catch(e){alert("Could not request cancellation: "+e.message);}
+  };
+  if(loading)return<Spin/>;
+  const now=new Date();
+  const upcoming=bookings.filter(b=>{try{const st=(b.status||"").toUpperCase();return new Date(b.scheduledAt||b.date)>=now&&st!=="CANCELLED";}catch{return false;}}).sort((a,b)=>new Date(a.scheduledAt||a.date)-new Date(b.scheduledAt||b.date));
+  const past=bookings.filter(b=>{try{return new Date(b.scheduledAt||b.date)<now;}catch{return false;}}).sort((a,b)=>new Date(b.scheduledAt||b.date)-new Date(a.scheduledAt||a.date)).slice(0,20);
+  const statusColors={confirmed:C.ok,pending:C.wn,completed:C.a2,cancelled:C.mt,cancel_requested:C.or,no_show:C.dg};
+  return<div>
+    <ST>My Schedule</ST>
+    {upcoming.length===0?<Empty icon="📅" text="No upcoming sessions"/>:
+    <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+      <div style={{fontSize:13,fontWeight:600,color:C.mt,marginBottom:4}}>Upcoming</div>
+      {upcoming.map(b=>{const t=new Date(b.scheduledAt||b.date);const st=(b.status||"pending").toLowerCase();
+        return<Card key={b.id} style={{padding:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:600,color:C.tx}}>{t.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
+              <div style={{fontSize:16,fontWeight:700,color:C.ac}}>{t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>
+              <div style={{fontSize:12,color:C.mt}}>{b.durationMinutes||60}min · {cName(b.coach)||b.sessionType||"Session"}</div>
+            </div>
+            <Badge color={statusColors[st]||C.wn}>{st==="cancel_requested"?"Cancel Pending":st}</Badge>
+          </div>
+          {st==="confirmed"&&<button onClick={()=>setCancelId(b.id)} style={{width:"100%",padding:"8px",borderRadius:8,border:`1px solid ${C.dg}30`,background:C.dg+"10",color:C.dg,fontSize:12,fontWeight:600,cursor:"pointer"}}>Request Cancellation</button>}
+          {st==="cancel_requested"&&<div style={{fontSize:12,color:C.or,textAlign:"center",padding:4}}>Waiting for coach approval</div>}
+        </Card>;})}
+    </div>}
+    {past.length>0&&<div>
+      <div style={{fontSize:13,fontWeight:600,color:C.mt,marginBottom:8}}>Past Sessions</div>
+      {past.map(b=>{const t=new Date(b.scheduledAt||b.date);const st=(b.status||"").toLowerCase();
+        return<Card key={b.id} style={{padding:12,marginBottom:6,opacity:.7}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div><div style={{fontSize:13,fontWeight:600,color:C.tx}}>{t.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})} · {t.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div></div>
+            <Badge color={statusColors[st]||C.mt}>{st}</Badge>
+          </div>
+        </Card>;})}
+    </div>}
+    <Modal open={!!cancelId} onClose={()=>setCancelId(null)} title="Request Cancellation">
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{fontSize:13,color:C.mt}}>Your coach will be notified and must approve the cancellation.</div>
+        <TextArea label="Reason (optional)" value={cancelReason} onChange={e=>setCancelReason(e.target.value)} placeholder="e.g. Schedule conflict, feeling unwell..."/>
+        <Btn variant="danger" onClick={requestCancel} style={{width:"100%",background:C.dg,color:"#fff"}}>Submit Cancellation Request</Btn>
+      </div>
+    </Modal>
+  </div>;
+}
+
+function ClientProgressPage(){
+  const[sessions,setSessions]=useState([]);const[loading,setLoading]=useState(true);
+  useEffect(()=>{api.get("/workouts/sessions").then(d=>{const s=Array.isArray(d)?d:d.data||[];setSessions(s);}).catch(()=>{}).finally(()=>setLoading(false));},[]);
+  if(loading)return<Spin/>;
+  // Group by date
+  const byDate={};sessions.forEach(s=>{const d=new Date(s.completedAt).toISOString().slice(0,10);if(!byDate[d])byDate[d]=[];byDate[d].push(s);});
+  const dates=Object.keys(byDate).sort().reverse().slice(0,14);
+  return<div>
+    <ST>My Progress</ST>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:16}}>
+      <SC label="Total Sessions" value={sessions.length} icon="💪" color={C.ac}/>
+      <SC label="This Week" value={sessions.filter(s=>new Date(s.completedAt)>=new Date(Date.now()-7*86400000)).length} icon="📅" color={C.ok}/>
+      <SC label="Exercises" value={[...new Set(sessions.map(s=>s.exerciseName))].length} icon="🏋️" color={C.a2}/>
+    </div>
+    {dates.length===0?<Empty icon="💪" text="No workout sessions yet. Your coach will log them during sessions."/>:
+    dates.map(d=><div key={d} style={{marginBottom:12}}>
+      <div style={{fontSize:13,fontWeight:600,color:C.mt,marginBottom:6}}>{new Date(d+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}</div>
+      {byDate[d].map(s=><Card key={s.id} style={{padding:12,marginBottom:4}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{fontSize:14,fontWeight:600,color:C.tx}}>{s.exerciseName}</div><div style={{fontSize:12,color:C.mt}}>{s.sets}×{s.reps}{s.intensity?` @ ${s.intensity}`:""}</div></div>
+          {s.notes&&<div style={{fontSize:11,color:C.mt,maxWidth:"40%",textAlign:"right"}}>{s.notes}</div>}
+        </div>
+      </Card>)}
+    </div>)}
+  </div>;
+}
+
+function ClientMediaPage(){
+  const[photos,setPhotos]=useState(ls.get("client_progress_photos",[]));
+  const[showAdd,setShowAdd]=useState(false);
+  const handleUpload=(e)=>{
+    const file=e.target.files?.[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      const entry={id:Date.now(),url:ev.target.result,date:new Date().toISOString().slice(0,10),type:file.type.startsWith("video")?"video":"photo",fileName:file.name};
+      const updated=[...photos,entry];setPhotos(updated);ls.set("client_progress_photos",updated);setShowAdd(false);
+    };reader.readAsDataURL(file);
+  };
+  const deletePhoto=(id)=>{const updated=photos.filter(p=>p.id!==id);setPhotos(updated);ls.set("client_progress_photos",updated);};
+  return<div>
+    <ST right={<Btn onClick={()=>setShowAdd(true)} style={{padding:"8px 14px",fontSize:12}}>+ Add Photo</Btn>}>Progress Photos</ST>
+    {photos.length===0?<Empty icon="📸" text="No progress photos yet. Tap + to add your first one."/>:
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+      {photos.sort((a,b)=>b.date.localeCompare(a.date)).map(p=>
+        <div key={p.id} style={{position:"relative",borderRadius:12,overflow:"hidden",aspectRatio:"1"}}>
+          <img src={p.url} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+          <div style={{position:"absolute",bottom:0,left:0,right:0,padding:"4px 6px",background:"rgba(0,0,0,.6)",fontSize:10,color:"#fff"}}>{p.date}</div>
+          <button onClick={()=>deletePhoto(p.id)} style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:11,border:"none",background:"rgba(0,0,0,.5)",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+        </div>
+      )}
+    </div>}
+    <Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Add Progress Photo">
+      <div style={{display:"flex",flexDirection:"column",gap:12,alignItems:"center"}}>
+        <div style={{fontSize:13,color:C.mt,textAlign:"center"}}>Upload a progress photo or body check-in image</div>
+        <label style={{width:"100%",padding:24,borderRadius:12,border:`2px dashed ${C.bd}`,textAlign:"center",cursor:"pointer",color:C.mt,fontSize:14}}>
+          📷 Tap to select photo
+          <input type="file" accept="image/*" onChange={handleUpload} style={{display:"none"}}/>
+        </label>
+      </div>
+    </Modal>
+  </div>;
+}
+
+function ClientSettingsPage(){
+  const{user,logout}=useAuth();const{themeName,switchTheme,themes}=useTheme();
+  const[profile,setProfile]=useState({name:user?.name||"",email:user?.email||""});
+  const[saved,setSaved]=useState(false);
+  const save=async()=>{try{await api.put("/auth/profile",profile);setSaved(true);setTimeout(()=>setSaved(false),2000);}catch{}};
+  return<div>
+    <ST>Settings</ST>
+    <Card style={{marginBottom:12}}>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <Input label="Name" value={profile.name} onChange={e=>setProfile({...profile,name:e.target.value})}/>
+        <Input label="Email" type="email" value={profile.email} onChange={e=>setProfile({...profile,email:e.target.value})}/>
+        <Btn onClick={save} style={{width:"100%"}}>{saved?"✓ Saved!":"Save Profile"}</Btn>
+      </div>
+    </Card>
+    <Card style={{marginBottom:12}}>
+      <div style={{fontSize:14,fontWeight:600,color:C.tx,marginBottom:12}}>Theme</div>
+      <div style={{display:"flex",gap:8}}>
+        {Object.entries(themes).map(([k,t])=><button key={k} onClick={()=>switchTheme(k)} style={{flex:1,padding:"12px 8px",borderRadius:12,border:themeName===k?`2px solid ${C.ac}`:`2px solid ${C.bd}`,background:t.bg,cursor:"pointer"}}>
+          <div style={{fontSize:12,fontWeight:600,color:t.tx}}>{t.name}</div>
+        </button>)}
+      </div>
+    </Card>
+    <Card><Btn variant="danger" onClick={logout} style={{width:"100%"}}>Sign Out</Btn></Card>
+  </div>;
+}
+
+function ClientMainApp(){
+  const[tab,setTab]=useState("schedule");const[rk,setRk]=useState(0);
+  const clientTabs=[{id:"schedule",icon:"📅",label:"Schedule"},{id:"progress",icon:"💪",label:"Progress"},{id:"devices",icon:"⌚",label:"Devices"},{id:"nutrition",icon:"🥗",label:"Nutrition"}];
+  const render=()=>{
+    const K=`${tab}_${rk}`;
+    const pages={
+      schedule:<ClientSchedulePage key={K}/>,
+      progress:<ClientProgressPage key={K}/>,
+      devices:<FitnessDevicesPage key={K}/>,
+      nutrition:<NutritionTracker key={K}/>,
+      photos:<ClientMediaPage key={K}/>,
+      settings:<ClientSettingsPage key={K}/>,
+    };
+    return pages[tab]||<ClientSchedulePage key={K}/>;
+  };
+  return<div style={{minHeight:"100dvh",background:C.bg,color:C.tx,fontFamily:"'DM Sans','SF Pro Display',-apple-system,system-ui,sans-serif"}}>
+    <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{background:${C.bg};overflow-x:hidden}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:${C.bd};border-radius:4px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}input::placeholder,textarea::placeholder{color:${C.mt}}select option{background:${C.sf};color:${C.tx}}`}</style>
+    <div style={{padding:"16px 16px 90px",maxWidth:600,margin:"0 auto"}}>{render()}</div>
+    <nav style={{position:"fixed",bottom:0,left:0,right:0,zIndex:100,background:C.sf,borderTop:`1px solid ${C.bd}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
+      {clientTabs.map(t=>{const a=tab===t.id;return<button key={t.id} onClick={()=>{setTab(t.id);setRk(k=>k+1);}} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"10px 0 8px",border:"none",cursor:"pointer",background:"transparent"}}>
+        <div style={{padding:"4px 16px",borderRadius:12,background:a?C.ac+"20":"transparent",fontSize:18}}>{t.icon}</div>
+        <span style={{fontSize:10,fontWeight:a?700:500,color:a?C.ac:C.mt}}>{t.label}</span>
+      </button>;})}
+      {[{id:"photos",icon:"📸",label:"Photos"},{id:"settings",icon:"⚙️",label:"Settings"}].map(t=>{const a=tab===t.id;return<button key={t.id} onClick={()=>{setTab(t.id);setRk(k=>k+1);}} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"10px 0 8px",border:"none",cursor:"pointer",background:"transparent"}}>
+        <div style={{padding:"4px 16px",borderRadius:12,background:a?C.ac+"20":"transparent",fontSize:18}}>{t.icon}</div>
+        <span style={{fontSize:10,fontWeight:a?700:500,color:a?C.ac:C.mt}}>{t.label}</span>
+      </button>;})}
+    </nav>
+  </div>;
+}
+
+function AuthGate(){const{user}=useAuth();if(!user)return<AuthScreen/>;const role=(user.role||"").toUpperCase();return role==="CLIENT"?<ClientMainApp/>:<MainApp/>;}
