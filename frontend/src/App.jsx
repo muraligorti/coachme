@@ -16,7 +16,14 @@ const api = {
       const r = await fetch(`${API}${p}`, { ...o, headers: h });
       if (r.status === 401 && !p.includes("/auth/")) { this.setToken(null); throw new Error("Session expired"); }
       const t = await r.text(); let d; try { d = JSON.parse(t); } catch { d = { raw: t }; }
-      if (!r.ok) throw new Error(d.message || d.error || r.statusText);
+      if (!r.ok) {
+        let msg = d.message || d.error || r.statusText;
+        // Include validation details if present (Zod errors)
+        if (d.details && Array.isArray(d.details)) {
+          msg = d.details.map(e => `${(e.path||[]).join(".")}: ${e.message}`).join(". ") || msg;
+        }
+        throw new Error(msg);
+      }
       return d;
     } catch (e) { if (e.message.includes("Failed to fetch")) throw new Error(`Network error on ${p}`); throw e; }
   },
@@ -166,7 +173,7 @@ function ClientsPage(){
   useEffect(()=>{load();},[]);
   const filtered=clients.filter(c=>(cName(c)||"").toLowerCase().includes(search.toLowerCase())||(cEmail(c)||"").toLowerCase().includes(search.toLowerCase())||(c.phone||"").includes(search));
 
-  const addClient=async()=>{if(!form.name||!form.email){alert("Name and email are required");return;}if(!form.phone){alert("Mobile number is required");return;}try{await api.post("/clients",form);setForm(emptyForm);setShowAdd(false);load();}catch(e){alert(e.message);}};
+  const addClient=async()=>{if(!form.name){alert("Name is required");return;}if(!form.email){alert("Email is required");return;}try{await api.post("/clients",form);setForm(emptyForm);setShowAdd(false);load();}catch(e){alert("Add client failed: "+e.message);}};
   const editClient=async()=>{
     const updateData={...form,displayName:form.name};
     // Try multiple update paths

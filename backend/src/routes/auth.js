@@ -18,18 +18,18 @@ const REFRESH_TOKEN_EXPIRY = "7d";
 // ─── Validation Schemas ──────────────────────────────────────────────
 
 const registerSchema = z.object({
-  email: z.string().email().max(255),
-  password: z.string().min(8).max(128)
-    .regex(/[A-Z]/, "Must contain uppercase")
-    .regex(/[a-z]/, "Must contain lowercase")
-    .regex(/\d/, "Must contain a number"),
-  role: z.enum(["COACH", "CLIENT"]),
+  email: z.string().email("Please enter a valid email").max(255),
+  password: z.string().min(8, "Password must be at least 8 characters").max(128)
+    .regex(/[A-Z]/, "Password must contain an uppercase letter")
+    .regex(/[a-z]/, "Password must contain a lowercase letter")
+    .regex(/\d/, "Password must contain a number"),
+  name: z.string().max(100).optional(), // Accept name at root level too
+  role: z.enum(["COACH", "CLIENT"]).default("CLIENT"),
   profile: z.object({
-    displayName: z.string().min(1).max(100),
+    displayName: z.string().min(1, "Name is required").max(100),
     phone: z.string().max(30).optional(),
     country: z.string().max(100).optional(),
     city: z.string().max(100).optional(),
-    // Coach-specific
     specializations: z.array(z.string().max(100)).max(10).optional(),
     certifications: z.array(z.string().max(100)).max(20).optional(),
     languages: z.array(z.string().max(50)).max(10).optional(),
@@ -41,14 +41,13 @@ const registerSchema = z.object({
     gymName: z.string().max(200).optional(),
     online: z.boolean().optional(),
     inPerson: z.boolean().optional(),
-    // Client-specific
     age: z.number().min(13).max(120).optional(),
     gender: z.string().max(20).optional(),
     heightCm: z.number().min(50).max(300).optional(),
     weightKg: z.number().min(20).max(500).optional(),
     fitnessGoals: z.array(z.string().max(100)).max(10).optional(),
     conditions: z.array(z.string().max(100)).max(20).optional(),
-  }),
+  }).optional(), // Make profile optional — we'll build defaults
 });
 
 const loginSchema = z.object({
@@ -70,6 +69,13 @@ function generateTokens(user) {
 router.post("/register", registerLimiter, sanitizeBody, audit("register", "user"), async (req, res) => {
   try {
     const data = registerSchema.parse(req.body);
+    // Build profile defaults if not provided
+    if (!data.profile) {
+      data.profile = { displayName: data.name || data.email.split("@")[0] };
+    }
+    if (!data.profile.displayName) {
+      data.profile.displayName = data.name || data.email.split("@")[0];
+    }
 
     // Check existing user
     const existing = await prisma.user.findUnique({ where: { email: data.email } });
@@ -203,7 +209,8 @@ router.post("/register", registerLimiter, sanitizeBody, audit("register", "user"
     });
   } catch (err) {
     if (err.name === "ZodError") {
-      return res.status(400).json({ error: "Validation failed", details: err.errors });
+      const messages = err.errors.map(e => `${(e.path||[]).join(".")}: ${e.message}`).join(". ");
+      return res.status(400).json({ error: messages || "Validation failed", details: err.errors });
     }
     logger.error("Registration error", { error: err.message });
     res.status(500).json({ error: "Registration failed" });
@@ -295,7 +302,8 @@ router.post("/login", loginLimiter, sanitizeBody, audit("login", "user"), async 
     });
   } catch (err) {
     if (err.name === "ZodError") {
-      return res.status(400).json({ error: "Validation failed", details: err.errors });
+      const messages = err.errors.map(e => `${(e.path||[]).join(".")}: ${e.message}`).join(". ");
+      return res.status(400).json({ error: messages || "Validation failed", details: err.errors });
     }
     logger.error("Login error", { error: err.message });
     res.status(500).json({ error: "Login failed" });

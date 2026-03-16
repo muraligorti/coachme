@@ -28,8 +28,10 @@ router.get("/", authenticate, authorize("COACH", "ADMIN"), async (req, res) => {
 router.post("/", authenticate, authorize("COACH"), checkClientLimit, sanitizeBody, audit("add_client", "client"), async (req, res) => {
   try {
     const coachProfile = await prisma.coachProfile.findUnique({ where: { userId: req.user.id } });
-    const { name, email, phone, age, goals, conditions } = req.body;
-    if (!name || !email) return res.status(400).json({ error: "Name and email required" });
+    if (!coachProfile) return res.status(404).json({ error: "Coach profile not found. Please complete your profile first." });
+    const { name, displayName, email, phone, age, goals, conditions, sessionType, notes, gender, dob } = req.body;
+    const clientName = name || displayName;
+    if (!clientName || !email) return res.status(400).json({ error: "Name and email are required" });
     
     const result = await prisma.$transaction(async (tx) => {
       // Check if user exists or create invite
@@ -43,10 +45,14 @@ router.post("/", authenticate, authorize("COACH"), checkClientLimit, sanitizeBod
         }
       } else {
         user = await tx.user.create({ data: { email, passwordHash: "PENDING_INVITE", role: "CLIENT" } });
-        clientProfile = await tx.clientProfile.create({ data: { userId: user.id, displayName: name, phone: phone || null, age, fitnessGoals: goals || [] } });
+        clientProfile = await tx.clientProfile.create({ data: { userId: user.id, displayName: clientName, phone: phone || null, age: age ? parseInt(age) : null, gender: gender || null, dob: dob || null, notes: notes || null, fitnessGoals: goals ? (Array.isArray(goals) ? goals : [goals]) : [] } });
         await tx.subscription.create({ data: { userId: user.id, tier: "FREE" } });
       }
-      const link = await tx.clientCoach.create({ data: { clientId: clientProfile.id, coachId: coachProfile.id } });
+      const link = await tx.clientCoach.upsert({
+        where: { clientId_coachId_coachingType: { clientId: clientProfile.id, coachId: coachProfile.id, coachingType: "training" } },
+        update: { status: "active" },
+        create: { clientId: clientProfile.id, coachId: coachProfile.id, coachingType: "training" },
+      });
       await tx.coachProfile.update({ where: { id: coachProfile.id }, data: { totalClients: { increment: 1 } } });
       return { client: clientProfile, link };
     });
