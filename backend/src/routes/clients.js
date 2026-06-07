@@ -50,7 +50,7 @@ router.post("/", authenticate, authorize("COACH"), checkClientLimit, sanitizeBod
       }
       const link = await tx.clientCoach.upsert({
         where: { clientId_coachId_coachingType: { clientId: clientProfile.id, coachId: coachProfile.id, coachingType: "training" } },
-        update: { status: "active" },
+        update: { status: "active", coachingType: "training" },
         create: { clientId: clientProfile.id, coachId: coachProfile.id, coachingType: "training" },
       });
       await tx.coachProfile.update({ where: { id: coachProfile.id }, data: { totalClients: { increment: 1 } } });
