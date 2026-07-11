@@ -59,7 +59,9 @@ enum SessionType {
 model User {
   id              String    @id @default(cuid())
   email           String    @unique
-  passwordHash    String    // bcrypt hashed
+  passwordHash    String?   // bcrypt hashed; null for Google-only accounts
+  googleId        String?   @unique // Google "sub" claim, set when signed up/linked via Google
+  avatarUrl       String?   // profile picture from Google, if provided
   role            Role      @default(CLIENT)
   emailVerified   Boolean   @default(false)
   verifyToken     String?
