@@ -85,6 +85,7 @@ model User {
   notifications   Notification[]
   sentMessages    Message[]     @relation("SentMessages")
   receivedMessages Message[]    @relation("ReceivedMessages")
+  googleAuthToken GoogleAuthToken?
 
   @@index([email])
   @@index([role])
@@ -532,4 +533,20 @@ model DeviceToken {
 
   @@unique([clientId, provider])
   @@index([clientId])
+}
+
+// --- GOOGLE AUTH TOKENS ---
+
+model GoogleAuthToken {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken   String   @db.Text
+  refreshToken  String?  @db.Text
+  expiresAt     DateTime?
+  scope         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
 }
