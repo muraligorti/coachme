@@ -3,6 +3,10 @@
 import { useState, useEffect, useRef, useCallback, createContext, useContext, useMemo } from "react";
 
 const API = "https://just-perception-production.up.railway.app/api";
+// Google Identity Services client ID — get one at https://console.cloud.google.com/apis/credentials
+// (Create Credentials → OAuth client ID → Web application → add your Vercel domain under
+// "Authorized JavaScript origins"). Paste the value here, it's a public identifier, not a secret.
+const GOOGLE_CLIENT_ID = "619052415275-6cs36e9mml9h8tdb9cl0g2tnhf06ic9f.apps.googleusercontent.com.apps.googleusercontent.com";
 const log = (...a) => console.log("[CoachMe]", ...a);
 
 // ─── API CLIENT ───────────────────────────────────────────────────────────────
@@ -62,9 +66,14 @@ function AuthProvider({ children }) {
     const d=await api.post("/auth/register",payload); const tk=xToken(d); if(!tk) throw new Error("No token"); api.setToken(tk);
     const u=xUser(d); if(u){u.role=u.role||payload.role;u.name=u.name||payload.profile.displayName;setUser(u);}else{setUser({email:pl.email,name:payload.profile.displayName,role:payload.role});}
   };
+  const googleLogin = async (credential, role) => {
+    const d = await api.post("/auth/google", { credential, role: (role||"CLIENT").toUpperCase() });
+    const tk = xToken(d); if (!tk) throw new Error("No token"); api.setToken(tk);
+    const u = xUser(d); if (u) setUser(u); else setUser({ email: d?.user?.email, role: d?.user?.role });
+  };
   const logout = () => { api.setToken(null); setUser(null); };
   if (loading) return <Splash />;
-  return <AuthCtx.Provider value={{user,login,register,logout}}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{user,login,register,logout,googleLogin}}>{children}</AuthCtx.Provider>;
 }
 
 // ─── THEMES & DESIGN SYSTEM ───────────────────────────────────────────────────
@@ -128,7 +137,26 @@ const PhoneInput=({label,value,onChange,placeholder})=>{
 };
 
 // ─── AUTH SCREEN ──────────────────────────────────────────────────────────────
-function AuthScreen(){const{login,register}=useAuth();const[mode,setMode]=useState("login");const[form,setForm]=useState({name:"",email:"",password:"",role:"CLIENT",phone:""});const[error,setError]=useState("");const[success,setSuccess]=useState("");const[busy,setBusy]=useState(false);const[resetToken,setResetToken]=useState("");const[newPassword,setNewPassword]=useState("");const[resetMethod,setResetMethod]=useState("email");
+function AuthScreen(){const{login,register,googleLogin}=useAuth();const[mode,setMode]=useState("login");const[form,setForm]=useState({name:"",email:"",password:"",role:"CLIENT",phone:""});const[error,setError]=useState("");const[success,setSuccess]=useState("");const[busy,setBusy]=useState(false);const[resetToken,setResetToken]=useState("");const[newPassword,setNewPassword]=useState("");const[resetMethod,setResetMethod]=useState("email");
+  const googleBtnRef=useRef(null);
+  // Render the official Google "Sign in with Google" button whenever we're on the
+  // login/register screen. The role picked in the register form is passed through
+  // so a Google sign-up creates a COACH or CLIENT account to match the user's choice.
+  useEffect(()=>{
+    if(mode!=="login"&&mode!=="register")return;
+    if(!window.google?.accounts?.id||!googleBtnRef.current)return;
+    if(GOOGLE_CLIENT_ID.startsWith("619052415275-6cs36e9mml9h8tdb9cl0g2tnhf06ic9f.apps.googleusercontent.com")){log("Set GOOGLE_CLIENT_ID in App.jsx to enable Google Sign-In");return;}
+    window.google.accounts.id.initialize({
+      client_id:GOOGLE_CLIENT_ID,
+      callback:async(resp)=>{
+        setError("");setSuccess("");setBusy(true);
+        try{await googleLogin(resp.credential,form.role);}catch(e){setError(e.message);}
+        setBusy(false);
+      },
+    });
+    googleBtnRef.current.innerHTML="";
+    window.google.accounts.id.renderButton(googleBtnRef.current,{theme:"outline",size:"large",width:320,text:mode==="register"?"signup_with":"signin_with"});
+  },[mode,form.role]);
   const submit=async()=>{setError("");setSuccess("");
     if(mode==="forgot"){
       const contact=resetMethod==="sms"?form.phone:form.email;
@@ -139,7 +167,10 @@ function AuthScreen(){const{login,register}=useAuth();const[mode,setMode]=useSta
     if(!form.email||!form.password)return setError("Email and password required");setBusy(true);try{mode==="login"?await login(form.email,form.password):await register(form);}catch(e){setError(e.message);}setBusy(false);
   };
   return<div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg,padding:20}}><Card style={{maxWidth:400,width:"100%"}}><div style={{textAlign:"center",marginBottom:28}}><div style={{width:52,height:52,borderRadius:14,background:C.gr,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:800,color:"#fff",marginBottom:12}}>C</div><h1 style={{color:C.tx,margin:0,fontSize:22,fontWeight:700}}>CoachMe.life</h1><p style={{color:C.mt,margin:"6px 0 0",fontSize:14}}>{mode==="login"?"Welcome back":mode==="register"?"Create your account":mode==="forgot"?"Reset your password":"Enter reset code"}</p></div><div style={{display:"flex",flexDirection:"column",gap:14}}>
-    {mode==="register"&&<><Input label="Full Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Murali Gorti"/><PhoneInput label="Mobile Number" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/><Sel label="I am a…" value={form.role} onChange={e=>setForm({...form,role:e.target.value})} options={[{value:"COACH",label:"Coach"},{value:"CLIENT",label:"Client"}]}/></>}
+    {mode==="register"&&<Sel label="I am a…" value={form.role} onChange={e=>setForm({...form,role:e.target.value})} options={[{value:"COACH",label:"Coach"},{value:"CLIENT",label:"Client"}]}/>}
+    {(mode==="login"||mode==="register")&&<div style={{display:"flex",justifyContent:"center"}}><div ref={googleBtnRef}/></div>}
+    {(mode==="login"||mode==="register")&&<div style={{display:"flex",alignItems:"center",gap:10,margin:"2px 0"}}><div style={{flex:1,height:1,background:C.bd}}/><span style={{fontSize:12,color:C.mt}}>or</span><div style={{flex:1,height:1,background:C.bd}}/></div>}
+    {mode==="register"&&<><Input label="Full Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Murali Gorti"/><PhoneInput label="Mobile Number" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></>}
     {mode==="forgot"&&<div style={{display:"flex",gap:4,marginBottom:4}}>{[{id:"sms",label:"📱 SMS"},{id:"email",label:"📧 Email"}].map(m=><button key={m.id} onClick={()=>setResetMethod(m.id)} style={{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:resetMethod===m.id?C.ac+"20":C.s2,color:resetMethod===m.id?C.ac:C.mt}}>{m.label}</button>)}</div>}
     {mode==="forgot"&&resetMethod==="sms"&&<PhoneInput label="Mobile Number" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/>}
     {(mode==="login"||mode==="register"||(mode==="forgot"&&resetMethod==="email"))&&<Input label="Email" type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="you@email.com"/>}
@@ -1129,7 +1160,7 @@ function BookingsPage(){
   const[currentMonth,setCurrentMonth]=useState(new Date());
   const[selDate,setSelDate]=useState(new Date().toISOString().slice(0,10));
   const[holidays,setHolidays]=useState(ls.get("holidays",[]));
-  const[form,setForm]=useState({clientId:"",date:new Date().toISOString().slice(0,10),time:"09:00",duration:60,type:"training",notes:""});
+  const[form,setForm]=useState({clientId:"",date:new Date().toISOString().slice(0,10),time:"09:00",duration:60,type:"training",mode:"ONLINE",notes:""});
   const[repeatForm,setRepeatForm]=useState({endDate:"",mode:"until_date",daysOfWeek:[1,2,3,4,5]});
 
   const load=()=>{Promise.all([api.get("/bookings").catch(()=>({})),api.get("/clients").catch(()=>({}))]).then(([b,c])=>{
@@ -1157,7 +1188,7 @@ function BookingsPage(){
         coachId,
         scheduledAt:new Date(form.date+"T"+form.time).toISOString(),
         durationMinutes:form.duration||60,
-        sessionType:form.type==="training"||form.type==="group"?"IN_PERSON":"ONLINE",
+        sessionType:form.mode||"ONLINE", // explicit coach choice: ONLINE / IN_PERSON / HYBRID
         notes:form.notes,
       });
       setShowAdd(false);load();
@@ -1441,7 +1472,7 @@ function BookingsPage(){
             </div>
             <div style={{flex:1}}>
               <div style={{fontSize:14,fontWeight:600,color:C.tx}}>{clientName}</div>
-              <div style={{fontSize:12,color:C.mt}}>{b.duration||60}min · {b.type||"training"}{b._local?" · 📱 Local":""}</div>
+              <div style={{fontSize:12,color:C.mt}}>{b.duration||60}min · {b.type||"training"} · {b.sessionType==="IN_PERSON"?"📍 Offline":b.sessionType==="HYBRID"?"🔀 Hybrid":"💻 Online"}{b._local?" · 📱 Local":""}</div>
             </div>
             <div style={{display:"flex",gap:6,alignItems:"center"}}>
               {resolveClientPhone(b)&&<button onClick={(e)=>{e.stopPropagation();whatsAppCall(resolveClientPhone(b));}} style={{width:32,height:32,borderRadius:8,border:"none",cursor:"pointer",background:"#25D366"+"20",color:"#25D366",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}} title="WhatsApp Call">📞</button>}
@@ -1475,6 +1506,7 @@ function BookingsPage(){
           <Input label="Duration (min)" type="number" value={form.duration} onChange={e=>setForm({...form,duration:+e.target.value})}/>
           <Sel label="Type" value={form.type} onChange={e=>setForm({...form,type:e.target.value})} options={[{value:"training",label:"Training"},{value:"assessment",label:"Assessment"},{value:"consultation",label:"Consultation"},{value:"group",label:"Group Class"}]}/>
         </div>
+        <Sel label="Mode" value={form.mode} onChange={e=>setForm({...form,mode:e.target.value})} options={[{value:"ONLINE",label:"💻 Online"},{value:"IN_PERSON",label:"📍 Offline (In-person)"},{value:"HYBRID",label:"🔀 Hybrid"}]}/>
         <TextArea label="Notes" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/>
         <Btn onClick={save} disabled={!form.clientId||!form.date||!form.time} style={{width:"100%"}}>Confirm Booking</Btn>
       </div>
