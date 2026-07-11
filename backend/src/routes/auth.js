@@ -6,19 +6,23 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
+import { OAuth2Client } from "google-auth-library";
 import { prisma, redis, logger } from "../server.js";
 import { authenticate, loginLimiter, registerLimiter, sanitizeBody, audit } from "../middleware/auth.js";
+import { validateEmailDomain } from "../lib/emailValidation.js";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY = "7d";
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
 // ─── Validation Schemas ──────────────────────────────────────────────
 
 const registerSchema = z.object({
-  email: z.string().email("Please enter a valid email").max(255),
+  email: z.string().email("Please enter a valid email").max(255).transform(v => v.trim().toLowerCase()),
   password: z.string().min(8, "Password must be at least 8 characters").max(128)
     .regex(/[A-Z]/, "Password must contain an uppercase letter")
     .regex(/[a-z]/, "Password must contain a lowercase letter")
@@ -69,6 +73,14 @@ function generateTokens(user) {
 router.post("/register", registerLimiter, sanitizeBody, audit("register", "user"), async (req, res) => {
   try {
     const data = registerSchema.parse(req.body);
+
+    // Reject fake/typo/disposable email domains (e.g. "yahoo1.com") before
+    // we touch the database. Real format (a@b.tld) is already checked by zod above.
+    const emailCheck = await validateEmailDomain(data.email);
+    if (!emailCheck.valid) {
+      return res.status(400).json({ error: emailCheck.reason, suggestion: emailCheck.suggestion });
+    }
+
     // Build profile defaults if not provided
     if (!data.profile) {
       data.profile = { displayName: data.name || data.email.split("@")[0] };
@@ -217,6 +229,103 @@ router.post("/register", registerLimiter, sanitizeBody, audit("register", "user"
   }
 });
 
+// ─── POST /api/auth/google — Sign up / Sign in with Google ───────────
+// Frontend sends the Google ID token ("credential") obtained from Google
+// Identity Services. We verify it server-side, then either log the user
+// in (if they already exist) or create a new account (sign-up).
+
+router.post("/google", sanitizeBody, audit("google_auth", "user"), async (req, res) => {
+  try {
+    if (!googleClient) {
+      return res.status(500).json({ error: "Google sign-in is not configured on this server" });
+    }
+    const { credential, role } = req.body;
+    if (!credential) return res.status(400).json({ error: "Missing Google credential" });
+
+    // Verify the ID token's signature, audience, and expiry with Google.
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    if (!payload?.email) return res.status(400).json({ error: "Google account has no email" });
+    if (!payload.email_verified) return res.status(400).json({ error: "Google email is not verified" });
+
+    const email = payload.email.toLowerCase();
+    const displayName = payload.name || email.split("@")[0];
+    let user = await prisma.user.findUnique({ where: { email } });
+    let profile = null;
+
+    if (!user) {
+      // ── New sign-up via Google ──
+      const chosenRole = role === "COACH" ? "COACH" : "CLIENT"; // default to CLIENT if not specified
+      user = await prisma.$transaction(async (tx) => {
+        const newUser = await tx.user.create({
+          data: {
+            email,
+            passwordHash: null, // Google-only account — no password set
+            googleId: payload.sub,
+            avatarUrl: payload.picture || null,
+            role: chosenRole,
+            emailVerified: true,
+          },
+        });
+
+        if (chosenRole === "COACH") {
+          await tx.coachProfile.create({
+            data: { userId: newUser.id, displayName, languages: ["English"], sessionTypes: ["ONLINE"], pricePerSession: 30 },
+          });
+        } else {
+          await tx.clientProfile.create({ data: { userId: newUser.id, displayName } });
+        }
+
+        await tx.subscription.create({
+          data: {
+            userId: newUser.id,
+            tier: chosenRole === "COACH" ? "STARTER" : "FREE",
+            maxClients: chosenRole === "COACH" ? 5 : 999,
+          },
+        });
+
+        return newUser;
+      });
+      logger.info("User registered via Google", { userId: user.id, email });
+    } else if (!user.googleId) {
+      // ── Existing email/password account — link Google as an additional sign-in method ──
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { googleId: payload.sub, avatarUrl: user.avatarUrl || payload.picture || null, emailVerified: true },
+      });
+    }
+
+    if (!user.isActive) return res.status(403).json({ error: "Account disabled. Contact support." });
+
+    if (user.role === "COACH") profile = await prisma.coachProfile.findUnique({ where: { userId: user.id } });
+    else if (user.role === "CLIENT") profile = await prisma.clientProfile.findUnique({ where: { userId: user.id } });
+
+    const { accessToken, refreshToken } = generateTokens(user);
+    await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date(), loginAttempts: 0, lockedUntil: null } });
+    await prisma.session.create({
+      data: {
+        userId: user.id, token: accessToken, refreshToken,
+        userAgent: req.headers["user-agent"], ipAddress: req.ip,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    logger.info("User signed in via Google", { userId: user.id, role: user.role });
+    res.json({
+      user: { id: user.id, email: user.email, role: user.role, avatarUrl: user.avatarUrl },
+      profile,
+      accessToken,
+      refreshToken,
+    });
+  } catch (err) {
+    logger.error("Google auth error", { error: err.message });
+    res.status(401).json({ error: "Google sign-in failed. Please try again." });
+  }
+});
+
 // ─── POST /api/auth/login ────────────────────────────────────────────
 
 router.post("/login", loginLimiter, sanitizeBody, audit("login", "user"), async (req, res) => {
@@ -232,6 +341,11 @@ router.post("/login", loginLimiter, sanitizeBody, audit("login", "user"), async 
     if (user.lockedUntil && user.lockedUntil > new Date()) {
       const minutesLeft = Math.ceil((user.lockedUntil - Date.now()) / 60000);
       return res.status(423).json({ error: `Account locked. Try again in ${minutesLeft} minutes.` });
+    }
+
+    // Accounts created via Google sign-up have no password set
+    if (!user.passwordHash) {
+      return res.status(400).json({ error: "This account uses Google Sign-In. Please continue with Google." });
     }
 
     // Verify password
