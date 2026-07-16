@@ -24,6 +24,7 @@ import adminRoutes from "./routes/admin.js";
 import aiRoutes from "./routes/ai.js";
 import healthDataRoutes from "./routes/health-data.js";
 import nutritionRoutes from "./routes/nutrition.js";
+import insightsRoutes from "./routes/insights.js"; 
 
 // ─── Initialize Services ────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false,
 }));
-
+app.use("/api/insights", insightsRoutes); 
 // CORS: Only allow configured origins
 app.use(cors({
   origin: [
