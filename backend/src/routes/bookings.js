@@ -1,0 +1,104 @@
+import { Router } from "express";
+import { prisma, logger } from "../server.js";
+import { authenticate, authorize, ownsResource, sanitizeBody, audit } from "../middleware/auth.js";
+const router = Router();
+
+// POST /api/bookings — Create booking (client, coach, or admin)
+router.post("/", authenticate, authorize("CLIENT", "COACH", "ADMIN"), sanitizeBody, audit("create_booking", "booking"), async (req, res) => {
+  try {
+    // Resolve clientId: clients use their own profile; coaches/admins must supply clientId
+    let clientProfile;
+    if (req.user.role === "CLIENT") {
+      clientProfile = await prisma.clientProfile.findUnique({ where: { userId: req.user.id } });
+    } else {
+      if (!req.body.clientId) return res.status(400).json({ error: "clientId required when booking as coach/admin" });
+      clientProfile = await prisma.clientProfile.findUnique({ where: { id: req.body.clientId } });
+    }
+    if (!clientProfile) return res.status(404).json({ error: "Client profile not found" });
+
+    const coach = await prisma.coachProfile.findUnique({ where: { id: req.body.coachId } });
+    if (!coach) return res.status(404).json({ error: "Coach not found" });
+    const booking = await prisma.booking.create({
+      data: { clientId: clientProfile.id, coachId: coach.id, scheduledAt: new Date(req.body.scheduledAt),
+        durationMinutes: req.body.durationMinutes || 60, sessionType: req.body.sessionType || "ONLINE",
+        price: coach.pricePerSession, currency: coach.currency, notes: req.body.notes },
+    });
+    // Create notification for coach
+    await prisma.notification.create({
+      data: { userId: coach.userId, type: "booking", title: "New Booking", body: `${clientProfile.displayName} booked a session` },
+    });
+    res.status(201).json(booking);
+  } catch (err) { logger.error("Booking create error", { error: err.message }); res.status(500).json({ error: "Booking failed" }); }
+});
+
+// GET /api/bookings — List bookings
+router.get("/", authenticate, async (req, res) => {
+  try {
+    let where = {};
+    if (req.user.role === "COACH") {
+      const coachProfile = await prisma.coachProfile.findUnique({ where: { userId: req.user.id } });
+      if (coachProfile) where = { coachId: coachProfile.id };
+    } else if (req.user.role === "CLIENT") {
+      // Find client profile — try by userId first, then by email match
+      let clientProfile = await prisma.clientProfile.findUnique({ where: { userId: req.user.id } });
+      if (!clientProfile) {
+        // Fallback: find by email via User table (handles coach-invited accounts)
+        const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+        if (user) {
+          const allProfiles = await prisma.clientProfile.findMany({ where: { user: { email: user.email } } });
+          if (allProfiles.length > 0) clientProfile = allProfiles[0];
+        }
+      }
+      if (clientProfile) where = { clientId: clientProfile.id };
+      else {
+        logger.warn("Client has no profile, cannot load bookings", { userId: req.user.id });
+        return res.json([]);
+      }
+    }
+    // ADMIN sees all
+    const bookings = await prisma.booking.findMany({
+      where, orderBy: { scheduledAt: "desc" }, take: 50,
+      include: { client: { select: { displayName: true, phone: true } }, coach: { select: { displayName: true, phone: true } } },
+    });
+    res.json(bookings);
+  } catch (err) { logger.error("Load bookings error", { error: err.message, userId: req.user.id }); res.status(500).json({ error: "Failed to load bookings" }); }
+});
+
+// POST /api/bookings/:id/cancel-request — Client requests cancellation (coach must approve)
+router.post("/:id/cancel-request", authenticate, authorize("CLIENT"), sanitizeBody, audit("cancel_request", "booking"), async (req, res) => {
+  try {
+    const clientProfile = await prisma.clientProfile.findUnique({ where: { userId: req.user.id } });
+    if (!clientProfile) return res.status(404).json({ error: "Client profile not found" });
+    const booking = await prisma.booking.findUnique({ where: { id: req.params.id } });
+    if (!booking || booking.clientId !== clientProfile.id) return res.status(404).json({ error: "Booking not found" });
+    if (booking.status === "CANCELLED" || booking.status === "COMPLETED") return res.status(400).json({ error: "Cannot cancel this booking" });
+    const updated = await prisma.booking.update({
+      where: { id: req.params.id },
+      data: { status: "CANCEL_REQUESTED", cancelReason: req.body.reason || "Client requested cancellation" }
+    });
+    // Notify coach
+    try {
+      const coachProfile = await prisma.coachProfile.findUnique({ where: { id: booking.coachId } });
+      if (coachProfile) {
+        await prisma.notification.create({
+          data: { userId: coachProfile.userId, type: "booking", title: "Cancellation Request",
+            body: `${clientProfile.displayName} requested to cancel session on ${new Date(booking.scheduledAt).toLocaleDateString()}`,
+            data: { bookingId: booking.id } }
+        });
+      }
+    } catch {}
+    res.json(updated);
+  } catch (err) { logger.error("Cancel request error", { error: err.message }); res.status(500).json({ error: "Cancel request failed" }); }
+});
+
+// PATCH /api/bookings/:id — Update status (coach can confirm/cancel)
+router.patch("/:id", authenticate, sanitizeBody, audit("update_booking", "booking"), async (req, res) => {
+  try {
+    const updateData = { status: req.body.status, cancelReason: req.body.cancelReason };
+    if (req.body.notes !== undefined) updateData.notes = req.body.notes;
+    const booking = await prisma.booking.update({ where: { id: req.params.id }, data: updateData });
+    res.json(booking);
+  } catch (err) { res.status(500).json({ error: "Update failed" }); }
+});
+
+export default router;

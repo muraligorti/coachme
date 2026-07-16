@@ -1,0 +1,54 @@
+# ── Dependencies ──
+node_modules/
+.pnp
+.pnp.js
+
+# ── Environment / secrets ──
+.env
+.env.local
+.env.*.local
+
+# ── Build output ──
+dist/
+build/
+out/
+
+# ── Logs ──
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# ── OS files ──
+.DS_Store
+Thumbs.db
+
+# ── Editor ──
+.vscode/
+.idea/
+*.swp
+
+# ── Android (Capacitor) ──
+frontend/android/app/build/
+frontend/android/build/
+frontend/android/.gradle/
+frontend/android/captures/
+frontend/android/local.properties
+frontend/android/.idea/
+frontend/android/app/release/
+frontend/android/app/debug/
+frontend/android/*.keystore
+frontend/android/*.jks
+!frontend/android/app/src/
+
+# ── iOS (Capacitor) ──
+frontend/ios/App/Pods/
+frontend/ios/App/build/
+frontend/ios/App/DerivedData/
+frontend/ios/App/App.xcworkspace/xcuserdata/
+frontend/ios/App/App.xcodeproj/xcuserdata/
+frontend/ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
+frontend/ios/.idea/
+
+# ── Prisma ──
+backend/prisma/*.db

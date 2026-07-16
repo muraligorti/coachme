@@ -1,0 +1,13 @@
+npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated source-map@0.8.0-beta.0: The work that was done in this beta branch won't be included in future versions
+npm warn deprecated glob@11.1.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm error code E404
+npm error 404 Not Found - GET https://packagefeedproxy.microsoft.io/npm/terser/-/terser-5.49.0.tgz - Cannot find the file terser-5.49.0.tgz in package 'terser 5.49.0' in feed 'npm-public'
+npm error 404
+npm error 404  The requested resource 'terser@https://packagefeedproxy.microsoft.io/npm/terser/-/terser-5.49.0.tgz' could not be found or you do not have permission to access it.
+npm error 404
+npm error 404 Note that you can also install from a
+npm error 404 tarball, folder, http url, or git url.
+npm error A complete log of this run can be found in: C:\Users\mugorti\AppData\Local\npm-cache\_logs\2026-07-13T04_18_02_303Z-debug-0.log

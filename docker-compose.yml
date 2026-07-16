@@ -1,0 +1,75 @@
+version: "3.9"
+
+services:
+  # ═══ PostgreSQL Database ═══
+  postgres:
+    image: postgres:16-alpine
+    container_name: nexus-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nexus
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-nexus_secure_2024}
+      POSTGRES_DB: nexus
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexus"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ═══ Redis (Sessions + Rate Limiting + Caching) ═══
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD:-nexus_redis_2024}
+    volumes:
+      - redisdata:/data
+
+  # ═══ Backend API ═══
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nexus-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://nexus:${DB_PASSWORD:-nexus_secure_2024}@postgres:5432/nexus
+      REDIS_URL: redis://:${REDIS_PASSWORD:-nexus_redis_2024}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:-change_this_to_64_char_random_string}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change_this_too_different_64_char}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      NODE_ENV: production
+      PORT: 4000
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-32_byte_hex_key_for_medical_data}
+    ports:
+      - "4000:4000"
+
+  # ═══ Frontend ═══
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nexus-web
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: ${API_URL:-http://localhost:4000}
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:
+  redisdata:
