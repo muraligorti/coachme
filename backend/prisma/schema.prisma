@@ -139,6 +139,7 @@ model CoachProfile {
   verifiedAt        DateTime?
   featured          Boolean   @default(false)
   rating            Float     @default(0)
+  insightSettings   Json?     // Per-coach overrides for Daily Briefing / risk-flag thresholds — see services/insightsService.js DEFAULT_SETTINGS for shape & defaults. Null = use defaults.
   reviewCount       Int       @default(0)
   totalClients      Int       @default(0)
   totalSessions     Int       @default(0)
