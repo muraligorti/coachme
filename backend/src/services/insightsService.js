@@ -8,7 +8,16 @@
 // Design rule followed throughout (see Volume 4 AI Principles): never
 // flag on a single weak signal alone. Every risk flag states the specific
 // reasons it fired — no bare scores, ever.
+//
+// THRESHOLDS ARE CONFIGURABLE PER COACH. A coach who sees clients weekly
+// has a very different definition of "gone quiet" than one who runs a
+// twice-a-week bootcamp. Rather than hardcode one set of numbers for
+// every coach, thresholds live in CoachProfile.insightSettings (a nullable
+// JSON column) and merge over DEFAULT_SETTINGS below — a coach who's never
+// touched their settings gets sensible defaults; one who has gets their
+// own overrides, field by field (a partial override doesn't reset the rest).
 // ═══════════════════════════════════════════════════════════════════════
+import { AppError } from "../lib/AppError.js";
 import * as clientCoachRepository from "../repositories/clientCoachRepository.js";
 import * as bookingRepository from "../repositories/bookingRepository.js";
 import * as workoutInsightsRepository from "../repositories/workoutInsightsRepository.js";
@@ -24,12 +33,53 @@ function daysSince(date) {
   return Math.floor((Date.now() - new Date(date).getTime()) / DAY_MS);
 }
 
-// ─── Per-client risk computation ───────────────────────────────────────
-// Combines multiple weak signals into one flag. A single moderate signal
-// never fires alone; either one severe signal, or two-or-more moderate
-// signals together, are required — this is a deliberate design choice
-// (see Volume 4 AI Principles), not an accident of implementation.
-async function computeRiskForClient(clientProfileId) {
+export const DEFAULT_SETTINGS = {
+  workoutGapModerateDays: 7,
+  workoutGapSevereDays: 14,
+  nutritionGapDays: 14,
+  healthSyncGapDays: 10,
+  bookingDropModeratePct: 30,
+  bookingDropSeverePct: 60,
+  coldLeadDays: 7,
+};
+
+export const SETTINGS_BOUNDS = {
+  workoutGapModerateDays: { min: 2, max: 30 },
+  workoutGapSevereDays: { min: 5, max: 60 },
+  nutritionGapDays: { min: 3, max: 60 },
+  healthSyncGapDays: { min: 3, max: 60 },
+  bookingDropModeratePct: { min: 10, max: 90 },
+  bookingDropSeverePct: { min: 20, max: 95 },
+  coldLeadDays: { min: 2, max: 30 },
+};
+
+function getEffectiveSettings(coachProfile) {
+  return { ...DEFAULT_SETTINGS, ...(coachProfile?.insightSettings || {}) };
+}
+
+export async function getSettings(userId) {
+  const profile = await profileRepository.findCoachProfileByUserId(userId);
+  if (!profile) throw new AppError(404, "Coach profile not found");
+  return { settings: getEffectiveSettings(profile), defaults: DEFAULT_SETTINGS, bounds: SETTINGS_BOUNDS };
+}
+
+export async function updateSettings(userId, updates) {
+  for (const [key, value] of Object.entries(updates)) {
+    if (!(key in DEFAULT_SETTINGS)) throw new AppError(400, `Unknown setting: ${key}`);
+    const bounds = SETTINGS_BOUNDS[key];
+    if (typeof value !== "number" || Number.isNaN(value)) throw new AppError(400, `${key} must be a number`);
+    if (value < bounds.min || value > bounds.max) {
+      throw new AppError(400, `${key} must be between ${bounds.min} and ${bounds.max}`);
+    }
+  }
+  const profile = await profileRepository.findCoachProfileByUserId(userId);
+  if (!profile) throw new AppError(404, "Coach profile not found");
+  const merged = { ...(profile.insightSettings || {}), ...updates };
+  await profileRepository.updateCoachProfile(userId, { insightSettings: merged });
+  return { settings: getEffectiveSettings({ insightSettings: merged }), defaults: DEFAULT_SETTINGS, bounds: SETTINGS_BOUNDS };
+}
+
+async function computeRiskForClient(clientProfileId, settings) {
   const now = new Date();
   const thirtyAgo = new Date(now - 30 * DAY_MS);
   const sixtyAgo = new Date(now - 60 * DAY_MS);
@@ -45,26 +95,25 @@ async function computeRiskForClient(clientProfileId) {
   const reasons = [];
   let severeSignalFired = false;
 
-  // Booking cadence drop — only meaningful if there was a prior baseline to drop from.
   if (priorBookings >= 2) {
     const dropPct = Math.round(((priorBookings - recentBookings) / priorBookings) * 100);
-    if (dropPct >= 60) { reasons.push(`Booking frequency down ${dropPct}% vs their own recent average`); severeSignalFired = true; }
-    else if (dropPct >= 30) reasons.push(`Booking frequency down ${dropPct}% vs their own recent average`);
+    if (dropPct >= settings.bookingDropSeverePct) { reasons.push(`Booking frequency down ${dropPct}% vs their own recent average`); severeSignalFired = true; }
+    else if (dropPct >= settings.bookingDropModeratePct) reasons.push(`Booking frequency down ${dropPct}% vs their own recent average`);
   }
 
   const workoutGapDays = daysSince(lastWorkout?.completedAt);
   if (workoutGapDays !== null) {
-    if (workoutGapDays >= 14) { reasons.push(`No workout logged in ${workoutGapDays} days`); severeSignalFired = true; }
-    else if (workoutGapDays >= 7) reasons.push(`No workout logged in ${workoutGapDays} days`);
+    if (workoutGapDays >= settings.workoutGapSevereDays) { reasons.push(`No workout logged in ${workoutGapDays} days`); severeSignalFired = true; }
+    else if (workoutGapDays >= settings.workoutGapModerateDays) reasons.push(`No workout logged in ${workoutGapDays} days`);
   }
 
   const nutritionGapDays = daysSince(lastNutrition?.createdAt);
-  if (nutritionGapDays !== null && nutritionGapDays >= 14) {
+  if (nutritionGapDays !== null && nutritionGapDays >= settings.nutritionGapDays) {
     reasons.push(`No nutrition log in ${nutritionGapDays} days`);
   }
 
   const healthGapDays = daysSince(lastHealthSync?.syncedAt);
-  if (lastHealthSync && healthGapDays !== null && healthGapDays >= 10) {
+  if (lastHealthSync && healthGapDays !== null && healthGapDays >= settings.healthSyncGapDays) {
     reasons.push(`Connected device hasn't synced in ${healthGapDays} days`);
   }
 
@@ -72,21 +121,17 @@ async function computeRiskForClient(clientProfileId) {
   return { flagged, reasons };
 }
 
-// Returns { [clientProfileId]: { flagged, reasons, clientName } } for every
-// active client of this coach. Used by both the Clients-page risk badges
-// and the Daily Briefing.
-export async function computeClientRisks(coachId) {
+export async function computeClientRisks(coachId, settings) {
   const relationships = await clientCoachRepository.findActiveClientsForCoach(coachId);
   const results = {};
   await Promise.all(relationships.map(async (rel) => {
-    const risk = await computeRiskForClient(rel.clientId);
+    const risk = await computeRiskForClient(rel.clientId, settings);
     results[rel.clientId] = { ...risk, clientName: rel.client?.displayName || "Client" };
   }));
   return results;
 }
 
-// ─── Cold leads ─────────────────────────────────────────────────────────
-export async function computeColdLeads(coachId, staleDays = 7) {
+export async function computeColdLeads(coachId, staleDays) {
   const since = new Date(Date.now() - staleDays * DAY_MS);
   const leads = await leadInsightsRepository.findColdLeads(coachId, since);
   return leads.map((l) => ({
@@ -96,7 +141,6 @@ export async function computeColdLeads(coachId, staleDays = 7) {
   }));
 }
 
-// ─── Capacity / tier insight ────────────────────────────────────────────
 async function computeCapacityInsight(coachId, userId) {
   const [relationships, subscription] = await Promise.all([
     clientCoachRepository.findActiveClientsForCoach(coachId),
@@ -104,7 +148,7 @@ async function computeCapacityInsight(coachId, userId) {
   ]);
   const activeCount = relationships.length;
   const max = subscription?.maxClients || 5;
-  if (max >= 999) return null; // effectively unlimited tier — nothing worth flagging
+  if (max >= 999) return null;
   const remaining = max - activeCount;
   if (remaining <= 5 && remaining >= 0) {
     return { activeCount, max, remaining, tier: subscription?.tier || "FREE" };
@@ -112,20 +156,18 @@ async function computeCapacityInsight(coachId, userId) {
   return null;
 }
 
-// ─── Daily Briefing assembly ────────────────────────────────────────────
-// Returns a small, prioritized list (max 5 items) — never a wall of data.
-// An empty list is a valid, positive outcome; the UI is responsible for
-// showing "all clear" rather than this service manufacturing urgency.
 export async function getBriefing(coachId, userId) {
+  const profile = await profileRepository.findCoachProfileByUserId(userId);
+  const settings = getEffectiveSettings(profile);
+
   const [risks, coldLeads, capacity] = await Promise.all([
-    computeClientRisks(coachId),
-    computeColdLeads(coachId),
+    computeClientRisks(coachId, settings),
+    computeColdLeads(coachId, settings.coldLeadDays),
     computeCapacityInsight(coachId, userId),
   ]);
 
   const items = [];
 
-  // Flagged clients first — sorted by number of contributing reasons (most concerning first)
   Object.entries(risks)
     .filter(([, r]) => r.flagged)
     .sort((a, b) => b[1].reasons.length - a[1].reasons.length)
@@ -143,7 +185,7 @@ export async function getBriefing(coachId, userId) {
     items.push({
       type: "cold_leads", icon: "🧊",
       headline: coldLeads.length === 1 ? `1 lead has gone cold` : `${coldLeads.length} leads have gone cold`,
-      why: `No follow-up in 7+ days — ${coldLeads.slice(0, 3).map((l) => l.name).join(", ")}`,
+      why: `No follow-up in ${settings.coldLeadDays}+ days — ${coldLeads.slice(0, 3).map((l) => l.name).join(", ")}`,
       action: { label: "View leads", nav: "leads" },
     });
   }
@@ -164,11 +206,6 @@ export async function getBriefing(coachId, userId) {
   return { items: items.slice(0, 5), generatedAt: new Date().toISOString() };
 }
 
-// ─── Grounded context for the AI assistant ──────────────────────────────
-// A compact, plain-text summary of the same signals above, formatted for
-// injection into the AI system prompt server-side — so answers like
-// "which clients need attention" are grounded in real, current data
-// rather than the model guessing.
 export async function getGroundedContext(coachId, userId) {
   const briefing = await getBriefing(coachId, userId);
   if (briefing.items.length === 0) {
