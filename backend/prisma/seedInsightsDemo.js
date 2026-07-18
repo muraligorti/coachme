@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════
-// SEED: Daily Briefing demo data for coach@fitnexus-os.com
+// SEED: Daily Briefing demo data for coach@fitos-nexus.com
 //
 // Creates 3 demo clients under this coach with deliberately different
 // histories, so every branch of insightsService's risk logic actually
@@ -23,10 +23,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const daysAgo = (n) => new Date(Date.now() - n * DAY_MS);
 
 async function findCoach() {
-  const user = await prisma.user.findUnique({ where: { email: "coach@fitnexus-os.com" } });
-  if (!user) throw new Error("coach@fitnexus-os.com not found — register this account in the app first, then re-run this script.");
+  const user = await prisma.user.findUnique({ where: { email: "coach@fitos-nexus.com" } });
+  if (!user) throw new Error("coach@fitos-nexus.com not found — register this account in the app first, then re-run this script.");
   const coach = await prisma.coachProfile.findUnique({ where: { userId: user.id } });
-  if (!coach) throw new Error("coach@fitnexus-os.com exists but has no CoachProfile — is this account actually registered as a Coach, not a Client?");
+  if (!coach) throw new Error("coach@fitos-nexus.com exists but has no CoachProfile — is this account actually registered as a Coach, not a Client?");
   return coach;
 }
 
@@ -123,7 +123,7 @@ async function main() {
   await seedColdLead(coach.id, "Demo Cold Lead — Rahul K.", 12);
   console.log("Seeded cold leads (or already existed)");
 
-  console.log("\nDone. Refresh the Dashboard for coach@fitnexus-os.com — you should now see:");
+  console.log("\nDone. Refresh the Dashboard for coach@fitos-nexus.com — you should now see:");
   console.log("  - 1 severely-flagged client (fires on the workout gap alone)");
   console.log("  - 1 moderately-flagged client (fires on workout gap + nutrition gap together)");
   console.log("  - 1 healthy client that stays unflagged (proves it's not over-flagging)");
