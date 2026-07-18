@@ -35,7 +35,24 @@ export async function getBriefing(req, res) {
 export async function getClientRisks(req, res) {
   try {
     const coach = await requireCoachProfile(req);
-    const risks = await insightsService.computeClientRisks(coach.id);
+    const { settings } = await insightsService.getSettings(req.user.id);
+    const risks = await insightsService.computeClientRisks(coach.id, settings);
     res.json({ risks });
   } catch (err) { sendError(err, res, "Failed to load client risk data"); }
+}
+
+export async function getSettings(req, res) {
+  try {
+    await requireCoachProfile(req);
+    const result = await insightsService.getSettings(req.user.id);
+    res.json(result);
+  } catch (err) { sendError(err, res, "Failed to load insight settings"); }
+}
+
+export async function updateSettings(req, res) {
+  try {
+    await requireCoachProfile(req);
+    const result = await insightsService.updateSettings(req.user.id, req.body || {});
+    res.json(result);
+  } catch (err) { sendError(err, res, "Failed to update insight settings"); }
 }
