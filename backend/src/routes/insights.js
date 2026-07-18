@@ -14,4 +14,9 @@ router.get("/briefing", authenticate, authorize("COACH", "ADMIN"), insightsContr
 // Full risk map for every active client — powers the Clients-page badges.
 router.get("/client-risks", authenticate, authorize("COACH", "ADMIN"), insightsController.getClientRisks);
 
+// Per-coach configurable thresholds — every coach operates differently,
+// so these aren't one-size-fits-all constants (see insightsService.js).
+router.get("/settings", authenticate, authorize("COACH", "ADMIN"), insightsController.getSettings);
+router.put("/settings", authenticate, authorize("COACH", "ADMIN"), insightsController.updateSettings);
+
 export default router;
