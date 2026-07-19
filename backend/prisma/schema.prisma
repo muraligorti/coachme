@@ -504,13 +504,17 @@ model NutritionLog {
   clientId    String
   client      ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
   date        String   // "2026-03-15"
+  loggedAt    DateTime? // precise date+time the client picked for this meal (date above is derived from this for existing date-indexed queries)
   meal        String   // "breakfast", "lunch", "dinner", "snack"
   name        String
   calories    Int      @default(0)
   protein     Float    @default(0)
   carbs       Float    @default(0)
   fat         Float    @default(0)
-  source      String?  // "manual", "ai_meal_plan"
+  fiber       Float    @default(0)
+  photoUrl    String?  @db.Text // compressed photo as a data URL — see nutritionPhotoService.js for the size cap
+  aiEstimated Boolean  @default(false) // true if calories/macros came from photo analysis rather than manual entry
+  source      String?  // "manual", "ai_meal_plan", "ai_photo"
   createdAt   DateTime @default(now())
 
   @@index([clientId, date])
