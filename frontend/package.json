@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@capacitor/core": "^7.0.0",
+    "@capacitor/status-bar": "^9.0.0-dev-2559-20260703T125056.0",
     "@capgo/capacitor-health": "^8.7.0",
     "@tensorflow-models/pose-detection": "^2.1.3",
     "@tensorflow/tfjs": "^4.17.0",

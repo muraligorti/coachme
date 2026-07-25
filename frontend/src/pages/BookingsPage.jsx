@@ -1,0 +1,316 @@
+// ═══════════════════════════════════════════════════════════════════════
+// BOOKINGS / SCHEDULE — month + scrollable week calendar, day bookings
+// with attendance/status controls, WhatsApp call + notification
+// integration, schedule replication, holiday management, and launching
+// a Live Session (voice-recorded workout logging).
+// ═══════════════════════════════════════════════════════════════════════
+import { useState, useEffect } from "react";
+import { C } from "../theme/theme.js";
+import { api } from "../lib/api.js";
+import { ls } from "../lib/storage.js";
+import { unwrap, cName, cPhone, log } from "../lib/utils.js";
+import { Card, Badge, Btn, Input, TextArea, Sel, Modal, Empty, ST, Spin } from "../components/ui.jsx";
+import LiveSessionPage from "./LiveSessionPage.jsx";
+
+export default function BookingsPage() {
+  const [bookings, setBookings] = useState([]); const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false); const [showRepeat, setShowRepeat] = useState(false);
+  const [clients, setClients] = useState([]); const [viewMode, setViewMode] = useState("week");
+  const [activeSession, setActiveSession] = useState(null);
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [selDate, setSelDate] = useState(new Date().toISOString().slice(0, 10));
+  const [holidays, setHolidays] = useState(ls.get("holidays", []));
+  const [form, setForm] = useState({ clientId: "", date: new Date().toISOString().slice(0, 10), time: "09:00", duration: 60, type: "training", mode: "ONLINE", notes: "" });
+  const [repeatForm, setRepeatForm] = useState({ endDate: "", mode: "until_date", daysOfWeek: [1, 2, 3, 4, 5] });
+  const [showCallSelect, setShowCallSelect] = useState(false);
+  const [callSelections, setCallSelections] = useState({});
+
+  const load = () => { Promise.all([api.get("/bookings").catch(() => ({})), api.get("/clients").catch(() => ({}))]).then(([b, c]) => {
+    setBookings(unwrap(b, "bookings", "sessions")); setClients(unwrap(c, "clients"));
+  }).finally(() => setLoading(false)); };
+  useEffect(() => { load(); }, []);
+
+  const createBooking = async (bookingData) => api.post("/bookings", bookingData);
+
+  const save = async () => {
+    if (!form.clientId) { alert("Please select a client"); return; }
+    try {
+      const me = await api.get("/auth/me").catch(() => null);
+      const coachId = me?.profile?.id;
+      if (!coachId) { alert("Could not resolve coach profile"); return; }
+      await createBooking({ clientId: form.clientId, coachId, scheduledAt: new Date(form.date + "T" + form.time).toISOString(), durationMinutes: form.duration || 60, sessionType: form.mode || "ONLINE", notes: form.notes });
+      setShowAdd(false); load();
+    } catch (e) { alert("Booking error: " + e.message); }
+  };
+
+  const markAttendance = async (bid, status) => {
+    try { await api.req(`/bookings/${bid}`, { method: "PATCH", body: JSON.stringify({ status: status.toUpperCase() }) }); } catch (e) { log("Attendance update failed:", e.message); }
+    setBookings(prev => prev.map(b => b.id === bid ? { ...b, status } : b));
+    if (status === "cancelled") load();
+  };
+
+  const replicateSchedule = async () => {
+    const dayBk = getDateBookings(selDate);
+    if (dayBk.length === 0) { alert("No sessions to replicate"); return; }
+    const end = new Date(repeatForm.endDate); const start = new Date(selDate); start.setDate(start.getDate() + 1);
+    let created = 0;
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dow = d.getDay();
+      if (repeatForm.mode === "week_days" && !repeatForm.daysOfWeek.includes(dow)) continue;
+      const iso = d.toISOString().slice(0, 10);
+      if (holidays.includes(iso)) continue;
+      for (const bk of dayBk) {
+        const origTime = new Date(bk.date || bk.startTime || bk.scheduledAt);
+        const timeStr = origTime.toTimeString().slice(0, 5);
+        try {
+          let coachId = bk.coachId || bk.coach?.id;
+          if (!coachId) { try { const me = await api.get("/auth/me"); coachId = me?.profile?.id; } catch {} }
+          await createBooking({ clientId: bk.clientId || bk.client?.id, coachId, scheduledAt: new Date(iso + "T" + timeStr).toISOString(), durationMinutes: bk.durationMinutes || bk.duration || 60, sessionType: bk.sessionType || (bk.type === "training" || bk.type === "group" ? "IN_PERSON" : "ONLINE"), notes: bk.notes || "" });
+          created++;
+        } catch {}
+      }
+    }
+    alert(`Created ${created} sessions!`); setShowRepeat(false); load();
+  };
+
+  const toggleHoliday = (date) => { const u = holidays.includes(date) ? holidays.filter(h => h !== date) : [...holidays, date]; setHolidays(u); ls.set("holidays", u); };
+  const cancelDay = async () => {
+    const dayBk = getDateBookings(selDate);
+    if (dayBk.length === 0) { alert("No sessions to cancel"); return; }
+    if (!confirm(`Cancel ${dayBk.length} session(s) on ${selDate}?`)) return;
+    for (const bk of dayBk) { markAttendance(bk.id, "cancelled"); }
+    toggleHoliday(selDate); alert(`${dayBk.length} session(s) cancelled.`);
+  };
+
+  const sendWhatsAppToClient = (phone, message) => {
+    const cleanPhone = String(phone || "").replace(/[\s\-\+\(\)]/g, "");
+    const intlPhone = cleanPhone.startsWith("91") ? cleanPhone : cleanPhone.startsWith("0") ? `91${cleanPhone.slice(1)}` : `91${cleanPhone}`;
+    window.open(`https://wa.me/${intlPhone}?text=${encodeURIComponent(message)}`, "_blank");
+  };
+  const whatsAppCall = (phone) => {
+    const cleanPhone = String(phone || "").replace(/[\s\-\+\(\)]/g, "");
+    const intlPhone = cleanPhone.startsWith("91") ? cleanPhone : cleanPhone.startsWith("0") ? `91${cleanPhone.slice(1)}` : `91${cleanPhone}`;
+    window.open(`https://wa.me/${intlPhone}`, "_blank");
+  };
+
+  const resolveClientPhone = (booking) => {
+    let phone = booking.client?.phone || cPhone(booking.client);
+    if (phone) return phone;
+    const fullClient = clients.find(c => c.id === booking.clientId || c.id === booking.client?.id || c.userId === booking.client?.userId);
+    if (fullClient) { phone = fullClient.phone || fullClient.user?.phone || cPhone(fullClient); if (phone) return phone; }
+    const edits = ls.get("client_edits", {});
+    const editId = booking.clientId || booking.client?.id;
+    if (editId && edits[editId]?.phone) return edits[editId].phone;
+    return "";
+  };
+  const resolveClientName = (booking) => {
+    const fullClient = clients.find(c => c.id === booking.clientId || c.id === booking.client?.id);
+    return cName(fullClient) || cName(booking.client) || booking.type || "Client";
+  };
+
+  const whatsAppGroupCall = () => {
+    const dayBk = getDateBookings(selDate);
+    if (dayBk.length === 0) { alert("No sessions on this day"); return; }
+    const clientList = dayBk.map(b => ({ id: b.id, name: resolveClientName(b), phone: resolveClientPhone(b), time: new Date(b.date || b.startTime || b.scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), duration: b.duration || 60, type: b.type || "training" }));
+    const withPhone = clientList.filter(c => c.phone);
+    if (withPhone.length === 0) { alert("No client phone numbers found.\n\nTo fix: Go to Clients → tap a client → ✏️ Edit → add their mobile number."); return; }
+    const selections = {}; withPhone.forEach(c => { selections[c.id] = true; });
+    setCallSelections(selections); setShowCallSelect(true);
+  };
+
+  const sendGroupCall = () => {
+    const dayBk = getDateBookings(selDate);
+    const selected = dayBk.filter(b => callSelections[b.id]);
+    if (selected.length === 0) { alert("Select at least one client"); return; }
+    if (selected.length === 1) { const phone = resolveClientPhone(selected[0]); if (phone) whatsAppCall(phone); setShowCallSelect(false); return; }
+    const timeSlots = selected.map(b => { const t = new Date(b.date || b.startTime || b.scheduledAt); return `${t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} — ${resolveClientName(b)} (${b.duration || 60}min)`; }).join("\n");
+    const msg = `🏋️ *CoachMe Session — ${new Date(selDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}*\n\n📅 Schedule:\n${timeSlots}\n\n📞 Joining the call at your session time.\nPlease be ready!\n\nSee you! 💪`;
+    selected.forEach((b, i) => { const phone = resolveClientPhone(b); if (phone) setTimeout(() => sendWhatsAppToClient(phone, msg), i * 1000); });
+    setShowCallSelect(false); alert(`Opening WhatsApp for ${selected.length} client(s)…`);
+  };
+
+  const cancelDayAndNotify = async () => {
+    const dayBk = getDateBookings(selDate);
+    if (dayBk.length === 0) { alert("No sessions to cancel"); return; }
+    if (!confirm(`Cancel ${dayBk.length} session(s) on ${selDate} and notify clients via WhatsApp?`)) return;
+    for (const bk of dayBk) { markAttendance(bk.id, "cancelled"); }
+    toggleHoliday(selDate);
+    const msg = `❌ *Session Cancelled*\n\nHi! Your session on ${new Date(selDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })} has been cancelled.\n\nWe'll reschedule soon. Sorry for the inconvenience!\n\n— Your Coach via CoachMe.life`;
+    dayBk.forEach((bk, i) => { const phone = resolveClientPhone(bk); if (phone) setTimeout(() => sendWhatsAppToClient(phone, msg), i * 800); });
+    alert(`${dayBk.length} session(s) cancelled. WhatsApp notifications sent.`);
+  };
+
+  const getDateBookings = (dateStr) => bookings.filter(b => { try { const st = (b.status || "").toUpperCase(); return new Date(b.date || b.startTime || b.scheduledAt).toISOString().slice(0, 10) === dateStr && st !== "CANCELLED"; } catch { return false; } });
+
+  const getMonthDays = () => {
+    const y = currentMonth.getFullYear(), m = currentMonth.getMonth();
+    const firstDay = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const daysInPrev = new Date(y, m, 0).getDate();
+    const cells = [];
+    for (let i = firstDay - 1; i >= 0; i--) cells.push({ day: daysInPrev - i, month: m - 1, faded: true });
+    for (let i = 1; i <= daysInMonth; i++) cells.push({ day: i, month: m, faded: false });
+    const remaining = 42 - cells.length;
+    for (let i = 1; i <= remaining; i++) cells.push({ day: i, month: m + 1, faded: true });
+    return cells;
+  };
+  const monthName = currentMonth.toLocaleString("default", { month: "long", year: "numeric" });
+  const prevMonth = () => { const d = new Date(currentMonth); d.setMonth(d.getMonth() - 1); setCurrentMonth(d); };
+  const nextMonth = () => { const d = new Date(currentMonth); d.setMonth(d.getMonth() + 1); setCurrentMonth(d); };
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const db = getDateBookings(selDate);
+  const isHoliday = holidays.includes(selDate);
+
+  if (loading) return <Spin />;
+  if (activeSession) return <LiveSessionPage booking={activeSession} clients={clients} onBack={() => setActiveSession(null)} onComplete={() => { setActiveSession(null); load(); }} />;
+
+  return (
+    <div>
+      <ST right={<div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        <button onClick={() => setViewMode(viewMode === "month" ? "week" : "month")} style={{ padding: "6px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.s2, color: C.mt }}>{viewMode === "month" ? "📅 Week" : "📆 Month"}</button>
+        <Btn variant="secondary" onClick={() => setShowRepeat(true)} style={{ padding: "6px 10px", fontSize: 11 }}>🔁 Repeat</Btn>
+        <Btn variant={isHoliday ? "danger" : "secondary"} onClick={() => isHoliday ? toggleHoliday(selDate) : cancelDayAndNotify()} style={{ padding: "6px 10px", fontSize: 11 }}>{isHoliday ? "✓ Off" : "🏖️"}</Btn>
+        <button onClick={whatsAppGroupCall} style={{ padding: "6px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: "#25D36620", color: "#25D366" }} title="WhatsApp call all clients">📞 Call</button>
+        <Btn onClick={() => setShowAdd(true)} style={{ padding: "6px 12px", fontSize: 12 }}>+ Book</Btn>
+      </div>}>Schedule</ST>
+
+      {viewMode === "month" && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <button onClick={prevMonth} style={{ background: "none", border: "none", color: C.tx, fontSize: 20, cursor: "pointer", padding: "4px 8px" }}>‹</button>
+            <span style={{ fontSize: 16, fontWeight: 700, color: C.tx }}>{monthName}</span>
+            <button onClick={nextMonth} style={{ background: "none", border: "none", color: C.tx, fontSize: 20, cursor: "pointer", padding: "4px 8px" }}>›</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2, marginBottom: 4 }}>{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => <div key={d} style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: C.mt, padding: "6px 0" }}>{d}</div>)}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}>
+            {getMonthDays().map((cell, i) => {
+              const y = currentMonth.getFullYear();
+              const m = cell.month < 0 ? 11 : cell.month > 11 ? 0 : cell.month;
+              const adjY = cell.month < 0 ? y - 1 : cell.month > 11 ? y + 1 : y;
+              const iso = `${adjY}-${String(m + 1).padStart(2, "0")}-${String(cell.day).padStart(2, "0")}`;
+              const dayBk = getDateBookings(iso);
+              const isSel = iso === selDate; const isToday = iso === todayStr;
+              const isH = holidays.includes(iso);
+              return (
+                <button key={i} onClick={() => setSelDate(iso)} style={{ minHeight: 52, padding: 4, borderRadius: 8, border: isSel ? `2px solid ${C.ac}` : "none", cursor: "pointer", background: isH ? C.dg + "12" : isSel ? C.ac + "15" : isToday ? C.a2 + "12" : C.sf, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, opacity: cell.faded ? .4 : 1, transition: "all .15s", position: "relative" }}>
+                  <span style={{ fontSize: 12, fontWeight: isToday || isSel ? 700 : 400, color: isH ? C.dg : isSel ? C.ac : isToday ? C.a2 : C.tx }}>{cell.day}</span>
+                  {dayBk.length > 0 && <div style={{ display: "flex", gap: 2, flexWrap: "wrap", justifyContent: "center" }}>{dayBk.length <= 3 ? dayBk.map((_, j) => <div key={j} style={{ width: 6, height: 6, borderRadius: 3, background: C.ac }} />) : <span style={{ fontSize: 9, fontWeight: 600, color: C.ac }}>{dayBk.length}</span>}</div>}
+                  {isH && <span style={{ fontSize: 7, color: C.dg, fontWeight: 600 }}>OFF</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {viewMode === "week" && (
+        <div className="jz-scrollx" style={{ display: "flex", gap: 6, marginBottom: 16, paddingBottom: 2 }}>
+          {(() => { const b = new Date(selDate); const s = new Date(b); s.setDate(b.getDate() - b.getDay() - 7); return Array.from({ length: 21 }, (_, i) => { const d = new Date(s); d.setDate(s.getDate() + i); return d; }); })().map((d, i) => {
+            const iso = d.toISOString().slice(0, 10); const isSel = iso === selDate;
+            const has = getDateBookings(iso).length > 0; const isH = holidays.includes(iso);
+            return (
+              <button key={i} onClick={() => setSelDate(iso)} style={{ flexShrink: 0, width: 52, padding: "10px 2px", borderRadius: 12, border: "none", cursor: "pointer", background: isSel ? C.gr : isH ? C.dg + "20" : C.s2, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, boxShadow: isSel ? `0 4px 14px ${C.ac}45` : "none" }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: isSel ? "#fff" : isH ? C.dg : C.mt, textTransform: "uppercase" }}>{"Sun,Mon,Tue,Wed,Thu,Fri,Sat".split(",")[d.getDay()]}</span>
+                <span style={{ fontSize: 16, fontWeight: 700, color: isSel ? "#fff" : C.tx }}>{d.getDate()}</span>
+                {has && <div style={{ width: 5, height: 5, borderRadius: "50%", background: isSel ? "#fff" : C.ac }} />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "12px 0 8px" }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{new Date(selDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}{isHoliday && <Badge color={C.dg} style={{ marginLeft: 8 }}>Holiday</Badge>}</span>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {db.filter(b => (b.status || "").toLowerCase() === "confirmed").length > 1 && <button onClick={() => setActiveSession(db.filter(b => (b.status || "").toLowerCase() === "confirmed"))} style={{ padding: "4px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.ac + "25", color: C.ac }}>🎙️ Group Session</button>}
+          <span style={{ fontSize: 12, color: C.mt }}>{db.length} session(s)</span>
+        </div>
+      </div>
+
+      {db.length === 0 ? <Empty icon={isHoliday ? "🏖️" : "📅"} text={isHoliday ? "Holiday — No sessions" : "No sessions this day"} /> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {db.sort((a, b) => new Date(a.date || a.startTime || a.scheduledAt) - new Date(b.date || b.startTime || b.scheduledAt)).map(b => {
+            const t = new Date(b.date || b.startTime || b.scheduledAt);
+            const clientName = cName(b.client) || b.type || "Session";
+            const st = (b.status || "pending").toLowerCase();
+            const statusColors = { present: C.ok, confirmed: C.ok, absent: C.dg, cancelled: C.mt, cancel_requested: C.or, late: C.wn, pending: C.wn };
+            return (
+              <Card key={b.id} style={{ padding: 14 }}>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ width: 50, padding: "6px 0", borderRadius: 8, background: C.ac + "15", textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 700, color: C.ac }}>{t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div></div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{clientName}</div>
+                    <div style={{ fontSize: 12, color: C.mt }}>{b.duration || 60}min · {b.type || "training"} · {b.sessionType === "IN_PERSON" ? "📍 Offline" : b.sessionType === "HYBRID" ? "🔀 Hybrid" : "💻 Online"}{b._local ? " · 📱 Local" : ""}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {resolveClientPhone(b) && <button onClick={(e) => { e.stopPropagation(); whatsAppCall(resolveClientPhone(b)); }} style={{ width: 32, height: 32, borderRadius: 8, border: "none", cursor: "pointer", background: "#25D36620", color: "#25D366", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }} title="WhatsApp Call">📞</button>}
+                    <Badge color={statusColors[st] || C.wn}>{st === "cancel_requested" ? "⚠️ Cancel Request" : st}</Badge>
+                  </div>
+                </div>
+                {st === "cancel_requested" && <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+                  <button onClick={() => markAttendance(b.id, "cancelled")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.ok + "20", color: C.ok }}>✅ Approve Cancel</button>
+                  <button onClick={() => markAttendance(b.id, "confirmed")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.dg + "20", color: C.dg }}>❌ Deny</button>
+                </div>}
+                <div style={{ display: "flex", gap: 4 }}>
+                  {st === "confirmed" && <button onClick={() => setActiveSession(b)} style={{ flex: 1, padding: "6px 2px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 10, fontWeight: 600, background: C.ac + "30", color: C.ac }}>🎙️ Live Session</button>}
+                  {[{ s: "confirmed", l: "✅ Confirm", c: C.ok }, { s: "cancelled", l: "🚫 Cancel", c: C.dg }, { s: "pending", l: "⏳ Pending", c: C.wn }].map(a => <button key={a.s} onClick={() => markAttendance(b.id, a.s)} style={{ flex: 1, padding: "6px 2px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 10, fontWeight: 600, background: st === a.s ? a.c + "30" : C.s2, color: st === a.s ? a.c : C.mt }}>{a.l}</button>)}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Book Session">
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {clients.length > 0 && <Sel label="Client" value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })} options={[{ value: "", label: "— Select Client —" }, ...clients.map(c => ({ value: c.id, label: cName(c) }))]} />}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}><Input label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /><Input label="Time" type="time" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} /></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <Input label="Duration (min)" type="number" value={form.duration} onChange={e => setForm({ ...form, duration: +e.target.value })} />
+            <Sel label="Type" value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} options={[{ value: "training", label: "Training" }, { value: "assessment", label: "Assessment" }, { value: "consultation", label: "Consultation" }, { value: "group", label: "Group Class" }]} />
+          </div>
+          <Sel label="Mode" value={form.mode} onChange={e => setForm({ ...form, mode: e.target.value })} options={[{ value: "ONLINE", label: "💻 Online" }, { value: "IN_PERSON", label: "📍 Offline (In-person)" }, { value: "HYBRID", label: "🔀 Hybrid" }]} />
+          <TextArea label="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+          <Btn onClick={save} disabled={!form.clientId || !form.date || !form.time} style={{ width: "100%" }}>Confirm Booking</Btn>
+        </div>
+      </Modal>
+
+      <Modal open={showRepeat} onClose={() => setShowRepeat(false)} title="Replicate Schedule">
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ padding: 12, background: C.s2, borderRadius: 10, fontSize: 12, color: C.mt }}>Copy {db.length} session(s) from <strong style={{ color: C.tx }}>{selDate}</strong> to future dates</div>
+          <Sel label="Repeat Mode" value={repeatForm.mode} onChange={e => setRepeatForm({ ...repeatForm, mode: e.target.value })} options={[{ value: "until_date", label: "Every day until end date" }, { value: "week_days", label: "Specific days of the week" }]} />
+          {repeatForm.mode === "week_days" && <div>
+            <label style={{ fontSize: 13, color: C.mt, fontWeight: 500, marginBottom: 6, display: "block" }}>Days</label>
+            <div style={{ display: "flex", gap: 4 }}>{"S,M,T,W,T,F,S".split(",").map((d, i) => <button key={i} onClick={() => { const dw = repeatForm.daysOfWeek.includes(i) ? repeatForm.daysOfWeek.filter(x => x !== i) : [...repeatForm.daysOfWeek, i]; setRepeatForm({ ...repeatForm, daysOfWeek: dw }); }} style={{ width: 36, height: 36, borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: repeatForm.daysOfWeek.includes(i) ? C.ac : C.s2, color: repeatForm.daysOfWeek.includes(i) ? "#fff" : C.mt }}>{d}</button>)}</div>
+          </div>}
+          <Input label="End Date" type="date" value={repeatForm.endDate} onChange={e => setRepeatForm({ ...repeatForm, endDate: e.target.value })} />
+          <Btn onClick={replicateSchedule} disabled={!repeatForm.endDate || db.length === 0} style={{ width: "100%" }}>🔁 Replicate {db.length} Session(s)</Btn>
+        </div>
+      </Modal>
+
+      <Modal open={showCallSelect} onClose={() => setShowCallSelect(false)} title="📞 WhatsApp Group Call">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 13, color: C.mt, marginBottom: 4 }}>Select clients to include in the group call for <strong style={{ color: C.tx }}>{new Date(selDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}</strong>:</div>
+          {getDateBookings(selDate).map(b => {
+            const name = resolveClientName(b); const phone = resolveClientPhone(b);
+            const time = new Date(b.date || b.startTime || b.scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            const hasPhone = !!phone;
+            return (
+              <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, background: callSelections[b.id] ? C.ok + "12" : C.s2, border: `1px solid ${callSelections[b.id] ? C.ok + "30" : C.bd}`, cursor: hasPhone ? "pointer" : "default", opacity: hasPhone ? 1 : 0.5 }} onClick={() => { if (!hasPhone) return; setCallSelections(s => ({ ...s, [b.id]: !s[b.id] })); }}>
+                <div style={{ width: 24, height: 24, borderRadius: 6, border: `2px solid ${callSelections[b.id] ? C.ok : C.bd}`, background: callSelections[b.id] ? C.ok : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#fff", flexShrink: 0 }}>{callSelections[b.id] ? "✓" : ""}</div>
+                <div style={{ flex: 1 }}><div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{name}</div><div style={{ fontSize: 11, color: C.mt }}>{time} · {b.duration || 60}min · {b.type || "training"}</div></div>
+                <div style={{ textAlign: "right" }}>{hasPhone ? <div style={{ fontSize: 12, color: C.ok }}>📱 {phone}</div> : <div style={{ fontSize: 11, color: C.dg }}>No phone</div>}</div>
+              </div>
+            );
+          })}
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button onClick={() => { const all = {}; getDateBookings(selDate).forEach(b => { if (resolveClientPhone(b)) all[b.id] = true; }); setCallSelections(all); }} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: C.s2, color: C.mt }}>Select All</button>
+            <button onClick={() => setCallSelections({})} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: C.s2, color: C.mt }}>Deselect All</button>
+          </div>
+          <Btn onClick={sendGroupCall} disabled={Object.values(callSelections).filter(Boolean).length === 0} style={{ width: "100%", marginTop: 4 }}>📞 Call {Object.values(callSelections).filter(Boolean).length} Client(s) via WhatsApp</Btn>
+        </div>
+      </Modal>
+    </div>
+  );
+}
