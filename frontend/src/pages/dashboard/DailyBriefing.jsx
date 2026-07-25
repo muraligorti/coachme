@@ -19,7 +19,7 @@ export default function DailyBriefing({ onNav }) {
   const allClear = !data.items || data.items.length === 0;
   const iconFor = (t) => t === "client_risk" ? "⚠️" : t === "cold_leads" ? "🧊" : t === "capacity" ? "📈" : "💡";
   const bgFor = (t) => t === "client_risk" ? C.wn + "20" : t === "cold_leads" ? C.a2 + "20" : C.ok + "20";
-  const goTo = (item) => { if (!onNav) return; if (item.action?.nav) onNav(item.action.nav); };
+  const goTo = (item) => { if (!onNav) return; if (!item.action?.nav) return; onNav(item.action.nav, item.action.clientId ? { clientId: item.action.clientId, tab: "overview" } : undefined); };
 
   return (
     <div style={{ borderRadius: 20, padding: 2, background: C.gr, marginBottom: 16 }}>
