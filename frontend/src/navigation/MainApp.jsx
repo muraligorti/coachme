@@ -27,6 +27,11 @@ import TestSuitePage from "../pages/TestSuitePage.jsx";
 
 export default function MainApp() {
   const [tab, setTab] = useState("dashboard"); const [sub, setSub] = useState(null); const [rk, setRk] = useState(0);
+  // Deep-link target for cross-page "jump straight to X" navigation — e.g.
+  // Schedule's "View Workout" button on a booking sets {clientId, tab:"workouts"}
+  // so ClientsPage opens directly on that client's Workouts sub-tab instead
+  // of landing on the roster list.
+  const [deepLink, setDeepLink] = useState(null);
 
   const handleV = useCallback((cmd, speak) => {
     const r = { dashboard: ["home", "dashboard"], workouts: ["workout", "exercise"], bookings: ["schedule", "booking", "calendar"], clients: ["client", "message", "chat"], leads: ["lead", "pipeline"], reports: ["report", "analytics"], ai: ["ai", "assistant"], mealplan: ["meal", "diet", "nutrition plan"], habits: ["habit"], checkins: ["checkin", "check-in"], invoices: ["invoice", "payment", "billing"], settings: ["setting", "profile"], tests: ["test", "testing", "suite"], devices: ["device", "fitbit", "garmin", "watch", "health", "wearable"] };
@@ -41,17 +46,23 @@ export default function MainApp() {
   const { listening, toggle } = useVoice(handleV);
   const bottomIds = getBottomTabs();
 
-  const nav = (id) => { setRk(k => k + 1); if (bottomIds.includes(id)) { setTab(id); setSub(null); } else { setTab("more"); setSub(id); } };
+  // nav(id) — plain tab switch, same as before.
+  // nav(id, {clientId, tab}) — tab switch that also carries a deep-link
+  // target, consumed once by the destination page then cleared.
+  const nav = (id, params) => {
+    setRk(k => k + 1); setDeepLink(params || null);
+    if (bottomIds.includes(id)) { setTab(id); setSub(null); } else { setTab("more"); setSub(id); }
+  };
 
   const render = () => {
     const K = `${tab}_${sub || ""}_${rk}`;
     const btmIds = getBottomTabs();
     if ((tab === "more" && sub) || (!btmIds.includes(tab) && tab !== "more")) {
       const subKey = sub || tab;
-      const p = { clients: <ClientsPage key={K} />, leads: <LeadsPage key={K} />, reports: <ReportsPage key={K} />, ai: <AIChatPage key={K} />, settings: <SettingsPage key={K} />, mealplan: <MealPlannerPage key={K} />, nutrition: <NutritionTracker key={K} />, habits: <HabitTracker key={K} />, checkins: <CheckInsPage key={K} />, invoices: <InvoicesPage key={K} />, media: <MediaLibrary key={K} />, devices: <FitnessDevicesPage key={K} />, tests: <TestSuitePage key={K} />, insightSettings: <InsightSettingsPage key={K} /> };
+      const p = { clients: <ClientsPage key={K} deepLink={deepLink} onConsumeDeepLink={() => setDeepLink(null)} />, leads: <LeadsPage key={K} />, reports: <ReportsPage key={K} />, ai: <AIChatPage key={K} />, settings: <SettingsPage key={K} />, mealplan: <MealPlannerPage key={K} />, nutrition: <NutritionTracker key={K} />, habits: <HabitTracker key={K} />, checkins: <CheckInsPage key={K} />, invoices: <InvoicesPage key={K} />, media: <MediaLibrary key={K} />, devices: <FitnessDevicesPage key={K} />, tests: <TestSuitePage key={K} />, insightSettings: <InsightSettingsPage key={K} /> };
       return p[subKey] || <MoreMenu onNav={setSub} />;
     }
-    const p = { dashboard: <DashboardPage key={K} onNav={nav} />, workouts: <WorkoutsPage key={K} />, bookings: <BookingsPage key={K} />, clients: <ClientsPage key={K} />, leads: <LeadsPage key={K} />, ai: <AIChatPage key={K} />, reports: <ReportsPage key={K} />, more: <MoreMenu onNav={setSub} /> };
+    const p = { dashboard: <DashboardPage key={K} onNav={nav} />, workouts: <WorkoutsPage key={K} />, bookings: <BookingsPage key={K} onNav={nav} />, clients: <ClientsPage key={K} deepLink={deepLink} onConsumeDeepLink={() => setDeepLink(null)} />, leads: <LeadsPage key={K} />, ai: <AIChatPage key={K} />, reports: <ReportsPage key={K} />, more: <MoreMenu onNav={setSub} /> };
     return p[tab] || <DashboardPage key={K} onNav={nav} />;
   };
 
