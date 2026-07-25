@@ -56,10 +56,11 @@ function ClientWorkoutsTab({ clientId }) {
   );
 }
 
-export default function ClientsPage() {
+export default function ClientsPage({ deepLink, onConsumeDeepLink }) {
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [risks, setRisks] = useState({});
+  const [clientsWithPlans, setClientsWithPlans] = useState(new Set());
   const [expandedRisk, setExpandedRisk] = useState(null);
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState(null);
@@ -78,7 +79,24 @@ export default function ClientsPage() {
     setClients(merged);
   }).catch(() => {}).finally(() => setLoading(false));
 
-  useEffect(() => { load(); api.get("/insights/client-risks").then(d => setRisks(d?.risks || {})).catch(() => {}); }, []);
+  useEffect(() => {
+    load();
+    api.get("/insights/client-risks").then(d => setRisks(d?.risks || {})).catch(() => {});
+    // One call for the whole roster, rather than N+1 — powers the "💪" quick-jump
+    // badge on each client card so the coach can see who's mapped to a plan
+    // and jump straight to it, without opening every client individually.
+    api.get("/workouts/plans").then(d => setClientsWithPlans(new Set(unwrap(d, "plans").map(p => p.clientId)))).catch(() => {});
+  }, []);
+
+  // Deep-link support: e.g. Schedule's "View Workout" button on a booking
+  // navigates here with {clientId, tab:"workouts"} so the coach lands
+  // directly on that client's workout plan instead of the roster list.
+  useEffect(() => {
+    if (!deepLink?.clientId || clients.length === 0) return;
+    const target = clients.find(c => c.id === deepLink.clientId);
+    if (target) { setSel(target); setTab(deepLink.tab || "overview"); }
+    onConsumeDeepLink?.();
+  }, [deepLink, clients]);
 
   const filtered = clients.filter(c => (cName(c) || "").toLowerCase().includes(search.toLowerCase()) || (cEmail(c) || "").toLowerCase().includes(search.toLowerCase()) || (c.phone || "").includes(search));
 
@@ -197,7 +215,7 @@ export default function ClientsPage() {
             const isOnline = c.lastLogin && (Date.now() - new Date(c.lastLogin).getTime()) < 15 * 60 * 1000;
             const lastSeen = c.lastLogin ? new Date(c.lastLogin) : c.lastActive ? new Date(c.lastActive) : null;
             const lastSeenText = lastSeen ? ((Date.now() - lastSeen.getTime()) < 60 * 60 * 1000 ? `${Math.round((Date.now() - lastSeen.getTime()) / 60000)}m ago` : lastSeen.toLocaleDateString()) : "Never";
-            const risk = risks[c.id]; const isExpanded = expandedRisk === c.id;
+            const risk = risks[c.id]; const isExpanded = expandedRisk === c.id; const hasPlan = clientsWithPlans.has(c.id);
             return (
               <Card key={c.id} onClick={() => setSel(c)} style={{ padding: 14, cursor: "pointer", ...(risk?.flagged ? { borderColor: C.wn + "60" } : {}) }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -212,6 +230,7 @@ export default function ClientsPage() {
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                     <Badge color={c.status === "active" ? C.ok : C.mt} style={{ fontSize: 10 }}>{c.status || "active"}</Badge>
+                    {hasPlan && <button onClick={e => { e.stopPropagation(); setSel(c); setTab("workouts"); }} style={{ display: "flex", alignItems: "center", gap: 3, background: C.ac + "18", color: C.ac, fontSize: 10, fontWeight: 700, padding: "4px 9px", borderRadius: 20, border: "none", cursor: "pointer" }} title="Jump to their workout plan">💪 Workout</button>}
                     {risk?.flagged && <button onClick={e => { e.stopPropagation(); setExpandedRisk(isExpanded ? null : c.id); }} style={{ display: "flex", alignItems: "center", gap: 3, background: C.wn + "20", color: C.wn, fontSize: 10, fontWeight: 700, padding: "4px 9px", borderRadius: 20, border: "none", cursor: "pointer" }}>⚠️ Needs attention <span style={{ opacity: .7 }}>{isExpanded ? "▴" : "▾"}</span></button>}
                   </div>
                 </div>

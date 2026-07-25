@@ -12,7 +12,7 @@ import { unwrap, cName, cPhone, log } from "../lib/utils.js";
 import { Card, Badge, Btn, Input, TextArea, Sel, Modal, Empty, ST, Spin } from "../components/ui.jsx";
 import LiveSessionPage from "./LiveSessionPage.jsx";
 
-export default function BookingsPage() {
+export default function BookingsPage({ onNav }) {
   const [bookings, setBookings] = useState([]); const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false); const [showRepeat, setShowRepeat] = useState(false);
   const [clients, setClients] = useState([]); const [viewMode, setViewMode] = useState("week");
@@ -244,6 +244,7 @@ export default function BookingsPage() {
                     <div style={{ fontSize: 12, color: C.mt }}>{b.duration || 60}min · {b.type || "training"} · {b.sessionType === "IN_PERSON" ? "📍 Offline" : b.sessionType === "HYBRID" ? "🔀 Hybrid" : "💻 Online"}{b._local ? " · 📱 Local" : ""}</div>
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {onNav && (b.clientId || b.client?.id) && <button onClick={(e) => { e.stopPropagation(); onNav("clients", { clientId: b.clientId || b.client?.id, tab: "workouts" }); }} style={{ width: 32, height: 32, borderRadius: 8, border: "none", cursor: "pointer", background: C.ac + "18", color: C.ac, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }} title="View their workout plan">💪</button>}
                     {resolveClientPhone(b) && <button onClick={(e) => { e.stopPropagation(); whatsAppCall(resolveClientPhone(b)); }} style={{ width: 32, height: 32, borderRadius: 8, border: "none", cursor: "pointer", background: "#25D36620", color: "#25D366", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }} title="WhatsApp Call">📞</button>}
                     <Badge color={statusColors[st] || C.wn}>{st === "cancel_requested" ? "⚠️ Cancel Request" : st}</Badge>
                   </div>
