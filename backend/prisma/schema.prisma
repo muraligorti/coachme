@@ -333,6 +333,7 @@ model Booking {
   cancelReason    String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  initiatedBy     String        @default("coach")
 
   @@index([coachId, scheduledAt])
   @@index([clientId, scheduledAt])
