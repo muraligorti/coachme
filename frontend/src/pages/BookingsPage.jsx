@@ -236,7 +236,8 @@ export default function BookingsPage({ onNav }) {
             const st = (b.status || "pending").toLowerCase();
             const statusColors = { present: C.ok, confirmed: C.ok, absent: C.dg, cancelled: C.mt, cancel_requested: C.or, late: C.wn, pending: C.wn };
             return (
-              <Card key={b.id} style={{ padding: 14 }}>
+              <Card key={b.id} style={{ padding: 14, ...(st === "pending" && b.initiatedBy === "client" ? { borderColor: C.ac + "60" } : {}) }}>
+                {st === "pending" && b.initiatedBy === "client" && <div style={{ fontSize: 10, fontWeight: 700, color: C.ac, background: C.ac + "18", padding: "3px 8px", borderRadius: 6, display: "inline-block", marginBottom: 8 }}>🙋 Client Requested — needs your decision</div>}
                 <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
                   <div style={{ width: 50, padding: "6px 0", borderRadius: 8, background: C.ac + "15", textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 700, color: C.ac }}>{t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div></div>
                   <div style={{ flex: 1 }}>
