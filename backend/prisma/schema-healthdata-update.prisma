@@ -1,0 +1,49 @@
+// ═══════════════════════════════════════════════════════════════════════
+// UPDATED HealthDataSync MODEL — replace the existing model block in
+// backend/prisma/schema.prisma with this one.
+//
+// TWO CHANGES from before:
+//
+// 1. New fields: restingHeartRate, heartRateVariability, bodyFat,
+//    workoutMinutes, workoutCount — matching the expanded native bridge.
+//
+// 2. THE IMPORTANT ONE: @@unique changed from [clientId, date, source]
+//    to [clientId, date]. Previously, a client with BOTH Fitbit and
+//    Huawei Health connected got TWO separate rows for the same day —
+//    one per source — and anything that summed across sources (or even
+//    just picked "the most recent row") could double-count the same
+//    real-world steps. Now there is structurally exactly ONE row per
+//    client per day, full stop. `source` still exists as a field, but
+//    it's now just a label for "which source most recently/authoritatively
+//    supplied this day's number" — decided by priority logic in
+//    services/healthDataSyncService.js, not something to sum across.
+// ═══════════════════════════════════════════════════════════════════════
+
+model HealthDataSync {
+  id                   String        @id @default(cuid())
+  clientId             String
+  client               ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  source               String        // "healthConnect", "appleHealth", "fitbit", "strava", "huawei", "manual", etc. — whichever source most recently won priority for this day, see healthDataSyncService.js
+  date                 String        // "2026-03-15"
+  steps                Int?
+  heartRateAvg         Int?
+  heartRateMax         Int?
+  sleepHours           Float?
+  sleepQuality         Int?
+  caloriesBurned       Int?
+  activeMinutes        Int?
+  distance             Float?
+  weight               Float?
+  spo2                 Int?
+  stressLevel          Int?
+  restingHeartRate     Int?          // new
+  heartRateVariability Int?          // new — HRV in milliseconds
+  bodyFat              Float?        // new — body fat percentage
+  workoutMinutes       Int?          // new — total logged workout duration for the day
+  workoutCount         Int?          // new — number of separate workout sessions logged
+  syncedAt             DateTime      @default(now())
+
+  @@unique([clientId, date])
+  @@index([clientId])
+  @@index([date])
+}
