@@ -1,0 +1,11 @@
+// ═══════════════════════════════════════════════════════════════════════
+// ADD this one field to your existing Booking model in schema.prisma:
+//
+//   initiatedBy   String   @default("coach")   // "coach" | "client"
+//
+// This is what lets the coach's calendar visually distinguish "a client
+// requested this slot and it's awaiting your decision" from a booking
+// the coach created directly (which is typically already confirmed).
+// No new model needed — Booking already has everything else required
+// (status already includes PENDING, coachId, clientId, scheduledAt).
+// ═══════════════════════════════════════════════════════════════════════
