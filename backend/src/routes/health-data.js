@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma, logger } from "../server.js";
 import { authenticate, authorize, sanitizeBody, audit } from "../middleware/auth.js";
+import { upsertDailyEntries } from "../services/healthDataSyncService.js";
 const router = Router();
 
 // POST /api/health-data/sync — Client syncs device data
@@ -9,15 +10,7 @@ router.post("/sync", authenticate, authorize("CLIENT"), sanitizeBody, audit("syn
     const clientProfile = await prisma.clientProfile.findUnique({ where: { userId: req.user.id } });
     if (!clientProfile) return res.status(404).json({ error: "Client profile not found" });
     const entries = req.body.entries || [req.body];
-    const results = [];
-    for (const entry of entries) {
-      const record = await prisma.healthDataSync.upsert({
-        where: { clientId_date_source: { clientId: clientProfile.id, date: entry.date, source: entry.source || "manual" } },
-        update: { steps: entry.steps, heartRateAvg: entry.heartRateAvg, heartRateMax: entry.heartRateMax, sleepHours: entry.sleepHours, sleepQuality: entry.sleepQuality, caloriesBurned: entry.caloriesBurned, activeMinutes: entry.activeMinutes, distance: entry.distance, weight: entry.weight, spo2: entry.spo2, stressLevel: entry.stressLevel, syncedAt: new Date() },
-        create: { clientId: clientProfile.id, source: entry.source || "manual", date: entry.date, steps: entry.steps, heartRateAvg: entry.heartRateAvg, heartRateMax: entry.heartRateMax, sleepHours: entry.sleepHours, sleepQuality: entry.sleepQuality, caloriesBurned: entry.caloriesBurned, activeMinutes: entry.activeMinutes, distance: entry.distance, weight: entry.weight, spo2: entry.spo2, stressLevel: entry.stressLevel },
-      });
-      results.push(record);
-    }
+    const results = await upsertDailyEntries(clientProfile.id, entries.map(e => ({ ...e, source: e.source || "manual" })));
     res.json({ synced: results.length, data: results });
   } catch (err) { logger.error("Health sync error", { error: err.message }); res.status(500).json({ error: "Sync failed" }); }
 });
