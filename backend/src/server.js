@@ -11,6 +11,7 @@ import rateLimit from "express-rate-limit";
 import { PrismaClient } from "@prisma/client";
 import Redis from "ioredis";
 import winston from "winston";
+import bookingRequestRoutes from "./routes/bookingRequests.js";
 
 // ─── Routes ──────────────────────────────────────────────────────────
 import authRoutes from "./routes/auth.js";
@@ -163,6 +164,7 @@ app.use("/api/health-data", healthDataRoutes);
 app.use("/api/nutrition", nutritionRoutes);
 app.use("/api/checkins", checkInRoutes);
 app.use("/api/habits", habitRoutes);
+app.use("/api/booking-requests", bookingRequestRoutes);
 
 // Health check
 app.get("/api/health", async (req, res) => {
