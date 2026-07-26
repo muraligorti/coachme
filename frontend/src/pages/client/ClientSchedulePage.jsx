@@ -7,12 +7,15 @@ import { C } from "../../theme/theme.js";
 import { api } from "../../lib/api.js";
 import { unwrap, cName, log } from "../../lib/utils.js";
 import { Card, Badge, Btn, TextArea, Modal, Empty, ST, Spin } from "../../components/ui.jsx";
+import RequestSessionModal from "./RequestSessionModal.jsx";
 
 export default function ClientSchedulePage() {
   const [bookings, setBookings] = useState([]); const [loading, setLoading] = useState(true);
   const [cancelId, setCancelId] = useState(null); const [cancelReason, setCancelReason] = useState("");
+  const [showRequest, setShowRequest] = useState(false);
 
-  useEffect(() => { api.get("/bookings").then(d => { const bk = unwrap(d, "bookings", "sessions"); log("Client bookings loaded:", bk.length); setBookings(bk); }).catch(e => { log("Client bookings error:", e.message); }).finally(() => setLoading(false)); }, []);
+  const load = () => api.get("/bookings").then(d => { const bk = unwrap(d, "bookings", "sessions"); log("Client bookings loaded:", bk.length); setBookings(bk); }).catch(e => { log("Client bookings error:", e.message); }).finally(() => setLoading(false));
+  useEffect(() => { load(); }, []);
 
   const requestCancel = async () => {
     if (!cancelId) return;
@@ -31,7 +34,7 @@ export default function ClientSchedulePage() {
 
   return (
     <div>
-      <ST>My Schedule</ST>
+      <ST right={<Btn onClick={() => setShowRequest(true)} style={{ padding: "8px 16px", fontSize: 13 }}>+ Request Session</Btn>}>My Schedule</ST>
       {upcoming.length === 0 ? <Empty icon="📅" text="No upcoming sessions" /> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: C.mt, marginBottom: 4 }}>Upcoming</div>
@@ -45,7 +48,7 @@ export default function ClientSchedulePage() {
                     <div style={{ fontSize: 16, fontWeight: 700, color: C.ac }}>{t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
                     <div style={{ fontSize: 12, color: C.mt }}>{b.durationMinutes || 60}min · {cName(b.coach) || b.sessionType || "Session"}</div>
                   </div>
-                  <Badge color={statusColors[st] || C.wn}>{st === "cancel_requested" ? "Cancel Pending" : st}</Badge>
+                  <Badge color={statusColors[st] || C.wn}>{st === "cancel_requested" ? "Cancel Pending" : st === "pending" && b.initiatedBy === "client" ? "Awaiting Coach" : st}</Badge>
                 </div>
                 {st === "confirmed" && <button onClick={() => setCancelId(b.id)} style={{ width: "100%", padding: "8px", borderRadius: 8, border: `1px solid ${C.dg}30`, background: C.dg + "10", color: C.dg, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Request Cancellation</button>}
                 {st === "cancel_requested" && <div style={{ fontSize: 12, color: C.or, textAlign: "center", padding: 4 }}>Waiting for coach approval</div>}
@@ -77,6 +80,7 @@ export default function ClientSchedulePage() {
           <Btn variant="danger" onClick={requestCancel} style={{ width: "100%", background: C.dg, color: "#fff" }}>Submit Cancellation Request</Btn>
         </div>
       </Modal>
+      <RequestSessionModal open={showRequest} onClose={() => setShowRequest(false)} onRequested={load} />
     </div>
   );
 }
