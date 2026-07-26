@@ -26,6 +26,9 @@ import healthDataRoutes from "./routes/health-data.js";
 import nutritionRoutes from "./routes/nutrition.js";
 import insightsRoutes from "./routes/insights.js"; 
 
+import checkInRoutes from "./routes/checkins.js";
+import habitRoutes from "./routes/habits.js";
+
 // ─── Initialize Services ────────────────────────────────────────────
 
 export const prisma = new PrismaClient({
@@ -158,6 +161,8 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/health-data", healthDataRoutes);
 app.use("/api/nutrition", nutritionRoutes);
+app.use("/api/checkins", checkInRoutes);
+app.use("/api/habits", habitRoutes);
 
 // Health check
 app.get("/api/health", async (req, res) => {
