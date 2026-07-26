@@ -10,8 +10,10 @@ import ClientMediaPage from "../pages/client/ClientMediaPage.jsx";
 import ClientSettingsPage from "../pages/client/ClientSettingsPage.jsx";
 import FitnessDevicesPage from "../pages/FitnessDevicesPage.jsx";
 import NutritionTracker from "../pages/NutritionTracker.jsx";
+import { useDailyHealthSync } from "./useDailyHealthSync.js";
 
 export default function ClientMainApp() {
+  useDailyHealthSync();
   const [tab, setTab] = useState("schedule"); const [rk, setRk] = useState(0);
   const clientTabs = [{ id: "schedule", icon: "📅", label: "Schedule" }, { id: "progress", icon: "💪", label: "Progress" }, { id: "devices", icon: "⌚", label: "Devices" }, { id: "nutrition", icon: "🥗", label: "Nutrition" }];
 
