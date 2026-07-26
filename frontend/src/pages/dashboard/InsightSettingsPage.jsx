@@ -25,9 +25,13 @@ export default function InsightSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
-    api.get("/insights/settings").then(r => { setSettings(r.settings); setBounds(r.bounds || {}); setDefaults(r.defaults || {}); }).catch(() => {}).finally(() => setLoading(false));
+    api.get("/insights/settings")
+      .then(r => { setSettings(r.settings); setBounds(r.bounds || {}); setDefaults(r.defaults || {}); })
+      .catch(e => setLoadError(e.message || "Could not load settings"))
+      .finally(() => setLoading(false));
   }, []);
 
   const update = (key, val) => { setSettings(s => ({ ...s, [key]: val })); setSaved(false); };
@@ -40,7 +44,7 @@ export default function InsightSettingsPage() {
   };
 
   if (loading) return <Spin />;
-  if (!settings) return <div><ST>AI Insights Settings</ST><Empty icon="🧠" text="Insights are available for coach accounts only" /></div>;
+  if (!settings) return <div><ST>AI Insights Settings</ST><Empty icon="🧠" text={loadError ? `Couldn't load settings: ${loadError}` : "Insights are available for coach accounts only"} /></div>;
 
   return (
     <div>
