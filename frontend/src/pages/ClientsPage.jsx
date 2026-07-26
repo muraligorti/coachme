@@ -15,6 +15,7 @@ import HabitTracker from "./HabitTracker.jsx";
 import NutritionTracker from "./NutritionTracker.jsx";
 import CheckInsPage from "./CheckInsPage.jsx";
 import MediaLibrary from "./MediaLibrary.jsx";
+import ClientHealthTab from "./ClientHealthTab.jsx";
 
 // Lightweight, read-only view of a single client's assigned workout
 // plan(s) — lives here (not the full WorkoutsPage) because a coach
@@ -177,13 +178,14 @@ export default function ClientsPage({ deepLink, onConsumeDeepLink }) {
           ))}
         </Card>
 
-        <Tabs tabs={[{ id: "overview", label: "Overview" }, { id: "workouts", label: "Workouts" }, { id: "progress", label: "Progress" }, { id: "habits", label: "Habits" }, { id: "nutrition", label: "Nutrition" }, { id: "checkins", label: "Check-ins" }, { id: "media", label: "Media" }]} active={tab} onChange={setTab} />
+        <Tabs tabs={[{ id: "overview", label: "Overview" }, { id: "workouts", label: "Workouts" }, { id: "progress", label: "Progress" }, { id: "health", label: "Health" }, { id: "habits", label: "Habits" }, { id: "nutrition", label: "Nutrition" }, { id: "checkins", label: "Check-ins" }, { id: "media", label: "Media" }]} active={tab} onChange={setTab} />
         {tab === "overview" && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}><SC label="Sessions" value={sel.totalSessions ?? 0} icon="📅" color={C.ac} /><SC label="Streak" value={`${sel.streak ?? 0}d`} icon="🔥" color={C.or} /><SC label="Compliance" value={`${sel.compliance ?? 0}%`} icon="✅" color={C.ok} /><SC label="Goal Progress" value={`${sel.goalProgress ?? 0}%`} icon="🎯" color={C.a2} /></div>}
         {tab === "workouts" && <ClientWorkoutsTab clientId={sel.id} />}
         {tab === "progress" && <ProgressTracker cid={sel.id} />}
+        {tab === "health" && <ClientHealthTab clientId={sel.id} />}
         {tab === "habits" && <HabitTracker cid={sel.id} />}
         {tab === "nutrition" && <NutritionTracker cid={sel.id} />}
-        {tab === "checkins" && <CheckInsPage />}
+        {tab === "checkins" && <CheckInsPage clientId={sel.id} />}
         {tab === "media" && <MediaLibrary clientId={sel.id} clientName={nm} />}
 
         <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Edit Client" wide>
