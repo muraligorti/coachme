@@ -306,6 +306,7 @@ model WorkoutSession {
   durationSeconds Int
   caloriesBurned  Int       @default(0)
   formScore       Float?
+  formNotes       String?   @db.Text // AI-extracted form/technique cues from the live-session transcript
   reps            Int       @default(0)
   sets            Int       @default(0)
   intensity       String?
@@ -343,6 +344,8 @@ model Booking {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   initiatedBy     String        @default("coach")
+  requestedRescheduleAt DateTime?
+  rescheduleReason      String?
   
   @@index([coachId, scheduledAt])
   @@index([clientId, scheduledAt])
@@ -468,25 +471,30 @@ model AuditLog {
 // --- HEALTH DATA SYNC (Device data from clients) ---
 
 model HealthDataSync {
-  id              String   @id @default(cuid())
-  clientId        String
-  client          ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  source          String   // "fitbit", "garmin", "manual", etc.
-  date            String   // "2026-03-15"
-  steps           Int?
-  heartRateAvg    Int?
-  heartRateMax    Int?
-  sleepHours      Float?
-  sleepQuality    Int?
-  caloriesBurned  Int?
-  activeMinutes   Int?
-  distance        Float?
-  weight          Float?
-  spo2            Int?
-  stressLevel     Int?
-  syncedAt        DateTime @default(now())
+  id                   String   @id @default(cuid())
+  clientId             String
+  client               ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  source               String   // "healthConnect", "appleHealth", "fitbit", "strava", "huawei", "manual", etc. — whichever source most recently won priority for this day, see healthDataSyncService.js
+  date                 String   // "2026-03-15"
+  steps                Int?
+  heartRateAvg         Int?
+  heartRateMax         Int?
+  sleepHours           Float?
+  sleepQuality         Int?
+  caloriesBurned       Int?
+  activeMinutes        Int?
+  distance             Float?
+  weight               Float?
+  spo2                 Int?
+  stressLevel          Int?
+  restingHeartRate     Int?
+  heartRateVariability Int?
+  bodyFat              Float?
+  workoutMinutes       Int?
+  workoutCount         Int?
+  syncedAt             DateTime @default(now())
 
-  @@unique([clientId, date, source])
+  @@unique([clientId, date])
   @@index([clientId])
   @@index([date])
 }
