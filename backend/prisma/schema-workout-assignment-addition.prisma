@@ -1,0 +1,26 @@
+// ═══════════════════════════════════════════════════════════════════════
+// ADD this new model to schema.prisma, PLUS two back-relation lines:
+//
+//   Inside WorkoutPlan model:      assignments   WorkoutPlanAssignment[]
+//   Inside ClientProfile model:    workoutAssignments  WorkoutPlanAssignment[]
+//
+// DESIGN: a proper many-to-many junction table — one plan can be
+// assigned to multiple clients, one client can have multiple plans
+// assigned. This deliberately does NOT touch WorkoutPlan's existing
+// single `clientId` field (if it has one) — assignment is now handled
+// entirely through this separate table, checked via checkboxes in the
+// UI rather than a single dropdown.
+// ═══════════════════════════════════════════════════════════════════════
+
+model WorkoutPlanAssignment {
+  id            String       @id @default(cuid())
+  workoutPlanId String
+  workoutPlan   WorkoutPlan  @relation(fields: [workoutPlanId], references: [id], onDelete: Cascade)
+  clientId      String
+  client        ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  assignedAt    DateTime     @default(now())
+
+  @@unique([workoutPlanId, clientId])
+  @@index([workoutPlanId])
+  @@index([clientId])
+}
