@@ -60,6 +60,13 @@ export const findUserById = (id, client = prisma) => client.user.findUnique({
 
 export const updateUser = (id, data, client = prisma) => client.user.update({ where: { id }, data });
 
+export const updateSubscriptionTier = (userId, tier, maxClients, client = prisma) =>
+  client.subscription.upsert({
+    where: { userId },
+    create: { userId, tier, maxClients },
+    update: { tier, maxClients },
+  });
+
 export const deleteAllSessionsForUser = (userId, client = prisma) => client.session.deleteMany({ where: { userId } });
 
 // A coach's active client count — used to warn an admin before deactivating
