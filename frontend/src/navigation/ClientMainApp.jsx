@@ -5,8 +5,9 @@
 // most-used day-to-day ones and sit first; Devices/Photos/Settings are
 // more occasional and sit at the scrollable tail.
 // ═══════════════════════════════════════════════════════════════════════
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { C } from "../theme/theme.js";
+import { api } from "../lib/api.js";
 import ClientSchedulePage from "../pages/client/ClientSchedulePage.jsx";
 import ClientProgressPage from "../pages/client/ClientProgressPage.jsx";
 import ClientMediaPage from "../pages/client/ClientMediaPage.jsx";
@@ -17,20 +18,24 @@ import CheckInsPage from "../pages/CheckInsPage.jsx";
 import HabitTracker from "../pages/HabitTracker.jsx";
 import { useDailyHealthSync } from "./useDailyHealthSync.js";
 
-const TABS = [
-  { id: "schedule", icon: "📅", label: "Schedule" },
-  { id: "progress", icon: "💪", label: "Progress" },
+const ALL_CLIENT_TABS = [
+  { id: "schedule", icon: "📅", label: "Schedule" }, // core — always visible, never admin-restrictable
+  { id: "progress", icon: "💪", label: "Progress" }, // core — always visible
   { id: "nutrition", icon: "🥗", label: "Nutrition" },
   { id: "checkins", icon: "📋", label: "Check-ins" },
   { id: "habits", icon: "✅", label: "Habits" },
   { id: "devices", icon: "⌚", label: "Devices" },
   { id: "photos", icon: "📸", label: "Photos" },
-  { id: "settings", icon: "⚙️", label: "Settings" },
+  { id: "settings", icon: "⚙️", label: "Settings" }, // core — always visible
 ];
+const CORE_TABS = new Set(["schedule", "progress", "settings"]);
 
 export default function ClientMainApp() {
   useDailyHealthSync();
   const [tab, setTab] = useState("schedule"); const [rk, setRk] = useState(0);
+  const [flags, setFlags] = useState(null); // null while loading = show everything, avoids a flash of missing tabs
+  useEffect(() => { api.get("/rbac/mine").then(r => setFlags(r.flags || {})).catch(() => setFlags({})); }, []);
+  const TABS = ALL_CLIENT_TABS.filter(t => CORE_TABS.has(t.id) || flags === null || flags[t.id] !== false);
 
   const render = () => {
     const K = `${tab}_${rk}`;

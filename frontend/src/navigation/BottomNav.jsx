@@ -3,9 +3,11 @@
 // Slot configuration is user-editable (see pages/SettingsPage.jsx) and
 // persisted to localStorage.
 // ═══════════════════════════════════════════════════════════════════════
+import { useState, useEffect } from "react";
 import { C } from "../theme/theme.js";
 import { ls } from "../lib/storage.js";
 import { Card, ST } from "../components/ui.jsx";
+import { api } from "../lib/api.js";
 
 export const ALL_TABS = [
   { id: "dashboard", icon: "🏠", label: "Home" },
@@ -29,22 +31,20 @@ export function TABS() { return getBottomTabs().map(id => ALL_TABS.find(t => t.i
 
 export function MoreMenu({ onNav }) {
   const btm = getBottomTabs();
+  const [flags, setFlags] = useState(null); // null while loading = show everything, avoids a flash of missing items
+  useEffect(() => { api.get("/rbac/mine").then(r => setFlags(r.flags || {})).catch(() => setFlags({})); }, []);
   const items = [
     { id: "clients", icon: "👥", label: "Clients", desc: "Manage clients" },
     { id: "leads", icon: "🎯", label: "Leads Pipeline", desc: "Kanban board" },
     { id: "mealplan", icon: "🍎", label: "AI Meal Planner", desc: "AI-generated plans" },
-    { id: "nutrition", icon: "🥗", label: "Nutrition Tracker", desc: "Log food & macros" },
-    { id: "habits", icon: "✅", label: "Habit Tracker", desc: "Daily habits & streaks" },
     { id: "checkins", icon: "📋", label: "Check-ins", desc: "Weekly questionnaires" },
     { id: "reports", icon: "📊", label: "Analytics", desc: "Revenue & reports" },
     { id: "invoices", icon: "🧾", label: "Invoices", desc: "Billing & payments" },
     { id: "ai", icon: "🤖", label: "AI Coach", desc: "RAG-powered assistant" },
     { id: "media", icon: "🎥", label: "Media Library", desc: "Videos & progress photos" },
-    { id: "devices", icon: "⌚", label: "Fitness Devices", desc: "Fitbit, Garmin, Apple Health" },
     { id: "insightSettings", icon: "🧠", label: "AI Insights Settings", desc: "Tune Daily Briefing thresholds" },
     { id: "settings", icon: "⚙️", label: "Settings", desc: "Profile & prefs" },
-    { id: "tests", icon: "🧪", label: "Test Suite", desc: "Run automated tests" },
-  ];
+  ].filter(i => i.id === "clients" || i.id === "settings" || flags === null || flags[i.id] !== false); // core items always shown; everything else respects admin flags once loaded
   return (
     <div>
       <ST>More</ST>
