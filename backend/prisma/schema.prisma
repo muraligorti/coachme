@@ -158,6 +158,8 @@ model CoachProfile {
   leads             Lead[]
   reports           Report[]     @relation("CoachReports")
   dataConsents    DataSharingConsent[]
+  exercises          Exercise[]
+  workoutTemplates   WorkoutTemplate[]
 
   @@index([country, city])
   @@index([specializations])
