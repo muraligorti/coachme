@@ -30,6 +30,7 @@ import habitRoutes from "./routes/habits.js";
 import bookingRequestRoutes from "./routes/bookingRequests.js";
 import rbacRoutes from "./routes/rbac.js";
 import exerciseLibraryRoutes from "./routes/exerciseLibrary.js";
+import workoutAssignmentRoutes from "./routes/workoutAssignments.js";
 
 // ─── Initialize Services ────────────────────────────────────────────
 
@@ -168,6 +169,7 @@ app.use("/api/habits", habitRoutes);
 app.use("/api/booking-requests", bookingRequestRoutes);
 app.use("/api/rbac", rbacRoutes);
 app.use("/api/exercise-library", exerciseLibraryRoutes);
+app.use("/api/workout-assignments", workoutAssignmentRoutes);
 
 // Health check
 app.get("/api/health", async (req, res) => {
