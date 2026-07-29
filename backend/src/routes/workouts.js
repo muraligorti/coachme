@@ -66,7 +66,7 @@ router.post("/sessions", authenticate, authorize("CLIENT", "COACH"), sanitizeBod
     const session = await prisma.workoutSession.create({
       data: { clientId: clientProfile.id, planId: req.body.planId || null, exerciseName: req.body.exerciseName,
         durationSeconds: req.body.durationSeconds || 0, caloriesBurned: req.body.caloriesBurned || 0,
-        formScore: req.body.formScore, reps: req.body.reps || 0, sets: req.body.sets || 0,
+        formScore: req.body.formScore, formNotes: req.body.formNotes, reps: req.body.reps || 0, sets: req.body.sets || 0,
         intensity: req.body.intensity, heartRateAvg: req.body.heartRateAvg, heartRateMax: req.body.heartRateMax,
         fatigueLevel: req.body.fatigueLevel, cameraUsed: req.body.cameraUsed || false,
         aiCoachingUsed: req.body.aiCoachingUsed || false, xpEarned: req.body.xpEarned || 0, notes: req.body.notes },

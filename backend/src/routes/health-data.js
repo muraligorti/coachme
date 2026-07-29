@@ -318,16 +318,11 @@ router.post("/fetch/:provider", authenticate, authorize("CLIENT"), async (req, r
       });
     }
 
-    // Save to DB
-    const results = [];
-    for (const entry of entries) {
-      const record = await prisma.healthDataSync.upsert({
-        where: { clientId_date_source: { clientId: clientProfile.id, date: entry.date, source: entry.source } },
-        update: { ...entry, syncedAt: new Date() },
-        create: { clientId: clientProfile.id, ...entry },
-      });
-      results.push(record);
-    }
+    // Save to DB — routed through the same priority-based service the
+    // manual /sync endpoint uses, so a Fitbit/Strava/Huawei auto-fetch
+    // can't create a second row for a day Health Connect (or another
+    // source) already has, undoing the double-counting fix.
+    const results = await upsertDailyEntries(clientProfile.id, entries.map(e => ({ ...e, source: e.source || provider })));
 
     // Update last sync time
     await prisma.deviceToken.update({ where: { id: token.id }, data: { lastSyncAt: new Date() } });
