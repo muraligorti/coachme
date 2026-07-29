@@ -1,0 +1,21 @@
+// ═══════════════════════════════════════════════════════════════════════
+// ADD these two fields to BOTH your CoachProfile model AND your
+// ClientProfile model in schema.prisma:
+//
+//   featureFlags   Json?     // admin-controlled feature visibility.
+//                            // null = everything visible (default,
+//                            // backward-compatible with every existing
+//                            // account). When set, keys map to feature
+//                            // ids (see FEATURE_KEYS in
+//                            // services/rbacService.js) with explicit
+//                            // true/false — only false entries actually
+//                            // hide something; anything unmentioned
+//                            // stays visible.
+//   category       String?   // free-text profile category, e.g. a coach
+//                            // might be "Strength & Conditioning" or
+//                            // "Nutrition Coaching"; a client might be
+//                            // "Weight Loss" or "Rehab/Recovery". Purely
+//                            // organizational — nothing else reads this
+//                            // yet, it's a foundation for future
+//                            // filtering/reporting by category.
+// ═══════════════════════════════════════════════════════════════════════
