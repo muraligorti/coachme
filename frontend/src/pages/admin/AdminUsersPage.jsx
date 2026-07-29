@@ -25,6 +25,8 @@ export default function AdminUsersPage() {
   const [sel, setSel] = useState(null); // selected user detail
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [rbac, setRbac] = useState(null);
+  const [categoryDraft, setCategoryDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -42,8 +44,19 @@ export default function AdminUsersPage() {
   useEffect(() => { const t = setTimeout(() => { setPage(1); load(); }, 350); return () => clearTimeout(t); }, [search]);
 
   const openDetail = (u) => {
-    setSel(u); setDetail(null); setDetailLoading(true); setError("");
+    setSel(u); setDetail(null); setRbac(null); setDetailLoading(true); setError("");
     api.get(`/admin/users/${u.id}`).then(setDetail).catch(e => setError(e.message)).finally(() => setDetailLoading(false));
+    api.get(`/rbac/${u.id}`).then(r => { setRbac(r); setCategoryDraft(r.category || ""); }).catch(() => {});
+  };
+
+  const toggleFeature = async (key, currentValue) => {
+    try { const r = await api.req(`/rbac/${sel.id}/flags`, { method: "PATCH", body: JSON.stringify({ [key]: !currentValue }) }); setRbac(r); }
+    catch (e) { alert("Failed to update: " + e.message); }
+  };
+
+  const saveCategory = async () => {
+    try { const r = await api.req(`/rbac/${sel.id}/category`, { method: "PATCH", body: JSON.stringify({ category: categoryDraft }) }); setRbac(r); }
+    catch (e) { alert("Failed to save category: " + e.message); }
   };
 
   const updateUser = async (changes) => {
@@ -111,6 +124,31 @@ export default function AdminUsersPage() {
                 <button disabled={isSelf || saving} onClick={() => updateUser({ isActive: !detail.isActive })} style={{ padding: "8px 16px", borderRadius: 10, border: "none", cursor: isSelf ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 700, opacity: isSelf ? .5 : 1, background: detail.isActive ? C.dg + "20" : C.ok + "20", color: detail.isActive ? C.dg : C.ok }}>{detail.isActive ? "Deactivate" : "Reactivate"}</button>
               </div>
             </Card>
+
+            {rbac && (rbac.availableKeys && Object.keys(rbac.availableKeys).length > 0) && (
+              <>
+                <Card style={{ marginBottom: 12, padding: 16 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 10 }}>Profile Category</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Input value={categoryDraft} onChange={e => setCategoryDraft(e.target.value)} placeholder={detail.role === "COACH" ? "e.g. Strength & Conditioning" : "e.g. Weight Loss"} style={{ flex: 1 }} />
+                    <Btn onClick={saveCategory} style={{ padding: "0 18px" }}>Save</Btn>
+                  </div>
+                  <div style={{ fontSize: 11, color: C.mt, marginTop: 6 }}>Organizational only — free text, not tied to any specific behavior yet.</div>
+                </Card>
+                <Card style={{ marginBottom: 12, padding: 16 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 4 }}>Feature Access</div>
+                  <div style={{ fontSize: 11, color: C.mt, marginBottom: 10 }}>Core navigation can't be restricted — only these optional features.</div>
+                  {Object.entries(rbac.availableKeys).map(([key, label]) => (
+                    <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${C.bd}` }}>
+                      <span style={{ fontSize: 13, color: C.tx }}>{label}</span>
+                      <button onClick={() => toggleFeature(key, rbac.flags[key])} style={{ width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer", background: rbac.flags[key] ? C.ok : C.bd, position: "relative", transition: "all .2s" }}>
+                        <div style={{ width: 18, height: 18, borderRadius: 9, background: "#fff", position: "absolute", top: 3, left: rbac.flags[key] ? 23 : 3, transition: "left .2s", boxShadow: "0 1px 2px rgba(0,0,0,.3)" }} />
+                      </button>
+                    </div>
+                  ))}
+                </Card>
+              </>
+            )}
 
             <Card style={{ padding: 16 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 10 }}>Session Control</div>
