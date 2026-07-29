@@ -240,7 +240,7 @@ export const loginLimiter = rateLimit({
 
 export const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 3, // 3 registrations per IP per hour
+  max: 15, // 15 registrations per IP per hour — was 3, which real onboarding from a shared office/mobile-carrier IP could trip legitimately
   handler: (req, res) => {
     res.status(429).json({ error: "Too many registration attempts. Try again later." });
   },
