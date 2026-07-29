@@ -18,6 +18,25 @@ export default function LiveSessionPage({ booking, clients, onBack, onComplete }
   const [manualNotes, setManualNotes] = useState("");
   const [timer, setTimer] = useState(0);
   const [exercises, setExercises] = useState([]);
+  const [comparisons, setComparisons] = useState({}); // exerciseName -> comparison result, 1:1 sessions only
+
+  // "vs last time" comparison — deterministic math (see backend
+  // exerciseTrendService.js for why this isn't a second AI call), fetched
+  // once per exercise as soon as the review screen has something to show.
+  // Deliberately 1:1 only — in a group session, exercises are shared
+  // across multiple clients and "whose progress" would be ambiguous to
+  // show in one shared review screen.
+  useEffect(() => {
+    if (phase !== "review" || isGroup || exercises.length === 0) return;
+    const clientId = bookings[0].clientId || bookings[0].client?.id;
+    if (!clientId) return;
+    exercises.forEach((ex) => {
+      if (!ex.name.trim() || comparisons[ex.name]) return;
+      api.post(`/exercise-trends/${clientId}/${encodeURIComponent(ex.name)}/compare`, { completedAt: new Date().toISOString(), intensity: ex.weight, reps: parseInt(ex.reps) || null })
+        .then((r) => setComparisons((prev) => ({ ...prev, [ex.name]: r })))
+        .catch(() => {}); // non-fatal — comparison is a nice-to-have, never blocks saving
+    });
+  }, [phase, exercises]);
   const [sessionNotes, setSessionNotes] = useState("");
   const [attendance, setAttendance] = useState(() => {
     const att = {}; bookings.forEach(b => { att[b.id] = true; }); return att;
@@ -128,7 +147,13 @@ ${fullText}
 """
 
 Return this exact JSON structure:
-{"exercises":[{"name":"Exercise Name","sets":3,"reps":10,"weight":"60kg","notes":""}],"sessionNotes":"Brief session summary in English"}`;
+{"exercises":[{"name":"Exercise Name","sets":3,"reps":10,"weight":"60kg","notes":"","formNotes":""}],"sessionNotes":"Brief session summary in English"}
+
+For "formNotes" specifically: listen for anything the coach says about HOW the exercise was performed, not just the numbers — form corrections, effort/struggle cues, or praise. Examples:
+- "watch your back on that last set" -> formNotes: "Coach flagged back position on the last set"
+- "bahut accha form tha" / "great form on those" -> formNotes: "Good form noted by coach"
+- "struggled with the last two reps" -> formNotes: "Struggled on the final reps"
+- Nothing said about form/quality for that exercise -> formNotes: "" (empty string, not a guess)`;
 
       const r = await api.post("/ai/chat", { system: systemPrompt, message: userMsg });
       const reply = r.text || r.reply || r.message || r.response || "";
@@ -138,7 +163,7 @@ Return this exact JSON structure:
         const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
         parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
       } catch { parsed = { exercises: [], sessionNotes: reply.slice(0, 200) }; }
-      setExercises((parsed.exercises || []).map(ex => ({ name: ex.name || "", sets: ex.sets || 3, reps: ex.reps || 10, weight: ex.weight || "", notes: ex.notes || "" })));
+      setExercises((parsed.exercises || []).map(ex => ({ name: ex.name || "", sets: ex.sets || 3, reps: ex.reps || 10, weight: ex.weight || "", notes: ex.notes || "", formNotes: ex.formNotes || "", formScore: null })));
       if (parsed.sessionNotes) setSessionNotes(parsed.sessionNotes);
     } catch (e) {
       setError("AI extraction failed: " + e.message + ". You can add exercises manually.");
@@ -147,7 +172,7 @@ Return this exact JSON structure:
     setPhase("review");
   };
 
-  const addExercise = () => setExercises([...exercises, { name: "", sets: 3, reps: 10, weight: "", notes: "" }]);
+  const addExercise = () => setExercises([...exercises, { name: "", sets: 3, reps: 10, weight: "", notes: "", formNotes: "", formScore: null }]);
   const removeExercise = (i) => setExercises(exercises.filter((_, j) => j !== i));
   const updateExercise = (i, field, value) => setExercises(exercises.map((ex, j) => j === i ? { ...ex, [field]: value } : ex));
 
@@ -163,7 +188,9 @@ Return this exact JSON structure:
       const attendingBookings = bookings.filter(b => attendance[b.id]);
       for (const b of attendingBookings) {
         for (const ex of validExercises) {
-          await api.post("/workouts/sessions", { clientId: b.clientId || b.client?.id, exerciseName: ex.name, sets: parseInt(ex.sets) || 0, reps: parseInt(ex.reps) || 0, intensity: ex.weight || null, durationSeconds: timer, notes: ex.notes || null });
+          // formScore/formNotes confirmed accepted directly by POST /workouts/sessions
+          // (verified against the real backend) — no separate follow-up call needed.
+          await api.post("/workouts/sessions", { clientId: b.clientId || b.client?.id, exerciseName: ex.name, sets: parseInt(ex.sets) || 0, reps: parseInt(ex.reps) || 0, intensity: ex.weight || null, durationSeconds: timer, notes: ex.notes || null, formScore: ex.formScore || null, formNotes: ex.formNotes || null });
         }
       }
       onComplete?.();
@@ -223,14 +250,33 @@ Return this exact JSON structure:
         </div>
         {exercises.length === 0 ? <div style={{ color: C.mt, fontSize: 13, textAlign: "center", padding: 16 }}>No exercises extracted. Tap "+ Add" to add manually.</div> : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {exercises.map((ex, i) => (
+            {exercises.map((ex, i) => {
+              const cmp = comparisons[ex.name];
+              return (
               <div key={i} style={{ padding: 12, background: C.s2, borderRadius: 10, position: "relative" }}>
                 <button onClick={() => removeExercise(i)} style={{ position: "absolute", top: 6, right: 8, background: "none", border: "none", color: C.dg, cursor: "pointer", fontSize: 16 }}>×</button>
                 <Input label="Exercise" value={ex.name} onChange={e => updateExercise(i, "name", e.target.value)} placeholder="e.g. Bench Press" style={{ marginBottom: 8 }} />
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}><Input label="Sets" type="number" value={ex.sets} onChange={e => updateExercise(i, "sets", e.target.value)} /><Input label="Reps" type="number" value={ex.reps} onChange={e => updateExercise(i, "reps", e.target.value)} /><Input label="Weight" value={ex.weight} onChange={e => updateExercise(i, "weight", e.target.value)} placeholder="60kg" /></div>
+                {cmp?.hasPrior && (cmp.weightDelta !== null || cmp.repsDelta !== null) && (
+                  <div style={{ fontSize: 11, color: cmp.weightDelta > 0 ? C.ok : cmp.weightDelta < 0 ? C.wn : C.mt, marginTop: 6, fontWeight: 600 }}>
+                    {cmp.weightDelta !== null && `vs last time: ${cmp.weightDelta > 0 ? "+" : ""}${cmp.weightDelta}kg`}
+                    {cmp.weightDelta !== null && cmp.repsDelta !== null && " · "}
+                    {cmp.repsDelta !== null && `${cmp.repsDelta > 0 ? "+" : ""}${cmp.repsDelta} reps`}
+                  </div>
+                )}
+                {ex.formNotes && <div style={{ fontSize: 11, color: C.ac, marginTop: 6, fontStyle: "italic" }}>🎙️ {ex.formNotes}</div>}
                 <Input label="Notes" value={ex.notes} onChange={e => updateExercise(i, "notes", e.target.value)} placeholder="Optional" style={{ marginTop: 6 }} />
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ fontSize: 11, color: C.mt, fontWeight: 500, marginBottom: 4, display: "block" }}>Form/quality (optional, one tap)</label>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {[{ v: 1, e: "😞" }, { v: 2, e: "😐" }, { v: 3, e: "🙂" }, { v: 4, e: "💪" }].map(q => (
+                      <button key={q.v} onClick={() => updateExercise(i, "formScore", ex.formScore === q.v ? null : q.v)} style={{ flex: 1, padding: "6px 0", borderRadius: 8, border: "none", cursor: "pointer", background: ex.formScore === q.v ? C.ac + "30" : C.sf, fontSize: 18 }}>{q.e}</button>
+                    ))}
+                  </div>
+                </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Card>

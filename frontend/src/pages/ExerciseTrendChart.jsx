@@ -87,7 +87,7 @@ export default function ExerciseTrendChart({ clientId }) {
               <Card key={h.id} style={{ padding: 10, display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: C.tx, minWidth: 70 }}>{new Date(h.date).toLocaleDateString()}</div>
                 <div style={{ flex: 1, fontSize: 12, color: C.mt }}>{h.sets}×{h.reps}{h.weightLabel ? ` @ ${h.weightLabel}` : ""}</div>
-                {h.qualityRating && <span style={{ fontSize: 16 }}>{qualityIcon[h.qualityRating]}</span>}
+                {h.formScore && <span style={{ fontSize: 16 }}>{qualityIcon[h.formScore]}</span>}
                 {h.formNotes && <span style={{ fontSize: 11, color: C.ac, fontStyle: "italic", maxWidth: "35%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={h.formNotes}>🎙️ {h.formNotes}</span>}
               </Card>
             ))}
