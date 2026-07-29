@@ -14,7 +14,7 @@ import { PhoneInput } from "../components/PhoneInput.jsx";
 export default function AuthScreen() {
   const { login, register, googleLogin } = useAuth();
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ name: "", email: "", password: "", role: "CLIENT", phone: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "CLIENT", phone: "", specializations: [] });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
@@ -99,6 +99,21 @@ export default function AuthScreen() {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {mode === "register" && <Sel label="I am a…" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} options={[{ value: "COACH", label: "Coach" }, { value: "CLIENT", label: "Client" }]} />}
+          {mode === "register" && form.role === "COACH" && (
+            <div>
+              <label style={{ fontSize: 13, color: C.mt, fontWeight: 500, marginBottom: 8, display: "block" }}>What kind of coaching do you do? (pick any)</label>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[{ v: "strength", l: "💪 Strength" }, { v: "yoga", l: "🧘 Yoga" }, { v: "pilates", l: "🤸 Pilates" }, { v: "crossfit", l: "🏋️ CrossFit" }, { v: "general", l: "✨ General" }].map(s => {
+                  const checked = form.specializations.includes(s.v);
+                  return (
+                    <button key={s.v} type="button" onClick={() => setForm(f => ({ ...f, specializations: checked ? f.specializations.filter(x => x !== s.v) : [...f.specializations, s.v] }))}
+                      style={{ padding: "8px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: checked ? C.ac : C.s2, color: checked ? "#fff" : C.mt }}>{s.l}</button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 11, color: C.mt, marginTop: 6 }}>This shapes which exercises and templates you'll see — you can change it anytime in Settings.</div>
+            </div>
+          )}
           {(mode === "login" || mode === "register") && <div style={{ display: "flex", justifyContent: "center" }}><div ref={googleBtnRef} /></div>}
           {(mode === "login" || mode === "register") && <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "2px 0" }}><div style={{ flex: 1, height: 1, background: C.bd }} /><span style={{ fontSize: 12, color: C.mt }}>or</span><div style={{ flex: 1, height: 1, background: C.bd }} /></div>}
           {mode === "register" && <><Input label="Full Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Murali Gorti" /><PhoneInput label="Mobile Number" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></>}

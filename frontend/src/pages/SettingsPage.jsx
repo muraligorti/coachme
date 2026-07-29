@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 // SETTINGS — profile edit, theme picker, bottom-nav tab customization.
 // ═══════════════════════════════════════════════════════════════════════
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { C } from "../theme/theme.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
@@ -10,12 +10,38 @@ import { ls } from "../lib/storage.js";
 import { Card, Badge, Btn, Input, ST } from "../components/ui.jsx";
 import { ALL_TABS, DEFAULT_BOTTOM, getBottomTabs } from "../navigation/BottomNav.jsx";
 
+const SPECIALIZATION_OPTIONS = [{ v: "strength", l: "💪 Strength" }, { v: "yoga", l: "🧘 Yoga" }, { v: "pilates", l: "🤸 Pilates" }, { v: "crossfit", l: "🏋️ CrossFit" }, { v: "general", l: "✨ General" }];
+const TIER_COLORS = { FREE: "#8b96a8", STARTER: "#8b96a8", PRO: "#f5a623", ELITE: "#22d3a8", PREMIUM: "#22d3a8" };
+
 export default function SettingsPage() {
   const { user, logout } = useAuth();
   const { themeName, switchTheme, themes } = useTheme();
   const [profile, setProfile] = useState({ name: user?.name || "", email: user?.email || "" });
   const [saved, setSaved] = useState(false);
   const [bottomTabs, setBottomTabs] = useState(getBottomTabs());
+  const [coachInfo, setCoachInfo] = useState(null); // { specializations, tier, maxClients }
+  const [specSaved, setSpecSaved] = useState(false);
+
+  useEffect(() => {
+    if (user?.role !== "COACH") return;
+    api.get("/coach-profile/me").then(setCoachInfo).catch(() => {});
+  }, [user?.role]);
+
+  const toggleSpecialization = (v) => {
+    setCoachInfo(prev => {
+      const current = prev?.specializations || [];
+      const next = current.includes(v) ? current.filter(x => x !== v) : [...current, v];
+      return { ...prev, specializations: next };
+    });
+    setSpecSaved(false);
+  };
+
+  const saveSpecializations = async () => {
+    try {
+      await api.put("/coach-profile/specializations", { specializations: coachInfo?.specializations || [] });
+      setSpecSaved(true); setTimeout(() => setSpecSaved(false), 2000);
+    } catch (e) { alert("Could not save: " + e.message); }
+  };
 
   const save = async () => { try { await api.put("/auth/profile", profile); setSaved(true); setTimeout(() => setSaved(false), 2000); } catch { } };
 
@@ -46,6 +72,24 @@ export default function SettingsPage() {
           <Btn onClick={save} style={{ width: "100%" }}>{saved ? "✓ Saved!" : "Update Profile"}</Btn>
         </div>
       </Card>
+
+      {user?.role === "COACH" && coachInfo && (
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>Plan &amp; Specialization</div>
+            <Badge color={TIER_COLORS[coachInfo.tier] || C.mt}>{coachInfo.tier}</Badge>
+          </div>
+          <div style={{ fontSize: 11, color: C.mt, marginBottom: 14 }}>{coachInfo.maxClients >= 999 ? "Unlimited clients" : `Up to ${coachInfo.maxClients} clients`} on your current plan. Upgrades are handled by an admin.</div>
+          <div style={{ fontSize: 12, color: C.mt, fontWeight: 500, marginBottom: 8 }}>Your specialization (shapes which exercises &amp; templates you see)</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            {SPECIALIZATION_OPTIONS.map(s => {
+              const checked = (coachInfo.specializations || []).includes(s.v);
+              return <button key={s.v} onClick={() => toggleSpecialization(s.v)} style={{ padding: "8px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: checked ? C.ac : C.s2, color: checked ? "#fff" : C.mt }}>{s.l}</button>;
+            })}
+          </div>
+          <Btn onClick={saveSpecializations} style={{ width: "100%" }}>{specSaved ? "✓ Saved!" : "Save Specialization"}</Btn>
+        </Card>
+      )}
 
       <Card style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 12 }}>Theme</div>
