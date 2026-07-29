@@ -32,6 +32,7 @@ import rbacRoutes from "./routes/rbac.js";
 import exerciseLibraryRoutes from "./routes/exerciseLibrary.js";
 import workoutAssignmentRoutes from "./routes/workoutAssignments.js";
 import coachProfileRoutes from "./routes/coachProfile.js";
+import exerciseTrendRoutes from "./routes/exerciseTrends.js";
 
 // ─── Initialize Services ────────────────────────────────────────────
 
@@ -172,6 +173,7 @@ app.use("/api/rbac", rbacRoutes);
 app.use("/api/exercise-library", exerciseLibraryRoutes);
 app.use("/api/workout-assignments", workoutAssignmentRoutes);
 app.use("/api/coach-profile", coachProfileRoutes);
+app.use("/api/exercise-trends", exerciseTrendRoutes);
 
 // Health check
 app.get("/api/health", async (req, res) => {
