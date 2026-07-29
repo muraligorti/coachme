@@ -36,6 +36,11 @@ export async function updateUser(req, res) {
   } catch (err) { sendError(err, res, "Failed to update user"); }
 }
 
+export async function setTier(req, res) {
+  try { res.json(await adminService.setUserTier(req.user.id, req.params.id, req.body?.tier)); }
+  catch (err) { sendError(err, res, "Failed to update tier"); }
+}
+
 export async function forceLogout(req, res) {
   try {
     const result = await adminService.forceLogout(req.user.id, req.params.id);
