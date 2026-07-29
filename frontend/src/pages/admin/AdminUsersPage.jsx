@@ -78,6 +78,13 @@ export default function AdminUsersPage() {
     setSaving(false);
   };
 
+  const setTier = async (tier) => {
+    setSaving(true); setError("");
+    try { await api.req(`/admin/users/${sel.id}/tier`, { method: "PATCH", body: JSON.stringify({ tier }) }); const fresh = await api.get(`/admin/users/${sel.id}`); setDetail(fresh); }
+    catch (e) { setError(e.message); }
+    setSaving(false);
+  };
+
   const forceLogout = async () => {
     if (!confirm(`Sign ${detail.email} out of all devices?`)) return;
     try { const r = await api.post(`/admin/users/${sel.id}/force-logout`); alert(r.message); } catch (e) { alert("Failed: " + e.message); }
@@ -117,6 +124,21 @@ export default function AdminUsersPage() {
               <Sel value={detail.role} disabled={isSelf || saving} onChange={e => updateUser({ role: e.target.value })} options={[{ value: "CLIENT", label: "Client" }, { value: "COACH", label: "Coach" }, { value: "ADMIN", label: "Admin" }]} />
               <div style={{ fontSize: 11, color: C.mt, marginTop: 8 }}>Changing role force-signs the user out everywhere, so they re-authenticate under their new permissions.</div>
             </Card>
+
+            {detail.role === "COACH" && (
+              <Card style={{ marginBottom: 12, padding: 16 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 12 }}>Subscription Tier</div>
+                <Sel value={detail.subscription?.tier || "FREE"} disabled={saving} onChange={e => setTier(e.target.value)} options={[{ value: "FREE", label: "Free (5 clients)" }, { value: "STARTER", label: "Starter (5 clients)" }, { value: "PRO", label: "Pro (50 clients)" }, { value: "ELITE", label: "Elite (unlimited)" }, { value: "PREMIUM", label: "Premium (unlimited)" }]} />
+                {detail.coachProfile?.specializations?.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 11, color: C.mt, marginBottom: 6 }}>Self-reported specialization:</div>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {detail.coachProfile.specializations.map(s => <Badge key={s} color={C.a2} style={{ fontSize: 10 }}>{s}</Badge>)}
+                    </div>
+                  </div>
+                )}
+              </Card>
+            )}
 
             <Card style={{ marginBottom: 12, padding: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
