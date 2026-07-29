@@ -25,7 +25,8 @@ export default function WorkoutsPage() {
   const [exS, setExS] = useState("");
   const [exF, setExF] = useState("all");
   const [editPlan, setEditPlan] = useState(null);
-  const [form, setForm] = useState({ title: "", description: "", clientId: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] });
+  const [form, setForm] = useState({ title: "", description: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] });
+  const [assignedClientIds, setAssignedClientIds] = useState(new Set());
   const [saveError, setSaveError] = useState("");
 
   const [showAddEx, setShowAddEx] = useState(false);
@@ -56,7 +57,9 @@ export default function WorkoutsPage() {
 
   const save = async () => {
     setSaveError("");
-    const payload = { name: form.title, description: form.description, exercises: form.exercises.filter(e => e.name), intensity: "moderate", durationWeeks: 4, clientId: form.clientId || undefined };
+    const payload = { name: form.title, description: form.description, exercises: form.exercises.filter(e => e.name), intensity: "moderate", durationWeeks: 4 };
+    const clientIds = [...assignedClientIds];
+    let planId = editPlan?.id;
     if (editPlan) {
       try {
         if (String(editPlan.id).startsWith("workout_")) {
@@ -73,13 +76,21 @@ export default function WorkoutsPage() {
     } else {
       try {
         const created = await api.post("/workouts/plans", payload);
+        planId = created?.id;
         setPlans(prev => [...prev, created || { ...payload, id: `pending_${Date.now()}`, status: "active", createdAt: new Date().toISOString() }]);
       } catch (e) {
-        setSaveError((form.clientId ? "Could not assign this plan to the client: " : "Could not save plan: ") + e.message);
+        setSaveError((clientIds.length ? "Could not save this plan: " : "Could not save plan: ") + e.message);
         return; // do NOT fall back to a local-only plan — a client-assigned plan that silently fails must never look like success
       }
     }
-    setEditPlan(null); setShowB(false); setForm({ title: "", description: "", clientId: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] });
+    // Assignment is a separate, verified step — deliberately not folded
+    // into the plan create/update payload itself, since that field was
+    // the source of the earlier "client not getting stored" bug.
+    if (planId && !String(planId).startsWith("pending_") && !String(planId).startsWith("workout_")) {
+      try { await api.put(`/workout-assignments/plan/${planId}`, { clientIds }); }
+      catch (e) { setSaveError(`Plan saved, but assigning to client(s) failed: ${e.message}`); return; }
+    }
+    setEditPlan(null); setShowB(false); setAssignedClientIds(new Set()); setForm({ title: "", description: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] });
   };
 
   const deletePlan = async (p) => {
@@ -92,7 +103,11 @@ export default function WorkoutsPage() {
   const startEdit = (p) => {
     setSaveError("");
     setEditPlan(p);
-    setForm({ title: p.title || p.name || "", description: p.description || "", clientId: p.clientId || "", exercises: (p.exercises && p.exercises.length > 0) ? p.exercises.map(e => ({ name: e.name || e, sets: e.sets || 3, reps: e.reps || 12, rest: e.rest || 60 })) : [{ name: "", sets: 3, reps: 12, rest: 60 }] });
+    setForm({ title: p.title || p.name || "", description: p.description || "", exercises: (p.exercises && p.exercises.length > 0) ? p.exercises.map(e => ({ name: e.name || e, sets: e.sets || 3, reps: e.reps || 12, rest: e.rest || 60 })) : [{ name: "", sets: 3, reps: 12, rest: 60 }] });
+    setAssignedClientIds(new Set());
+    if (!String(p.id).startsWith("workout_") && !String(p.id).startsWith("pending_")) {
+      api.get(`/workout-assignments/plan/${p.id}`).then(r => setAssignedClientIds(new Set(r.clientIds || []))).catch(() => {});
+    }
     setShowB(true);
   };
 
@@ -101,7 +116,8 @@ export default function WorkoutsPage() {
   // this button previously did nothing at all.
   const useTemplate = (t) => {
     setEditPlan(null); setSaveError("");
-    setForm({ title: t.name, description: t.description || "", clientId: "", exercises: (t.exercises || []).map(e => ({ name: e.name, sets: e.sets || 3, reps: e.reps || 12, rest: e.rest || 60 })) });
+    setForm({ title: t.name, description: t.description || "", exercises: (t.exercises || []).map(e => ({ name: e.name, sets: e.sets || 3, reps: e.reps || 12, rest: e.rest || 60 })) });
+    setAssignedClientIds(new Set());
     setShowB(true);
   };
 
@@ -142,7 +158,7 @@ export default function WorkoutsPage() {
 
   return (
     <div>
-      <ST right={<Btn onClick={() => { setEditPlan(null); setSaveError(""); setForm({ title: "", description: "", clientId: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] }); setShowB(true); }} style={{ padding: "8px 16px", fontSize: 13 }}>+ Create</Btn>}>Workouts</ST>
+      <ST right={<Btn onClick={() => { setEditPlan(null); setSaveError(""); setAssignedClientIds(new Set()); setForm({ title: "", description: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] }); setShowB(true); }} style={{ padding: "8px 16px", fontSize: 13 }}>+ Create</Btn>}>Workouts</ST>
       <Tabs tabs={[{ id: "plans", label: "My Plans" }, { id: "library", label: "Exercise Library" }, { id: "templates", label: "Templates" }]} active={tab} onChange={setTab} />
 
       {tab === "plans" && (plans.length === 0 ? <Empty icon="💪" text="No workout plans yet" /> : (
@@ -209,7 +225,24 @@ export default function WorkoutsPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <Input label="Title" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. PPL Week 1" />
           <Input label="Description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
-          {clients.length > 0 && <Sel label="Assign" value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })} options={[{ value: "", label: "— Select —" }, ...clients.map(c => ({ value: c.id, label: cName(c) }))]} />}
+          {clients.length > 0 && (
+            <div>
+              <label style={{ fontSize: 13, color: C.mt, fontWeight: 500, marginBottom: 8, display: "block" }}>Assign to (select any number)</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto", border: `1px solid ${C.bd}`, borderRadius: 10, padding: 8 }}>
+                {clients.map(c => {
+                  const checked = assignedClientIds.has(c.id);
+                  return (
+                    <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, cursor: "pointer", background: checked ? C.ac + "12" : "transparent" }}
+                      onClick={() => setAssignedClientIds(prev => { const next = new Set(prev); next.has(c.id) ? next.delete(c.id) : next.add(c.id); return next; })}>
+                      <div style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${checked ? C.ac : C.bd}`, background: checked ? C.ac : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "#fff", flexShrink: 0 }}>{checked ? "✓" : ""}</div>
+                      <span style={{ fontSize: 13, color: C.tx }}>{cName(c)}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              {assignedClientIds.size > 0 && <div style={{ fontSize: 11, color: C.mt, marginTop: 4 }}>{assignedClientIds.size} client{assignedClientIds.size !== 1 ? "s" : ""} selected</div>}
+            </div>
+          )}
           <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginTop: 8 }}>Exercises</div>
           {form.exercises.map((ex, i) => (
             <Card key={i} style={{ padding: 12, background: C.s2 }}>

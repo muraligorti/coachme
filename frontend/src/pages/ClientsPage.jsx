@@ -16,6 +16,7 @@ import NutritionTracker from "./NutritionTracker.jsx";
 import CheckInsPage from "./CheckInsPage.jsx";
 import MediaLibrary from "./MediaLibrary.jsx";
 import ClientHealthTab from "./ClientHealthTab.jsx";
+import ExerciseTrendChart from "./ExerciseTrendChart.jsx";
 
 // Lightweight, read-only view of a single client's assigned workout
 // plan(s) — lives here (not the full WorkoutsPage) because a coach
@@ -25,10 +26,7 @@ import ClientHealthTab from "./ClientHealthTab.jsx";
 function ClientWorkoutsTab({ clientId }) {
   const [plans, setPlans] = useState(null);
   useEffect(() => {
-    api.get("/workouts/plans").then(d => {
-      const all = unwrap(d, "plans");
-      setPlans(all.filter(p => p.clientId === clientId));
-    }).catch(() => setPlans([]));
+    api.get(`/workout-assignments/client/${clientId}`).then(d => setPlans(d.plans || [])).catch(() => setPlans([]));
   }, [clientId]);
   if (plans === null) return <Spin />;
   if (plans.length === 0) return <Empty icon="💪" text="No workout plan assigned yet — create one from the Workouts tab and assign it to this client." />;
@@ -86,7 +84,7 @@ export default function ClientsPage({ deepLink, onConsumeDeepLink }) {
     // One call for the whole roster, rather than N+1 — powers the "💪" quick-jump
     // badge on each client card so the coach can see who's mapped to a plan
     // and jump straight to it, without opening every client individually.
-    api.get("/workouts/plans").then(d => setClientsWithPlans(new Set(unwrap(d, "plans").map(p => p.clientId)))).catch(() => {});
+    api.get("/workout-assignments/mine").then(d => setClientsWithPlans(new Set(d.clientIds || []))).catch(() => {});
   }, []);
 
   // Deep-link support: e.g. Schedule's "View Workout" button on a booking
@@ -180,7 +178,13 @@ export default function ClientsPage({ deepLink, onConsumeDeepLink }) {
 
         <Tabs tabs={[{ id: "overview", label: "Overview" }, { id: "workouts", label: "Workouts" }, { id: "progress", label: "Progress" }, { id: "health", label: "Health" }, { id: "habits", label: "Habits" }, { id: "nutrition", label: "Nutrition" }, { id: "checkins", label: "Check-ins" }, { id: "media", label: "Media" }]} active={tab} onChange={setTab} />
         {tab === "overview" && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}><SC label="Sessions" value={sel.totalSessions ?? 0} icon="📅" color={C.ac} /><SC label="Streak" value={`${sel.streak ?? 0}d`} icon="🔥" color={C.or} /><SC label="Compliance" value={`${sel.compliance ?? 0}%`} icon="✅" color={C.ok} /><SC label="Goal Progress" value={`${sel.goalProgress ?? 0}%`} icon="🎯" color={C.a2} /></div>}
-        {tab === "workouts" && <ClientWorkoutsTab clientId={sel.id} />}
+        {tab === "workouts" && (
+          <div>
+            <ClientWorkoutsTab clientId={sel.id} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, margin: "20px 0 10px" }}>Performance Trends</div>
+            <ExerciseTrendChart clientId={sel.id} />
+          </div>
+        )}
         {tab === "progress" && <ProgressTracker cid={sel.id} />}
         {tab === "health" && <ClientHealthTab clientId={sel.id} />}
         {tab === "habits" && <HabitTracker cid={sel.id} />}
