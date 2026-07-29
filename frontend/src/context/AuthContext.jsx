@@ -48,6 +48,13 @@ export function AuthProvider({ children }) {
     const u = xUser(d);
     if (u) { u.role = u.role || payload.role; u.name = u.name || payload.profile.displayName; setUser(u); }
     else { setUser({ email: pl.email, name: payload.profile.displayName, role: payload.role }); }
+    // Specialization is set via a separate, safe follow-up call — deliberately
+    // not folded into the /auth/register payload itself, since that endpoint's
+    // exact accepted fields aren't something to guess at. Non-fatal if it
+    // fails: the coach can always set this later in Settings.
+    if (payload.role === "COACH" && Array.isArray(pl.specializations) && pl.specializations.length) {
+      try { await api.put("/coach-profile/specializations", { specializations: pl.specializations }); } catch { /* non-fatal, editable later in Settings */ }
+    }
   };
 
   const googleLogin = async (credential, role) => {
