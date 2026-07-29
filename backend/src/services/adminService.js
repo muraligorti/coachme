@@ -9,6 +9,10 @@ import * as adminRepository from "../repositories/adminRepository.js";
 
 const VALID_ROLES = ["ADMIN", "COACH", "CLIENT"];
 const EDITABLE_FIELDS = ["role", "isActive", "emailVerified"];
+const VALID_TIERS = ["FREE", "STARTER", "PRO", "ELITE", "PREMIUM"];
+// Matches the CoachMe Bible's TIER_FEATURES table (Volume 2, Module 15) —
+// kept here as the canonical source for admin-driven tier changes.
+const TIER_MAX_CLIENTS = { FREE: 5, STARTER: 5, PRO: 50, ELITE: 999, PREMIUM: 999 };
 
 export async function listUsers({ role, search, isActive, page, pageSize }) {
   page = Math.max(1, parseInt(page) || 1);
@@ -72,6 +76,20 @@ export async function updateUser(adminUserId, targetUserId, changes) {
     details: { changes, targetEmail: target.email },
   });
 
+  return updated;
+}
+
+export async function setUserTier(adminUserId, targetUserId, tier) {
+  if (!VALID_TIERS.includes(tier)) throw new AppError(400, `Invalid tier: ${tier}. Must be one of ${VALID_TIERS.join(", ")}`);
+  const target = await adminRepository.findUserById(targetUserId);
+  if (!target) throw new AppError(404, "User not found");
+  if (target.role !== "COACH") throw new AppError(400, "Only coach accounts have a subscription tier");
+
+  const updated = await adminRepository.updateSubscriptionTier(targetUserId, tier, TIER_MAX_CLIENTS[tier]);
+  await adminRepository.createAuditEntry({
+    userId: adminUserId, action: "admin_set_tier", resource: "subscription", resourceId: targetUserId,
+    details: { tier, targetEmail: target.email },
+  });
   return updated;
 }
 
