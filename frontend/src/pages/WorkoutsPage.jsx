@@ -44,27 +44,38 @@ export default function WorkoutsPage() {
   const rmEx = i => setForm({ ...form, exercises: form.exercises.filter((_, j) => j !== i) });
   const upEx = (i, f, v) => { const e = [...form.exercises]; e[i] = { ...e[i], [f]: v }; setForm({ ...form, exercises: e }); };
 
+  const [saveError, setSaveError] = useState("");
+
   const save = async () => {
-    const payload = { name: form.title, description: form.description, exercises: form.exercises.filter(e => e.name), intensity: "moderate", durationWeeks: 4 };
+    setSaveError("");
+    const payload = { name: form.title, description: form.description, exercises: form.exercises.filter(e => e.name), intensity: "moderate", durationWeeks: 4, clientId: form.clientId || undefined };
     if (editPlan) {
       try {
         if (String(editPlan.id).startsWith("workout_")) {
           const local = ls.get("local_workouts", []).map(p => p.id === editPlan.id ? { ...p, ...form, exercises: form.exercises.filter(e => e.name) } : p);
           ls.set("local_workouts", local); setPlans(prev => prev.map(p => p.id === editPlan.id ? { ...p, ...form, exercises: form.exercises.filter(e => e.name) } : p));
         } else {
-          await api.put(`/workouts/plans/${editPlan.id}`, payload);
-          setPlans(prev => prev.map(p => p.id === editPlan.id ? { ...p, ...form, exercises: form.exercises.filter(e => e.name) } : p));
+          const updated = await api.put(`/workouts/plans/${editPlan.id}`, payload);
+          setPlans(prev => prev.map(p => p.id === editPlan.id ? { ...p, ...(updated || form), exercises: (updated?.exercises) || form.exercises.filter(e => e.name) } : p));
         }
-      } catch {
-        const local = ls.get("local_workouts", []).map(p => p.id === editPlan.id ? { ...p, ...form, exercises: form.exercises.filter(e => e.name) } : p);
-        ls.set("local_workouts", local); setPlans(prev => prev.map(p => p.id === editPlan.id ? { ...p, ...form, exercises: form.exercises.filter(e => e.name) } : p));
+      } catch (e) {
+        // A plan the coach is actively trying to assign to a client must
+        // never silently become local-only — that would look like success
+        // while the client can never actually see it. Show the real error
+        // instead, so the coach knows to retry rather than assuming it worked.
+        setSaveError("Could not save changes: " + e.message);
+        return;
       }
     } else {
-      try { await api.post("/workouts/plans", payload); }
-      catch {
-        const plan = { ...form, id: `workout_${Date.now()}`, status: "active", createdAt: new Date().toISOString(), exercises: form.exercises.filter(e => e.name) };
-        const local = ls.get("local_workouts", []); local.push(plan); ls.set("local_workouts", local);
-        setPlans(prev => [...prev, plan]);
+      try {
+        const created = await api.post("/workouts/plans", payload);
+        // Reflect the SERVER's version (real id, clientId as actually
+        // stored) in local state — not just the form's local copy — so
+        // the coach's own list is immediately correct without a reload.
+        setPlans(prev => [...prev, created || { ...payload, id: `pending_${Date.now()}`, status: "active", createdAt: new Date().toISOString() }]);
+      } catch (e) {
+        setSaveError((form.clientId ? "Could not assign this plan to the client: " : "Could not save plan: ") + e.message);
+        return; // do NOT fall back to a local-only plan — see comment above
       }
     }
     setEditPlan(null); setShowB(false); setForm({ title: "", description: "", clientId: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] });
@@ -78,6 +89,7 @@ export default function WorkoutsPage() {
   };
 
   const startEdit = (p) => {
+    setSaveError("");
     setEditPlan(p);
     setForm({ title: p.title || p.name || "", description: p.description || "", clientId: p.clientId || "", exercises: (p.exercises && p.exercises.length > 0) ? p.exercises.map(e => ({ name: e.name || e, sets: e.sets || 3, reps: e.reps || 12, rest: e.rest || 60 })) : [{ name: "", sets: 3, reps: 12, rest: 60 }] });
     setShowB(true);
@@ -90,7 +102,7 @@ export default function WorkoutsPage() {
 
   return (
     <div>
-      <ST right={<Btn onClick={() => { setEditPlan(null); setForm({ title: "", description: "", clientId: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] }); setShowB(true); }} style={{ padding: "8px 16px", fontSize: 13 }}>+ Create</Btn>}>Workouts</ST>
+      <ST right={<Btn onClick={() => { setEditPlan(null); setSaveError(""); setForm({ title: "", description: "", clientId: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] }); setShowB(true); }} style={{ padding: "8px 16px", fontSize: 13 }}>+ Create</Btn>}>Workouts</ST>
       <Tabs tabs={[{ id: "plans", label: "My Plans" }, { id: "library", label: "Exercise Library" }, { id: "templates", label: "Templates" }]} active={tab} onChange={setTab} />
 
       {tab === "plans" && (plans.length === 0 ? <Empty icon="💪" text="No workout plans yet" /> : (
@@ -152,6 +164,7 @@ export default function WorkoutsPage() {
             </Card>
           ))}
           <Btn variant="secondary" onClick={addEx} style={{ width: "100%" }}>+ Exercise</Btn>
+          {saveError && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10 }}>{saveError}</div>}
           <Btn onClick={save} style={{ width: "100%" }}>{editPlan ? "Update Plan" : "Save Plan"}</Btn>
         </div>
       </Modal>
