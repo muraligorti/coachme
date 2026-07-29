@@ -95,7 +95,7 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false,
 }));
-app.use("/api/insights", insightsRoutes); 
+ 
 // CORS: Only allow configured origins
 app.use(cors({
   origin: [
@@ -150,7 +150,7 @@ app.use((req, res, next) => {
 });
 
 // ─── API Routes ──────────────────────────────────────────────────────
-
+app.use("/api/insights", insightsRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/coaches", coachRoutes);
 app.use("/api/clients", clientRoutes);
