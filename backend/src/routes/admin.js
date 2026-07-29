@@ -19,6 +19,7 @@ router.get("/users", authenticate, authorize("ADMIN"), adminController.listUsers
 router.get("/users/:id", authenticate, authorize("ADMIN"), adminController.getUser);
 router.patch("/users/:id", authenticate, authorize("ADMIN"), audit("admin_update_user", "user"), adminController.updateUser);
 router.post("/users/:id/force-logout", authenticate, authorize("ADMIN"), audit("admin_force_logout", "user"), adminController.forceLogout);
+router.patch("/users/:id/tier", authenticate, authorize("ADMIN"), audit("admin_set_tier", "subscription"), adminController.setTier);
 router.get("/audit", authenticate, authorize("ADMIN"), adminController.getAuditLog);
 
 export default router;
