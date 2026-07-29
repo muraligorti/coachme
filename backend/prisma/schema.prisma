@@ -147,6 +147,8 @@ model CoachProfile {
   lastOnline        DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+  featureFlags      Json?
+  category          String?
 
   // Relations
   clients           ClientCoach[]
@@ -188,7 +190,9 @@ model ClientProfile {
   injuries        String?   @db.Text
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
-
+  featureFlags      Json?
+  category          String?
+  
   // Relations
   coaches         ClientCoach[]
   medicalData     MedicalData?
@@ -334,7 +338,7 @@ model Booking {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   initiatedBy     String        @default("coach")
-
+  
   @@index([coachId, scheduledAt])
   @@index([clientId, scheduledAt])
   @@index([status])
@@ -555,4 +559,57 @@ model GoogleAuthToken {
   updatedAt     DateTime @updatedAt
 
   @@index([userId])
+}
+// ═══════════════════════════════════════════════════════════════════════
+// ADD these two models to schema.prisma (new — CheckIn and Habit/HabitLog
+// currently don't exist as backend tables at all; the feature has been
+// localStorage-only, invisible to coaches, until now).
+//
+// ALSO ADD these two relation lines inside your existing ClientProfile
+// model block (wherever its other relations like `bookings` or
+// `healthDataSync` are listed):
+//
+//   checkIns   CheckIn[]
+//   habits     Habit[]
+// ═══════════════════════════════════════════════════════════════════════
+
+model CheckIn {
+  id        String        @id @default(cuid())
+  clientId  String
+  client    ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  date      String        // "2026-03-15" — one check-in per client per day
+  mood      String?       // "great" | "good" | "okay" | "tired" | "bad"
+  energy    Int?          // 1-10
+  sleep     Int?          // 1-10
+  stress    Int?          // 1-10
+  adherence Int?          // 0-100 (%)
+  weight    Float?
+  notes     String?       @db.Text
+  createdAt DateTime      @default(now())
+
+  @@unique([clientId, date])
+  @@index([clientId])
+}
+
+model Habit {
+  id        String        @id @default(cuid())
+  clientId  String
+  client    ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name      String
+  icon      String?       @default("✨")
+  createdAt DateTime      @default(now())
+  logs      HabitLog[]
+
+  @@index([clientId])
+}
+
+model HabitLog {
+  id        String   @id @default(cuid())
+  habitId   String
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  date      String   // "2026-03-15"
+  completed Boolean  @default(true)
+
+  @@unique([habitId, date])
+  @@index([habitId])
 }
