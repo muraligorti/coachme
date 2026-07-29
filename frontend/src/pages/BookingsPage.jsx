@@ -4,7 +4,7 @@
 // integration, schedule replication, holiday management, and launching
 // a Live Session (voice-recorded workout logging).
 // ═══════════════════════════════════════════════════════════════════════
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { C } from "../theme/theme.js";
 import { api } from "../lib/api.js";
 import { ls } from "../lib/storage.js";
@@ -19,16 +19,77 @@ export default function BookingsPage({ onNav }) {
   const [activeSession, setActiveSession] = useState(null);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selDate, setSelDate] = useState(new Date().toISOString().slice(0, 10));
+  const weekStripRef = useRef(null);
+  const dateButtonRefs = useRef({});
   const [holidays, setHolidays] = useState(ls.get("holidays", []));
   const [form, setForm] = useState({ clientId: "", date: new Date().toISOString().slice(0, 10), time: "09:00", duration: 60, type: "training", mode: "ONLINE", notes: "" });
   const [repeatForm, setRepeatForm] = useState({ endDate: "", mode: "until_date", daysOfWeek: [1, 2, 3, 4, 5] });
   const [showCallSelect, setShowCallSelect] = useState(false);
   const [callSelections, setCallSelections] = useState({});
+  const [showBatchMessage, setShowBatchMessage] = useState(false);
+  const [batchMessageBookings, setBatchMessageBookings] = useState([]);
+  const [batchMessageText, setBatchMessageText] = useState("");
+  const [liveBatch, setLiveBatch] = useState(null); // bookings currently "in session" based on the clock, or null
+  const [showActivePreview, setShowActivePreview] = useState(false);
+  const [activePreviewPlans, setActivePreviewPlans] = useState({}); // clientId -> plans[]
+  const [activePreviewLoading, setActivePreviewLoading] = useState(false);
 
   const load = () => { Promise.all([api.get("/bookings").catch(() => ({})), api.get("/clients").catch(() => ({}))]).then(([b, c]) => {
     setBookings(unwrap(b, "bookings", "sessions")); setClients(unwrap(c, "clients"));
   }).finally(() => setLoading(false)); };
   useEffect(() => { load(); }, []);
+
+  // ACTIVE SESSION detection — a "batch" whose scheduled window has
+  // arrived (start time through end of duration, plus a 15-minute grace
+  // window on each side for early/late starts) shows up here regardless
+  // of which date is currently selected in the strip above. Re-checked
+  // every 30s so the banner appears/disappears live, not just on reload.
+  useEffect(() => {
+    const GRACE_MS = 15 * 60000;
+    const checkLive = () => {
+      const now = Date.now();
+      const confirmed = bookings.filter(b => (b.status || "").toUpperCase() === "CONFIRMED");
+      const inWindow = confirmed.filter(b => {
+        const start = new Date(b.date || b.startTime || b.scheduledAt).getTime();
+        const end = start + (b.durationMinutes || b.duration || 60) * 60000;
+        return now >= start - GRACE_MS && now <= end + GRACE_MS;
+      });
+      if (inWindow.length === 0) { setLiveBatch(null); return; }
+      // Group by exact start time — the "batch" is whichever time-window
+      // is actually live right now (usually just one, but handles the
+      // edge case of overlapping batches gracefully by picking the
+      // closest-to-now group).
+      const byTime = {};
+      inWindow.forEach(b => { const k = new Date(b.date || b.startTime || b.scheduledAt).getTime(); (byTime[k] = byTime[k] || []).push(b); });
+      const closest = Object.entries(byTime).sort((a, b) => Math.abs(+a[0] - now) - Math.abs(+b[0] - now))[0];
+      setLiveBatch(closest ? closest[1] : null);
+    };
+    checkLive();
+    const interval = setInterval(checkLive, 30000);
+    return () => clearInterval(interval);
+  }, [bookings]);
+
+  const openActivePreview = async () => {
+    if (!liveBatch) return;
+    setShowActivePreview(true); setActivePreviewLoading(true);
+    const plansByClient = {};
+    await Promise.all(liveBatch.map(async (b) => {
+      const cid = b.clientId || b.client?.id;
+      if (!cid) return;
+      try { const r = await api.get(`/workout-assignments/client/${cid}`); plansByClient[cid] = r.plans || []; } catch { plansByClient[cid] = []; }
+    }));
+    setActivePreviewPlans(plansByClient);
+    setActivePreviewLoading(false);
+  };
+
+  // Schedule should focus on the selected date (today, by default) in the
+  // horizontal week strip without the coach needing to scroll to find it
+  // manually — this fires on mount (today) and whenever selDate changes.
+  useEffect(() => {
+    if (viewMode !== "week") return;
+    const btn = dateButtonRefs.current[selDate];
+    if (btn) btn.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, [selDate, viewMode]);
 
   const createBooking = async (bookingData) => api.post("/bookings", bookingData);
 
@@ -129,6 +190,15 @@ export default function BookingsPage({ onNav }) {
     setShowCallSelect(false); alert(`Opening WhatsApp for ${selected.length} client(s)…`);
   };
 
+  const sendBatchMessage = () => {
+    if (!batchMessageText.trim()) { alert("Type a message first"); return; }
+    const withPhone = batchMessageBookings.filter(b => resolveClientPhone(b));
+    if (withPhone.length === 0) { alert("No phone numbers found for this batch.\n\nTo fix: Go to Clients → tap a client → ✏️ Edit → add their mobile number."); return; }
+    withPhone.forEach((b, i) => { const phone = resolveClientPhone(b); setTimeout(() => sendWhatsAppToClient(phone, batchMessageText), i * 800); });
+    setShowBatchMessage(false);
+    alert(`Opening WhatsApp for ${withPhone.length} client(s)…`);
+  };
+
   const cancelDayAndNotify = async () => {
     const dayBk = getDateBookings(selDate);
     if (dayBk.length === 0) { alert("No sessions to cancel"); return; }
@@ -167,6 +237,16 @@ export default function BookingsPage({ onNav }) {
 
   return (
     <div>
+      {liveBatch && (
+        <div onClick={openActivePreview} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 14, background: "linear-gradient(135deg, #ff4757 0%, #ff6348 100%)", marginBottom: 14, cursor: "pointer", boxShadow: "0 4px 16px rgba(255,71,87,.35)" }}>
+          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#fff", animation: "pulse 1.2s ease infinite" }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>🔴 Live Now — {new Date(liveBatch[0].date || liveBatch[0].startTime || liveBatch[0].scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} Batch</div>
+            <div style={{ fontSize: 11, color: "#fff", opacity: .9 }}>{liveBatch.length} participant{liveBatch.length !== 1 ? "s" : ""} — tap to view roster &amp; planned workouts</div>
+          </div>
+          <span style={{ color: "#fff", fontSize: 18 }}>›</span>
+        </div>
+      )}
       <ST right={<div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
         <button onClick={() => setViewMode(viewMode === "month" ? "week" : "month")} style={{ padding: "6px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.s2, color: C.mt }}>{viewMode === "month" ? "📅 Week" : "📆 Month"}</button>
         <Btn variant="secondary" onClick={() => setShowRepeat(true)} style={{ padding: "6px 10px", fontSize: 11 }}>🔁 Repeat</Btn>
@@ -210,7 +290,7 @@ export default function BookingsPage({ onNav }) {
             const iso = d.toISOString().slice(0, 10); const isSel = iso === selDate;
             const has = getDateBookings(iso).length > 0; const isH = holidays.includes(iso);
             return (
-              <button key={i} onClick={() => setSelDate(iso)} style={{ flexShrink: 0, width: 52, padding: "10px 2px", borderRadius: 12, border: "none", cursor: "pointer", background: isSel ? C.gr : isH ? C.dg + "20" : C.s2, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, boxShadow: isSel ? `0 4px 14px ${C.ac}45` : "none" }}>
+              <button key={i} ref={el => { if (el) dateButtonRefs.current[iso] = el; }} onClick={() => setSelDate(iso)} style={{ flexShrink: 0, width: 52, padding: "10px 2px", borderRadius: 12, border: "none", cursor: "pointer", background: isSel ? C.gr : isH ? C.dg + "20" : C.s2, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, boxShadow: isSel ? `0 4px 14px ${C.ac}45` : "none" }}>
                 <span style={{ fontSize: 10, fontWeight: 600, color: isSel ? "#fff" : isH ? C.dg : C.mt, textTransform: "uppercase" }}>{"Sun,Mon,Tue,Wed,Thu,Fri,Sat".split(",")[d.getDay()]}</span>
                 <span style={{ fontSize: 16, fontWeight: 700, color: isSel ? "#fff" : C.tx }}>{d.getDate()}</span>
                 {has && <div style={{ width: 5, height: 5, borderRadius: "50%", background: isSel ? "#fff" : C.ac }} />}
@@ -230,13 +310,35 @@ export default function BookingsPage({ onNav }) {
 
       {db.length === 0 ? <Empty icon={isHoliday ? "🏖️" : "📅"} text={isHoliday ? "Holiday — No sessions" : "No sessions this day"} /> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {db.sort((a, b) => new Date(a.date || a.startTime || a.scheduledAt) - new Date(b.date || b.startTime || b.scheduledAt)).map(b => {
+          {(() => {
+            const sorted = db.sort((a, b) => new Date(a.date || a.startTime || a.scheduledAt) - new Date(b.date || b.startTime || b.scheduledAt));
+            // Batch = every booking sharing the exact same start time — e.g.
+            // a 9am group class where several clients were booked into the
+            // identical slot. Precomputed once so the header can say
+            // "4 participants" before rendering any individual card.
+            const timeKeyOf = (bk) => new Date(bk.date || bk.startTime || bk.scheduledAt).getTime();
+            const batchCounts = {};
+            sorted.forEach(bk => { const k = timeKeyOf(bk); batchCounts[k] = (batchCounts[k] || 0) + 1; });
+            let lastTimeKey = null;
+            return sorted.map(b => {
+              const timeKey = timeKeyOf(b);
+              const isNewBatch = timeKey !== lastTimeKey;
+              lastTimeKey = timeKey;
+              const batchSize = batchCounts[timeKey];
+              const batchHeader = isNewBatch && batchSize > 1 ? (
+                <div key={`batch-${timeKey}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "4px 4px 2px" }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: C.ac }}>👥 Batch — {batchSize} participants</span>
+                  <button onClick={() => { setBatchMessageBookings(sorted.filter(x => timeKeyOf(x) === timeKey)); setBatchMessageText(""); setShowBatchMessage(true); }} style={{ padding: "5px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: "#25D36620", color: "#25D366" }}>📢 Message Batch</button>
+                </div>
+              ) : null;
             const t = new Date(b.date || b.startTime || b.scheduledAt);
             const clientName = cName(b.client) || b.type || "Session";
             const st = (b.status || "pending").toLowerCase();
             const statusColors = { present: C.ok, confirmed: C.ok, absent: C.dg, cancelled: C.mt, cancel_requested: C.or, late: C.wn, pending: C.wn };
-            return (
-              <Card key={b.id} style={{ padding: 14, ...(st === "pending" && b.initiatedBy === "client" ? { borderColor: C.ac + "60" } : {}) }}>
+              return (
+                <div key={b.id}>
+                  {batchHeader}
+                  <Card style={{ padding: 14, ...(st === "pending" && b.initiatedBy === "client" ? { borderColor: C.ac + "60" } : {}) }}>
                 {st === "pending" && b.initiatedBy === "client" && <div style={{ fontSize: 10, fontWeight: 700, color: C.ac, background: C.ac + "18", padding: "3px 8px", borderRadius: 6, display: "inline-block", marginBottom: 8 }}>🙋 Client Requested — needs your decision</div>}
                 <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
                   <div style={{ width: 50, padding: "6px 0", borderRadius: 8, background: C.ac + "15", textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 700, color: C.ac }}>{t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div></div>
@@ -254,13 +356,24 @@ export default function BookingsPage({ onNav }) {
                   <button onClick={() => markAttendance(b.id, "cancelled")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.ok + "20", color: C.ok }}>✅ Approve Cancel</button>
                   <button onClick={() => markAttendance(b.id, "confirmed")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.dg + "20", color: C.dg }}>❌ Deny</button>
                 </div>}
+                {b.requestedRescheduleAt && (
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, color: C.ac, marginBottom: 4, textAlign: "center" }}>🔄 Client wants to move this to {new Date(b.requestedRescheduleAt).toLocaleDateString()} {new Date(b.requestedRescheduleAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{b.rescheduleReason ? ` — "${b.rescheduleReason}"` : ""}</div>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button onClick={async () => { try { await api.post(`/booking-requests/${b.id}/reschedule-approve`); load(); } catch (e) { alert("Failed: " + e.message); } }} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.ok + "20", color: C.ok }}>✅ Approve New Time</button>
+                      <button onClick={async () => { try { await api.post(`/booking-requests/${b.id}/reschedule-deny`); load(); } catch (e) { alert("Failed: " + e.message); } }} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.dg + "20", color: C.dg }}>❌ Deny, Keep Original</button>
+                    </div>
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 4 }}>
                   {st === "confirmed" && <button onClick={() => setActiveSession(b)} style={{ flex: 1, padding: "6px 2px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 10, fontWeight: 600, background: C.ac + "30", color: C.ac }}>🎙️ Live Session</button>}
                   {[{ s: "confirmed", l: "✅ Confirm", c: C.ok }, { s: "cancelled", l: "🚫 Cancel", c: C.dg }, { s: "pending", l: "⏳ Pending", c: C.wn }].map(a => <button key={a.s} onClick={() => markAttendance(b.id, a.s)} style={{ flex: 1, padding: "6px 2px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 10, fontWeight: 600, background: st === a.s ? a.c + "30" : C.s2, color: st === a.s ? a.c : C.mt }}>{a.l}</button>)}
                 </div>
-              </Card>
-            );
-          })}
+                </Card>
+                </div>
+              );
+            });
+          })()}
         </div>
       )}
 
@@ -311,6 +424,44 @@ export default function BookingsPage({ onNav }) {
             <button onClick={() => setCallSelections({})} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: C.s2, color: C.mt }}>Deselect All</button>
           </div>
           <Btn onClick={sendGroupCall} disabled={Object.values(callSelections).filter(Boolean).length === 0} style={{ width: "100%", marginTop: 4 }}>📞 Call {Object.values(callSelections).filter(Boolean).length} Client(s) via WhatsApp</Btn>
+        </div>
+      </Modal>
+
+      <Modal open={showBatchMessage} onClose={() => setShowBatchMessage(false)} title="📢 Message This Batch">
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: 13, color: C.mt }}>Sending to <strong style={{ color: C.tx }}>{batchMessageBookings.length}</strong> client(s) in this batch:</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {batchMessageBookings.map(b => <Badge key={b.id} color={resolveClientPhone(b) ? C.ok : C.dg}>{resolveClientName(b)}{!resolveClientPhone(b) ? " (no phone)" : ""}</Badge>)}
+          </div>
+          <TextArea label="Message" value={batchMessageText} onChange={e => setBatchMessageText(e.target.value)} placeholder="e.g. Reminder: bring your own mat for today's session!" style={{ minHeight: 100 }} />
+          <Btn onClick={sendBatchMessage} disabled={!batchMessageText.trim()} style={{ width: "100%" }}>📤 Send via WhatsApp to {batchMessageBookings.filter(b => resolveClientPhone(b)).length} Client(s)</Btn>
+        </div>
+      </Modal>
+
+      <Modal open={showActivePreview} onClose={() => setShowActivePreview(false)} title="🔴 Live Session Roster" wide>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {activePreviewLoading ? <Spin /> : (liveBatch || []).map(b => {
+            const cid = b.clientId || b.client?.id;
+            const plans = activePreviewPlans[cid] || [];
+            return (
+              <Card key={b.id} style={{ padding: 14 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 6 }}>{resolveClientName(b)}</div>
+                {plans.length === 0 ? (
+                  <div style={{ fontSize: 12, color: C.mt }}>No workout plan assigned</div>
+                ) : plans.map(p => (
+                  <div key={p.id} style={{ marginBottom: 6 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: C.ac }}>{p.title || p.name}</div>
+                    {p.exercises && Array.isArray(p.exercises) && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                        {p.exercises.slice(0, 6).map((ex, i) => <span key={i} style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, background: C.s2, color: C.tx }}>{ex.name || ex}{ex.sets ? ` ${ex.sets}×${ex.reps}` : ""}</span>)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </Card>
+            );
+          })}
+          <Btn onClick={() => { setShowActivePreview(false); setActiveSession(liveBatch); }} style={{ width: "100%" }}>🎙️ Start Recording This Session</Btn>
         </div>
       </Modal>
     </div>
