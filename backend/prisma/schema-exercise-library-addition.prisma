@@ -1,0 +1,47 @@
+// ═══════════════════════════════════════════════════════════════════════
+// ADD these two models to schema.prisma, PLUS the two back-relation lines
+// inside your existing CoachProfile model (wherever its other relations
+// like `bookings` or `workoutPlans` are listed):
+//
+//   exercises          Exercise[]
+//   workoutTemplates   WorkoutTemplate[]
+//
+// DESIGN: `coachId = null` means a system/global entry visible to every
+// coach (seeded once via the script below); `coachId` set means a
+// specific coach's own custom addition, visible only to them.
+// `specialization` is a free-text tag ("yoga", "strength", "pilates",
+// "crossfit", "general", etc.) matched against the coach's own
+// `specializations` array (already on CoachProfile) — a coach sees every
+// global entry tagged "general" or matching one of their own
+// specializations, plus everything they've personally added, regardless
+// of tag.
+// ═══════════════════════════════════════════════════════════════════════
+
+model Exercise {
+  id             String        @id @default(cuid())
+  name           String
+  muscleGroup    String?
+  equipment      String?
+  specialization String?       // "yoga" | "strength" | "pilates" | "crossfit" | "general" | null
+  coachId        String?       // null = global/seeded; set = one coach's own custom addition
+  coach          CoachProfile? @relation(fields: [coachId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+
+  @@index([coachId])
+  @@index([specialization])
+}
+
+model WorkoutTemplate {
+  id             String        @id @default(cuid())
+  name           String
+  description    String?
+  level          String?       // "Beginner" | "Intermediate" | "Advanced"
+  specialization String?
+  exercises      Json          // [{ name, sets, reps }]
+  coachId        String?       // null = global/seeded; set = one coach's own saved template
+  coach          CoachProfile? @relation(fields: [coachId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+
+  @@index([coachId])
+  @@index([specialization])
+}
