@@ -207,6 +207,7 @@ model ClientProfile {
   deviceTokens    DeviceToken[]
   checkIns        CheckIn[]
   habits          Habit[]
+  workoutAssignments   WorkoutPlanAssignment[]
   @@index([country, city])
   @@index([fitnessGoals])
 }
@@ -285,6 +286,7 @@ model WorkoutPlan {
   isTemplate      Boolean   @default(false)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+  assignments     WorkoutPlanAssignment[]
 
   sessions        WorkoutSession[]
 
@@ -662,5 +664,17 @@ model WorkoutTemplate {
 
   @@index([coachId])
   @@index([specialization])
+}
+model WorkoutPlanAssignment {
+  id            String       @id @default(cuid())
+  workoutPlanId String
+  workoutPlan   WorkoutPlan  @relation(fields: [workoutPlanId], references: [id], onDelete: Cascade)
+  clientId      String
+  client        ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  assignedAt    DateTime     @default(now())
+
+  @@unique([workoutPlanId, clientId])
+  @@index([workoutPlanId])
+  @@index([clientId])
 }
 
