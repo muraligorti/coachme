@@ -192,7 +192,7 @@ model ClientProfile {
   updatedAt       DateTime  @updatedAt
   featureFlags      Json?
   category          String?
-  
+
   // Relations
   coaches         ClientCoach[]
   medicalData     MedicalData?
@@ -203,7 +203,8 @@ model ClientProfile {
   sharingConsents DataSharingConsent[]
   nutritionLogs   NutritionLog[]
   deviceTokens    DeviceToken[]
-
+  checkIns        CheckIn[]
+  habits          Habit[]
   @@index([country, city])
   @@index([fitnessGoals])
 }
