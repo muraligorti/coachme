@@ -9,7 +9,7 @@ import { C } from "../theme/theme.js";
 import { api } from "../lib/api.js";
 import { ls } from "../lib/storage.js";
 import { unwrap, cName, cPhone, log } from "../lib/utils.js";
-import { Card, Badge, Btn, Input, TextArea, Sel, Modal, Empty, ST, Spin } from "../components/ui.jsx";
+import { Card, Badge, Btn, Input, TextArea, Sel, Modal, Empty, ST, Spin, Avatar } from "../components/ui.jsx";
 import LiveSessionPage from "./LiveSessionPage.jsx";
 
 export default function BookingsPage({ onNav }) {
@@ -25,6 +25,7 @@ export default function BookingsPage({ onNav }) {
   const [form, setForm] = useState({ clientId: "", date: new Date().toISOString().slice(0, 10), time: "09:00", duration: 60, type: "training", mode: "ONLINE", notes: "" });
   const [repeatForm, setRepeatForm] = useState({ endDate: "", mode: "until_date", daysOfWeek: [1, 2, 3, 4, 5] });
   const [showCallSelect, setShowCallSelect] = useState(false);
+  const [expandedBookingId, setExpandedBookingId] = useState(null); // which client row inside a batch box is showing full actions
   const [callSelections, setCallSelections] = useState({});
   const [showBatchMessage, setShowBatchMessage] = useState(false);
   const [batchMessageBookings, setBatchMessageBookings] = useState([]);
@@ -312,64 +313,112 @@ export default function BookingsPage({ onNav }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {(() => {
             const sorted = db.sort((a, b) => new Date(a.date || a.startTime || a.scheduledAt) - new Date(b.date || b.startTime || b.scheduledAt));
-            // Batch = every booking sharing the exact same start time — e.g.
-            // a 9am group class where several clients were booked into the
-            // identical slot. Precomputed once so the header can say
-            // "4 participants" before rendering any individual card.
             const timeKeyOf = (bk) => new Date(bk.date || bk.startTime || bk.scheduledAt).getTime();
-            const batchCounts = {};
-            sorted.forEach(bk => { const k = timeKeyOf(bk); batchCounts[k] = (batchCounts[k] || 0) + 1; });
-            let lastTimeKey = null;
-            return sorted.map(b => {
-              const timeKey = timeKeyOf(b);
-              const isNewBatch = timeKey !== lastTimeKey;
-              lastTimeKey = timeKey;
-              const batchSize = batchCounts[timeKey];
-              const batchHeader = isNewBatch && batchSize > 1 ? (
-                <div key={`batch-${timeKey}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "4px 4px 2px" }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: C.ac }}>👥 Batch — {batchSize} participants</span>
-                  <button onClick={() => { setBatchMessageBookings(sorted.filter(x => timeKeyOf(x) === timeKey)); setBatchMessageText(""); setShowBatchMessage(true); }} style={{ padding: "5px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: "#25D36620", color: "#25D366" }}>📢 Message Batch</button>
-                </div>
-              ) : null;
-            const t = new Date(b.date || b.startTime || b.scheduledAt);
-            const clientName = cName(b.client) || b.type || "Session";
-            const st = (b.status || "pending").toLowerCase();
             const statusColors = { present: C.ok, confirmed: C.ok, absent: C.dg, cancelled: C.mt, cancel_requested: C.or, late: C.wn, pending: C.wn };
+
+            // Group into batches — every booking sharing the exact same
+            // start time is one batch (e.g. a 9am group class). A batch
+            // of 1 renders exactly like before (full card, nothing new).
+            // A batch of 2+ renders as ONE box: shared time/duration/mode
+            // shown once at the top, each client as a compact row that
+            // expands in place to the full action set (Confirm/Cancel/
+            // Reschedule/Live Session/etc.) — nothing lost, just collapsed
+            // by default so a 4-person batch doesn't take 4 full cards.
+            const batches = [];
+            for (const b of sorted) {
+              const key = timeKeyOf(b);
+              const existing = batches.find(g => g.key === key);
+              if (existing) existing.bookings.push(b); else batches.push({ key, bookings: [b] });
+            }
+
+            // The full action set for one booking — identical to the
+            // original per-card markup, just extracted so both the
+            // single-booking path and the expanded-row-in-a-batch path
+            // can render it without duplicating the logic.
+            const renderActions = (b) => {
+              const st = (b.status || "pending").toLowerCase();
               return (
-                <div key={b.id}>
-                  {batchHeader}
-                  <Card style={{ padding: 14, ...(st === "pending" && b.initiatedBy === "client" ? { borderColor: C.ac + "60" } : {}) }}>
-                {st === "pending" && b.initiatedBy === "client" && <div style={{ fontSize: 10, fontWeight: 700, color: C.ac, background: C.ac + "18", padding: "3px 8px", borderRadius: 6, display: "inline-block", marginBottom: 8 }}>🙋 Client Requested — needs your decision</div>}
-                <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
-                  <div style={{ width: 50, padding: "6px 0", borderRadius: 8, background: C.ac + "15", textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 700, color: C.ac }}>{t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div></div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{clientName}</div>
-                    <div style={{ fontSize: 12, color: C.mt }}>{b.duration || 60}min · {b.type || "training"} · {b.sessionType === "IN_PERSON" ? "📍 Offline" : b.sessionType === "HYBRID" ? "🔀 Hybrid" : "💻 Online"}{b._local ? " · 📱 Local" : ""}</div>
-                  </div>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    {onNav && (b.clientId || b.client?.id) && <button onClick={(e) => { e.stopPropagation(); onNav("clients", { clientId: b.clientId || b.client?.id, tab: "workouts" }); }} style={{ width: 32, height: 32, borderRadius: 8, border: "none", cursor: "pointer", background: C.ac + "18", color: C.ac, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }} title="View their workout plan">💪</button>}
-                    {resolveClientPhone(b) && <button onClick={(e) => { e.stopPropagation(); whatsAppCall(resolveClientPhone(b)); }} style={{ width: 32, height: 32, borderRadius: 8, border: "none", cursor: "pointer", background: "#25D36620", color: "#25D366", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }} title="WhatsApp Call">📞</button>}
-                    <Badge color={statusColors[st] || C.wn}>{st === "cancel_requested" ? "⚠️ Cancel Request" : st}</Badge>
-                  </div>
-                </div>
-                {st === "cancel_requested" && <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-                  <button onClick={() => markAttendance(b.id, "cancelled")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.ok + "20", color: C.ok }}>✅ Approve Cancel</button>
-                  <button onClick={() => markAttendance(b.id, "confirmed")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.dg + "20", color: C.dg }}>❌ Deny</button>
-                </div>}
-                {b.requestedRescheduleAt && (
-                  <div style={{ marginBottom: 6 }}>
-                    <div style={{ fontSize: 11, color: C.ac, marginBottom: 4, textAlign: "center" }}>🔄 Client wants to move this to {new Date(b.requestedRescheduleAt).toLocaleDateString()} {new Date(b.requestedRescheduleAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{b.rescheduleReason ? ` — "${b.rescheduleReason}"` : ""}</div>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      <button onClick={async () => { try { await api.post(`/booking-requests/${b.id}/reschedule-approve`); load(); } catch (e) { alert("Failed: " + e.message); } }} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.ok + "20", color: C.ok }}>✅ Approve New Time</button>
-                      <button onClick={async () => { try { await api.post(`/booking-requests/${b.id}/reschedule-deny`); load(); } catch (e) { alert("Failed: " + e.message); } }} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.dg + "20", color: C.dg }}>❌ Deny, Keep Original</button>
+                <>
+                  {st === "cancel_requested" && <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+                    <button onClick={() => markAttendance(b.id, "cancelled")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.ok + "20", color: C.ok }}>✅ Approve Cancel</button>
+                    <button onClick={() => markAttendance(b.id, "confirmed")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.dg + "20", color: C.dg }}>❌ Deny</button>
+                  </div>}
+                  {b.requestedRescheduleAt && (
+                    <div style={{ marginBottom: 6 }}>
+                      <div style={{ fontSize: 11, color: C.ac, marginBottom: 4, textAlign: "center" }}>🔄 Client wants to move this to {new Date(b.requestedRescheduleAt).toLocaleDateString()} {new Date(b.requestedRescheduleAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{b.rescheduleReason ? ` — "${b.rescheduleReason}"` : ""}</div>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button onClick={async () => { try { await api.post(`/booking-requests/${b.id}/reschedule-approve`); load(); } catch (e) { alert("Failed: " + e.message); } }} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.ok + "20", color: C.ok }}>✅ Approve New Time</button>
+                        <button onClick={async () => { try { await api.post(`/booking-requests/${b.id}/reschedule-deny`); load(); } catch (e) { alert("Failed: " + e.message); } }} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.dg + "20", color: C.dg }}>❌ Deny, Keep Original</button>
+                      </div>
                     </div>
+                  )}
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {st === "confirmed" && <button onClick={() => setActiveSession(b)} style={{ flex: 1, padding: "6px 2px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 10, fontWeight: 600, background: C.ac + "30", color: C.ac }}>🎙️ Live Session</button>}
+                    {[{ s: "confirmed", l: "✅ Confirm", c: C.ok }, { s: "cancelled", l: "🚫 Cancel", c: C.dg }, { s: "pending", l: "⏳ Pending", c: C.wn }].map(a => <button key={a.s} onClick={() => markAttendance(b.id, a.s)} style={{ flex: 1, padding: "6px 2px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 10, fontWeight: 600, background: st === a.s ? a.c + "30" : C.s2, color: st === a.s ? a.c : C.mt }}>{a.l}</button>)}
                   </div>
-                )}
-                <div style={{ display: "flex", gap: 4 }}>
-                  {st === "confirmed" && <button onClick={() => setActiveSession(b)} style={{ flex: 1, padding: "6px 2px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 10, fontWeight: 600, background: C.ac + "30", color: C.ac }}>🎙️ Live Session</button>}
-                  {[{ s: "confirmed", l: "✅ Confirm", c: C.ok }, { s: "cancelled", l: "🚫 Cancel", c: C.dg }, { s: "pending", l: "⏳ Pending", c: C.wn }].map(a => <button key={a.s} onClick={() => markAttendance(b.id, a.s)} style={{ flex: 1, padding: "6px 2px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 10, fontWeight: 600, background: st === a.s ? a.c + "30" : C.s2, color: st === a.s ? a.c : C.mt }}>{a.l}</button>)}
-                </div>
-                </Card>
+                </>
+              );
+            };
+
+            return batches.map(({ key, bookings: batchBookings }) => {
+              if (batchBookings.length === 1) {
+                // Single booking — unchanged from before, full card.
+                const b = batchBookings[0];
+                const t = new Date(b.date || b.startTime || b.scheduledAt);
+                const clientName = cName(b.client) || b.type || "Session";
+                const st = (b.status || "pending").toLowerCase();
+                return (
+                  <Card key={b.id} style={{ padding: 14, ...(st === "pending" && b.initiatedBy === "client" ? { borderColor: C.ac + "60" } : {}) }}>
+                    {st === "pending" && b.initiatedBy === "client" && <div style={{ fontSize: 10, fontWeight: 700, color: C.ac, background: C.ac + "18", padding: "3px 8px", borderRadius: 6, display: "inline-block", marginBottom: 8 }}>🙋 Client Requested — needs your decision</div>}
+                    <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
+                      <div style={{ width: 50, padding: "6px 0", borderRadius: 8, background: C.ac + "15", textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 700, color: C.ac }}>{t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div></div>
+                      <Avatar src={b.client?.avatar} name={clientName} size={36} radius={10} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{clientName}</div>
+                        <div style={{ fontSize: 12, color: C.mt }}>{b.duration || 60}min · {b.type || "training"} · {b.sessionType === "IN_PERSON" ? "📍 Offline" : b.sessionType === "HYBRID" ? "🔀 Hybrid" : "💻 Online"}{b._local ? " · 📱 Local" : ""}</div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        {onNav && (b.clientId || b.client?.id) && <button onClick={(e) => { e.stopPropagation(); onNav("clients", { clientId: b.clientId || b.client?.id, tab: "workouts" }); }} style={{ width: 32, height: 32, borderRadius: 8, border: "none", cursor: "pointer", background: C.ac + "18", color: C.ac, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }} title="View their workout plan">💪</button>}
+                        {resolveClientPhone(b) && <button onClick={(e) => { e.stopPropagation(); whatsAppCall(resolveClientPhone(b)); }} style={{ width: 32, height: 32, borderRadius: 8, border: "none", cursor: "pointer", background: "#25D36620", color: "#25D366", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }} title="WhatsApp Call">📞</button>}
+                        <Badge color={statusColors[st] || C.wn}>{st === "cancel_requested" ? "⚠️ Cancel Request" : st}</Badge>
+                      </div>
+                    </div>
+                    {renderActions(b)}
+                  </Card>
+                );
+              }
+
+              // Batch of 2+ — one box, compact rows, tap to expand.
+              const t = new Date(batchBookings[0].date || batchBookings[0].startTime || batchBookings[0].scheduledAt);
+              const first = batchBookings[0];
+              return (
+                <div key={key} style={{ background: "linear-gradient(160deg,#181f2c 0%,#12161f 100%)", border: `1px solid ${C.bd}`, borderRadius: 16, padding: 14, boxShadow: "0 6px 20px rgba(0,0,0,.25)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${C.bd}` }}>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: C.ac }}>{t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} Batch</div>
+                      <div style={{ fontSize: 10.5, color: C.mt, marginTop: 1 }}>{first.duration || 60}min · {first.sessionType === "IN_PERSON" ? "📍 Offline" : first.sessionType === "HYBRID" ? "🔀 Hybrid" : "💻 Online"} · {batchBookings.length} participants</div>
+                    </div>
+                    <button onClick={() => { setBatchMessageBookings(batchBookings); setBatchMessageText(""); setShowBatchMessage(true); }} style={{ padding: "5px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: "#25D36620", color: "#25D366" }}>📢 Message Batch</button>
+                  </div>
+                  {batchBookings.map(b => {
+                    const clientName = cName(b.client) || b.type || "Session";
+                    const st = (b.status || "pending").toLowerCase();
+                    const expanded = expandedBookingId === b.id;
+                    return (
+                      <div key={b.id} style={{ borderBottom: `1px solid rgba(255,255,255,.04)`, paddingBottom: 8, marginBottom: 8 }}>
+                        <div onClick={() => setExpandedBookingId(expanded ? null : b.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", cursor: "pointer" }}>
+                          <Avatar src={b.client?.avatar} name={clientName} size={30} radius={9} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: C.tx }}>{clientName}</div>
+                            {st === "pending" && b.initiatedBy === "client" && <div style={{ fontSize: 9.5, fontWeight: 700, color: C.ac }}>🙋 Needs your decision</div>}
+                          </div>
+                          <Badge color={statusColors[st] || C.wn} style={{ fontSize: 9.5 }}>{st === "cancel_requested" ? "⚠️ Cancel Req" : st}</Badge>
+                          <span style={{ color: C.mt, fontSize: 12 }}>{expanded ? "▴" : "▾"}</span>
+                        </div>
+                        {expanded && <div style={{ paddingLeft: 40, paddingTop: 4 }}>{renderActions(b)}</div>}
+                      </div>
+                    );
+                  })}
                 </div>
               );
             });
@@ -440,27 +489,34 @@ export default function BookingsPage({ onNav }) {
 
       <Modal open={showActivePreview} onClose={() => setShowActivePreview(false)} title="🔴 Live Session Roster" wide>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {activePreviewLoading ? <Spin /> : (liveBatch || []).map(b => {
-            const cid = b.clientId || b.client?.id;
-            const plans = activePreviewPlans[cid] || [];
-            return (
-              <Card key={b.id} style={{ padding: 14 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 6 }}>{resolveClientName(b)}</div>
-                {plans.length === 0 ? (
-                  <div style={{ fontSize: 12, color: C.mt }}>No workout plan assigned</div>
-                ) : plans.map(p => (
-                  <div key={p.id} style={{ marginBottom: 6 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: C.ac }}>{p.title || p.name}</div>
-                    {p.exercises && Array.isArray(p.exercises) && (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
-                        {p.exercises.slice(0, 6).map((ex, i) => <span key={i} style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, background: C.s2, color: C.tx }}>{ex.name || ex}{ex.sets ? ` ${ex.sets}×${ex.reps}` : ""}</span>)}
+          {activePreviewLoading ? <Spin /> : (
+            <div className="jz-scrollx" style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 6 }}>
+              {(liveBatch || []).map(b => {
+                const cid = b.clientId || b.client?.id;
+                const plans = activePreviewPlans[cid] || [];
+                return (
+                  <div key={b.id} style={{ flex: "0 0 150px", background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 14, padding: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, paddingBottom: 8, borderBottom: `1px solid ${C.bd}` }}>
+                      <Avatar src={b.client?.avatar} name={resolveClientName(b)} size={26} radius={8} />
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: C.tx, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resolveClientName(b)}</div>
+                    </div>
+                    {plans.length === 0 ? (
+                      <div style={{ fontSize: 11, color: C.mt }}>No plan assigned</div>
+                    ) : plans.map(p => (
+                      <div key={p.id} style={{ marginBottom: 6 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: C.ac, marginBottom: 4 }}>{p.title || p.name}</div>
+                        {p.exercises && Array.isArray(p.exercises) && p.exercises.slice(0, 8).map((ex, i) => (
+                          <div key={i} style={{ fontSize: 10.5, color: C.tx, background: C.s2, borderRadius: 6, padding: "5px 7px", marginBottom: 4, lineHeight: 1.3 }}>
+                            {ex.name || ex}{ex.sets ? <span style={{ color: C.ac, fontWeight: 700 }}> {ex.sets}×{ex.reps}</span> : ""}
+                          </div>
+                        ))}
                       </div>
-                    )}
+                    ))}
                   </div>
-                ))}
-              </Card>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
           <Btn onClick={() => { setShowActivePreview(false); setActiveSession(liveBatch); }} style={{ width: "100%" }}>🎙️ Start Recording This Session</Btn>
         </div>
       </Modal>

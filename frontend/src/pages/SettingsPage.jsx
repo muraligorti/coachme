@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { api } from "../lib/api.js";
 import { ls } from "../lib/storage.js";
+import { compressImage } from "../lib/utils.js";
 import { Card, Badge, Btn, Input, ST } from "../components/ui.jsx";
 import { ALL_TABS, DEFAULT_BOTTOM, getBottomTabs } from "../navigation/BottomNav.jsx";
 
@@ -17,8 +18,15 @@ export default function SettingsPage() {
   const { user, logout } = useAuth();
   const { themeName, switchTheme, themes } = useTheme();
   const [profile, setProfile] = useState({ name: user?.name || "", email: user?.email || "" });
+  const [avatar, setAvatar] = useState(null); // avatar lives on the CoachProfile, not the base user object AuthContext exposes — fetched below
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [bottomTabs, setBottomTabs] = useState(getBottomTabs());
+
+  useEffect(() => {
+    api.get("/auth/me").then(r => { if (r.profile?.avatar) setAvatar(r.profile.avatar); }).catch(() => {});
+  }, []);
   const [coachInfo, setCoachInfo] = useState(null); // { specializations, tier, maxClients }
   const [specSaved, setSpecSaved] = useState(false);
 
@@ -43,7 +51,22 @@ export default function SettingsPage() {
     } catch (e) { alert("Could not save: " + e.message); }
   };
 
-  const save = async () => { try { await api.put("/auth/profile", profile); setSaved(true); setTimeout(() => setSaved(false), 2000); } catch { } };
+  const save = async () => {
+    setError("");
+    try { await api.put("/auth/profile", { name: profile.name }); setSaved(true); setTimeout(() => setSaved(false), 2000); }
+    catch (e) { setError("Could not save: " + e.message); }
+  };
+
+  const uploadPhoto = async (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setUploadingPhoto(true); setError("");
+    try {
+      const compressed = await compressImage(file, 300, 0.75);
+      await api.put("/auth/profile", { avatar: compressed });
+      setAvatar(compressed);
+    } catch (e) { setError("Could not upload photo: " + e.message); }
+    setUploadingPhoto(false);
+  };
 
   const moveTab = (idx, dir) => {
     const arr = [...bottomTabs]; const newIdx = idx + dir;
@@ -63,12 +86,20 @@ export default function SettingsPage() {
       <ST>Settings</ST>
       <Card style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 16, background: C.gr, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 700, color: "#fff" }}>{(user?.name || "U")[0].toUpperCase()}</div>
+          <div style={{ position: "relative" }}>
+            {avatar ? <img src={avatar} alt="" style={{ width: 56, height: 56, borderRadius: 16, objectFit: "cover" }} /> :
+              <div style={{ width: 56, height: 56, borderRadius: 16, background: C.gr, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 700, color: "#000" }}>{(user?.name || "U")[0].toUpperCase()}</div>}
+            <label style={{ position: "absolute", bottom: -4, right: -4, width: 22, height: 22, borderRadius: 11, background: C.ac, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 10, border: `2px solid ${C.sf}` }}>
+              {uploadingPhoto ? "…" : "📷"}
+              <input type="file" accept="image/*" onChange={uploadPhoto} disabled={uploadingPhoto} style={{ display: "none" }} />
+            </label>
+          </div>
           <div><div style={{ color: C.tx, fontSize: 16, fontWeight: 600 }}>{user?.name}</div><Badge>{user?.role || "coach"}</Badge></div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <Input label="Name" value={profile.name} onChange={e => setProfile({ ...profile, name: e.target.value })} />
-          <Input label="Email" value={profile.email} onChange={e => setProfile({ ...profile, email: e.target.value })} />
+          <Input label="Email" value={profile.email} disabled style={{ opacity: .6 }} />
+          {error && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10 }}>{error}</div>}
           <Btn onClick={save} style={{ width: "100%" }}>{saved ? "✓ Saved!" : "Update Profile"}</Btn>
         </div>
       </Card>

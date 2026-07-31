@@ -8,7 +8,7 @@ import { C } from "../theme/theme.js";
 import { api } from "../lib/api.js";
 import { ls } from "../lib/storage.js";
 import { unwrap, cName, cEmail } from "../lib/utils.js";
-import { Card, Badge, Btn, Input, TextArea, Sel, Modal, Empty, Spin, ST, SC, Tabs } from "../components/ui.jsx";
+import { Card, Badge, Btn, Input, TextArea, Sel, Modal, Empty, Spin, ST, SC, Tabs, Avatar } from "../components/ui.jsx";
 import { PhoneInput } from "../components/PhoneInput.jsx";
 import ProgressTracker from "./ProgressTracker.jsx";
 import HabitTracker from "./HabitTracker.jsx";
@@ -151,7 +151,7 @@ export default function ClientsPage({ deepLink, onConsumeDeepLink }) {
         <button onClick={() => setSel(null)} style={{ background: "none", border: "none", color: C.ac, cursor: "pointer", fontSize: 14, fontWeight: 600, marginBottom: 12, padding: 0, fontFamily: "inherit" }}>← Back</button>
         <Card style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
           <div style={{ position: "relative" }}>
-            {photos.profile ? <img src={photos.profile} style={{ width: 56, height: 56, borderRadius: 16, objectFit: "cover" }} /> :
+            {sel.avatar || photos.profile ? <img src={sel.avatar || photos.profile} style={{ width: 56, height: 56, borderRadius: 16, objectFit: "cover" }} /> :
               <div style={{ width: 56, height: 56, borderRadius: 16, background: C.gr, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 700, color: "#fff" }}>{nm[0].toUpperCase()}</div>}
             <label style={{ position: "absolute", bottom: -4, right: -4, width: 22, height: 22, borderRadius: 11, background: C.ac, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 10, color: "#fff", border: `2px solid ${C.sf}` }}>📷<input type="file" accept="image/*" onChange={e => handlePhotoUpload(e, "profile")} style={{ display: "none" }} /></label>
           </div>
@@ -226,7 +226,7 @@ export default function ClientsPage({ deepLink, onConsumeDeepLink }) {
               <Card key={c.id} onClick={() => setSel(c)} style={{ padding: 14, cursor: "pointer", ...(risk?.flagged ? { borderColor: C.wn + "60" } : {}) }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div style={{ position: "relative", flexShrink: 0 }}>
-                    <div style={{ width: 42, height: 42, borderRadius: 12, background: C.gr, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, color: "#fff" }}>{(cName(c))[0].toUpperCase()}</div>
+                    <Avatar src={c.avatar} name={cName(c)} size={42} radius={12} />
                     <div style={{ position: "absolute", bottom: -2, right: -2, width: 12, height: 12, borderRadius: 6, border: `2px solid ${C.sf}`, background: isOnline ? C.ok : C.mt }} title={isOnline ? "Online" : "Offline"} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>

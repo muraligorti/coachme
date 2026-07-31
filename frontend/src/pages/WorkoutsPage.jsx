@@ -25,9 +25,10 @@ export default function WorkoutsPage() {
   const [exS, setExS] = useState("");
   const [exF, setExF] = useState("all");
   const [editPlan, setEditPlan] = useState(null);
-  const [form, setForm] = useState({ title: "", description: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] });
+  const [form, setForm] = useState({ title: "", description: "", focus: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] });
   const [assignedClientIds, setAssignedClientIds] = useState(new Set());
   const [saveError, setSaveError] = useState("");
+  const [planTypeFilter, setPlanTypeFilter] = useState("all");
 
   const [showAddEx, setShowAddEx] = useState(false);
   const [newEx, setNewEx] = useState({ name: "", muscleGroup: "", equipment: "", specialization: "" });
@@ -57,7 +58,7 @@ export default function WorkoutsPage() {
 
   const save = async () => {
     setSaveError("");
-    const payload = { name: form.title, description: form.description, exercises: form.exercises.filter(e => e.name), intensity: "moderate", durationWeeks: 4 };
+    const payload = { name: form.title, description: form.description, focus: form.focus || null, exercises: form.exercises.filter(e => e.name), intensity: "moderate", durationWeeks: 4 };
     const clientIds = [...assignedClientIds];
     let planId = editPlan?.id;
     if (editPlan) {
@@ -90,7 +91,7 @@ export default function WorkoutsPage() {
       try { await api.put(`/workout-assignments/plan/${planId}`, { clientIds }); }
       catch (e) { setSaveError(`Plan saved, but assigning to client(s) failed: ${e.message}`); return; }
     }
-    setEditPlan(null); setShowB(false); setAssignedClientIds(new Set()); setForm({ title: "", description: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] });
+    setEditPlan(null); setShowB(false); setAssignedClientIds(new Set()); setForm({ title: "", description: "", focus: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] });
   };
 
   const deletePlan = async (p) => {
@@ -103,7 +104,7 @@ export default function WorkoutsPage() {
   const startEdit = (p) => {
     setSaveError("");
     setEditPlan(p);
-    setForm({ title: p.title || p.name || "", description: p.description || "", exercises: (p.exercises && p.exercises.length > 0) ? p.exercises.map(e => ({ name: e.name || e, sets: e.sets || 3, reps: e.reps || 12, rest: e.rest || 60 })) : [{ name: "", sets: 3, reps: 12, rest: 60 }] });
+    setForm({ title: p.title || p.name || "", description: p.description || "", focus: p.focus || "", exercises: (p.exercises && p.exercises.length > 0) ? p.exercises.map(e => ({ name: e.name || e, sets: e.sets || 3, reps: e.reps || 12, rest: e.rest || 60 })) : [{ name: "", sets: 3, reps: 12, rest: 60 }] });
     setAssignedClientIds(new Set());
     if (!String(p.id).startsWith("workout_") && !String(p.id).startsWith("pending_")) {
       api.get(`/workout-assignments/plan/${p.id}`).then(r => setAssignedClientIds(new Set(r.clientIds || []))).catch(() => {});
@@ -158,24 +159,37 @@ export default function WorkoutsPage() {
 
   return (
     <div>
-      <ST right={<Btn onClick={() => { setEditPlan(null); setSaveError(""); setAssignedClientIds(new Set()); setForm({ title: "", description: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] }); setShowB(true); }} style={{ padding: "8px 16px", fontSize: 13 }}>+ Create</Btn>}>Workouts</ST>
+      <ST right={<Btn onClick={() => { setEditPlan(null); setSaveError(""); setAssignedClientIds(new Set()); setForm({ title: "", description: "", focus: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] }); setShowB(true); }} style={{ padding: "8px 16px", fontSize: 13 }}>+ Create</Btn>}>Workouts</ST>
       <Tabs tabs={[{ id: "plans", label: "My Plans" }, { id: "library", label: "Exercise Library" }, { id: "templates", label: "Templates" }]} active={tab} onChange={setTab} />
 
       {tab === "plans" && (plans.length === 0 ? <Empty icon="💪" text="No workout plans yet" /> : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {plans.map(p => (
-            <Card key={p.id} style={{ padding: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
-                <div><div style={{ color: C.tx, fontWeight: 600, fontSize: 15 }}>{p.title || p.name}</div>{p.description && <div style={{ color: C.mt, fontSize: 12, marginTop: 4 }}>{p.description}</div>}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <Badge color={p.status === "active" ? C.ok : C.mt}>{p.status || "draft"}</Badge>
-                  <button onClick={() => startEdit(p)} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", background: C.wn + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>✏️</button>
-                  <button onClick={() => deletePlan(p)} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", background: C.dg + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>🗑️</button>
+        <div>
+          {plans.some(p => p.focus) && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+              {[{ v: "all", l: "All" }, { v: "upper_body", l: "💪 Upper" }, { v: "lower_body", l: "🦵 Lower" }, { v: "full_body", l: "🔄 Composite" }, { v: "cardio", l: "🫁 Cardio" }].map(t => (
+                <button key={t.v} onClick={() => setPlanTypeFilter(t.v)} style={{ padding: "5px 11px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: planTypeFilter === t.v ? C.ac : C.s2, color: planTypeFilter === t.v ? "#fff" : C.mt }}>{t.l}</button>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {plans.filter(p => planTypeFilter === "all" || p.focus === planTypeFilter).map(p => (
+              <Card key={p.id} style={{ padding: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+                  <div>
+                    <div style={{ color: C.tx, fontWeight: 600, fontSize: 15 }}>{p.title || p.name}</div>
+                    {p.description && <div style={{ color: C.mt, fontSize: 12, marginTop: 4 }}>{p.description}</div>}
+                    {p.focus && <span style={{ display: "inline-block", marginTop: 6, fontSize: 9.5, fontWeight: 700, padding: "3px 8px", borderRadius: 20, background: C.ac + "20", color: C.ac }}>{({ upper_body: "💪 Upper", lower_body: "🦵 Lower", full_body: "🔄 Composite", cardio: "🫁 Cardio" })[p.focus] || p.focus}</span>}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Badge color={p.status === "active" ? C.ok : C.mt}>{p.status || "draft"}</Badge>
+                    <button onClick={() => startEdit(p)} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", background: C.wn + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>✏️</button>
+                    <button onClick={() => deletePlan(p)} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", background: C.dg + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>🗑️</button>
+                  </div>
                 </div>
-              </div>
-              {p.exercises && Array.isArray(p.exercises) && <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 4 }}>{p.exercises.slice(0, 4).map((ex, i) => <span key={i} style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 500, background: C.ac + "15", color: C.ac }}>{ex.name || ex}</span>)}</div>}
-            </Card>
-          ))}
+                {p.exercises && Array.isArray(p.exercises) && <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 4 }}>{p.exercises.slice(0, 4).map((ex, i) => <span key={i} style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 500, background: C.ac + "15", color: C.ac }}>{ex.name || ex}</span>)}</div>}
+              </Card>
+            ))}
+          </div>
         </div>
       ))}
 
@@ -225,6 +239,15 @@ export default function WorkoutsPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <Input label="Title" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. PPL Week 1" />
           <Input label="Description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+          <div>
+            <label style={{ fontSize: 13, color: C.mt, fontWeight: 500, marginBottom: 6, display: "block" }}>Workout Type <span style={{ opacity: .6 }}>(optional)</span></label>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {[{ v: "upper_body", l: "💪 Upper Body" }, { v: "lower_body", l: "🦵 Lower Body" }, { v: "full_body", l: "🔄 Full Body / Composite" }, { v: "cardio", l: "🫁 Cardio" }].map(t => (
+                <button key={t.v} type="button" onClick={() => setForm({ ...form, focus: form.focus === t.v ? "" : t.v })} style={{ padding: "7px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 11.5, fontWeight: 600, background: form.focus === t.v ? C.ac : C.s2, color: form.focus === t.v ? "#fff" : C.mt }}>{t.l}</button>
+              ))}
+            </div>
+            <Input value={["upper_body", "lower_body", "full_body", "cardio", ""].includes(form.focus) ? "" : form.focus} onChange={e => setForm({ ...form, focus: e.target.value })} placeholder="Or type a custom label…" style={{ marginTop: 6 }} />
+          </div>
           {clients.length > 0 && (
             <div>
               <label style={{ fontSize: 13, color: C.mt, fontWeight: 500, marginBottom: 8, display: "block" }}>Assign to (select any number)</label>

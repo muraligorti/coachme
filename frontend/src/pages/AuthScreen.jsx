@@ -7,17 +7,18 @@ import { C } from "../theme/theme.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { api } from "../lib/api.js";
 import { GOOGLE_CLIENT_ID } from "../lib/config.js";
-import { log } from "../lib/utils.js";
+import { log, compressImage } from "../lib/utils.js";
 import { Card, Btn, Input, Sel } from "../components/ui.jsx";
 import { PhoneInput } from "../components/PhoneInput.jsx";
 
 export default function AuthScreen() {
   const { login, register, googleLogin } = useAuth();
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ name: "", email: "", password: "", role: "CLIENT", phone: "", specializations: [] });
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "CLIENT", phone: "", specializations: [], avatar: "" });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [resetMethod, setResetMethod] = useState("email");
@@ -117,6 +118,21 @@ export default function AuthScreen() {
           {(mode === "login" || mode === "register") && <div style={{ display: "flex", justifyContent: "center" }}><div ref={googleBtnRef} /></div>}
           {(mode === "login" || mode === "register") && <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "2px 0" }}><div style={{ flex: 1, height: 1, background: C.bd }} /><span style={{ fontSize: 12, color: C.mt }}>or</span><div style={{ flex: 1, height: 1, background: C.bd }} /></div>}
           {mode === "register" && <><Input label="Full Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Murali Gorti" /><PhoneInput label="Mobile Number" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></>}
+          {mode === "register" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              {form.avatar ? <img src={form.avatar} alt="" style={{ width: 48, height: 48, borderRadius: 14, objectFit: "cover" }} /> :
+                <div style={{ width: 48, height: 48, borderRadius: 14, background: C.s2, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: C.mt }}>👤</div>}
+              <label style={{ fontSize: 12, fontWeight: 600, color: C.ac, cursor: "pointer" }}>
+                {uploadingPhoto ? "Uploading…" : form.avatar ? "Change photo" : "Add a photo (optional)"}
+                <input type="file" accept="image/*" disabled={uploadingPhoto} style={{ display: "none" }} onChange={async (e) => {
+                  const file = e.target.files?.[0]; if (!file) return;
+                  setUploadingPhoto(true);
+                  try { const compressed = await compressImage(file, 300, 0.75); setForm(f => ({ ...f, avatar: compressed })); } catch { /* ignore, photo stays optional */ }
+                  setUploadingPhoto(false);
+                }} />
+              </label>
+            </div>
+          )}
           {mode === "forgot" && <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>{[{ id: "sms", label: "📱 SMS" }, { id: "email", label: "📧 Email" }].map(m => <button key={m.id} onClick={() => setResetMethod(m.id)} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, background: resetMethod === m.id ? C.ac + "20" : C.s2, color: resetMethod === m.id ? C.ac : C.mt }}>{m.label}</button>)}</div>}
           {mode === "forgot" && resetMethod === "sms" && <PhoneInput label="Mobile Number" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />}
           {(mode === "login" || mode === "register" || (mode === "forgot" && resetMethod === "email")) && <Input label="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="you@email.com" />}
