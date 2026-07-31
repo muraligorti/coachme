@@ -291,6 +291,36 @@ export async function getMe(userId) {
   return { user, profile, subscription: { tier: subscription?.tier, maxClients: subscription?.maxClients } };
 }
 
+// Genuinely missing until now — the frontend's Settings "Update Profile"
+// button has been calling this endpoint the whole time with no backend
+// route to receive it, silently failing on every attempt (the frontend's
+// error handling swallowed the resulting 404). Also the entry point for
+// setting a profile photo (see routes/auth.js PUT /profile).
+export async function updateProfile(userId, data) {
+  const user = await userRepository.findByIdBasic(userId);
+  if (!user) throw new AppError(404, "User not found");
+
+  // A very rough sanity cap on avatar size — this is stored as a plain
+  // text column (base64 data URL), not real object storage (no S3/R2
+  // configured yet), so keep it to compressed-thumbnail territory rather
+  // than letting someone send an enormous string.
+  if (data.avatar && data.avatar.length > 500000) throw new AppError(400, "Photo is too large — please use a smaller image");
+
+  const updateData = {};
+  if (data.name !== undefined) updateData.displayName = data.name;
+  if (data.displayName !== undefined) updateData.displayName = data.displayName;
+  if (data.avatar !== undefined) updateData.avatar = data.avatar;
+  if (data.phone !== undefined) updateData.phone = data.phone;
+  // NOTE: bio is COACH-only (ClientProfile has no bio column) — handled
+  // separately below rather than in the shared updateData object, so a
+  // client sending bio doesn't crash on an unknown-field error.
+  if (Object.keys(updateData).length === 0 && data.bio === undefined) throw new AppError(400, "No valid profile fields provided");
+
+  if (user.role === "COACH") return profileRepository.updateCoachProfile(userId, { ...updateData, ...(data.bio !== undefined ? { bio: data.bio } : {}) });
+  if (user.role === "CLIENT") return profileRepository.updateClientProfile(userId, updateData);
+  throw new AppError(400, "This account type has no editable profile");
+}
+
 // ─── Forgot password ─────────────────────────────────────────────────
 
 export async function forgotPassword(email, phone) {
