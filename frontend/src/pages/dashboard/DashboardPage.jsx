@@ -11,7 +11,7 @@ import { Card, Badge, SC, Spin } from "../../components/ui.jsx";
 import DailyBriefing from "./DailyBriefing.jsx";
 
 export default function DashboardPage({ onNav }) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [stats, setStats] = useState({});
   const [up, setUp] = useState([]);
   const [clientCount, setClientCount] = useState(0);
@@ -43,9 +43,12 @@ export default function DashboardPage({ onNav }) {
     <div style={{ position: "relative" }}>
       <div style={{ position: "absolute", top: -24, left: -16, right: -16, height: 200, background: `radial-gradient(circle at 20% 15%, ${C.ac}45, transparent 55%), radial-gradient(circle at 85% 5%, ${C.a2}35, transparent 50%)`, filter: "blur(14px)", pointerEvents: "none", zIndex: 0 }} />
       <div style={{ position: "relative", zIndex: 1 }}>
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 14, color: C.mt, fontWeight: 500 }}>{g},</div>
-          <h2 style={{ background: `linear-gradient(90deg, ${C.tx} 40%, ${C.ac} 130%)`, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent", fontSize: 24, margin: "2px 0 0", fontWeight: 800, letterSpacing: "-.3px" }}>{user?.name || "Coach"} 👋</h2>
+        <div style={{ marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 14, color: C.mt, fontWeight: 500 }}>{g},</div>
+            <h2 style={{ background: `linear-gradient(90deg, ${C.tx} 40%, ${C.ac} 130%)`, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent", fontSize: 24, margin: "2px 0 0", fontWeight: 800, letterSpacing: "-.3px" }}>{user?.name || "Coach"} 👋</h2>
+          </div>
+          <button onClick={() => { if (confirm("Sign out?")) logout(); }} style={{ width: 34, height: 34, borderRadius: 17, border: `1px solid ${C.bd}`, cursor: "pointer", background: C.sf, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }} title="Sign Out">🚪</button>
         </div>
         <DailyBriefing onNav={go} />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
