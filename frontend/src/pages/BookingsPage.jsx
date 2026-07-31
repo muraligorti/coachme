@@ -70,11 +70,13 @@ export default function BookingsPage({ onNav }) {
     return () => clearInterval(interval);
   }, [bookings]);
 
-  const openActivePreview = async () => {
-    if (!liveBatch) return;
+  const openActivePreview = async (bookingsForPreview) => {
+    const target = bookingsForPreview || liveBatch;
+    if (!target || target.length === 0) return;
+    if (bookingsForPreview) setLiveBatch(bookingsForPreview); // so the modal's "Start Recording" button and header both reflect whichever batch is being previewed, not just the auto-detected one
     setShowActivePreview(true); setActivePreviewLoading(true);
     const plansByClient = {};
-    await Promise.all(liveBatch.map(async (b) => {
+    await Promise.all(target.map(async (b) => {
       const cid = b.clientId || b.client?.id;
       if (!cid) return;
       try { const r = await api.get(`/workout-assignments/client/${cid}`); plansByClient[cid] = r.plans || []; } catch { plansByClient[cid] = []; }
@@ -200,6 +202,18 @@ export default function BookingsPage({ onNav }) {
     alert(`Opening WhatsApp for ${withPhone.length} client(s)…`);
   };
 
+  // Scoped version of cancelDayAndNotify — cancels + notifies only the
+  // clients in ONE batch (one time-slot), not the coach's entire day.
+  const cancelBatchAndNotify = async (batchBookings) => {
+    if (batchBookings.length === 0) return;
+    const t = new Date(batchBookings[0].date || batchBookings[0].startTime || batchBookings[0].scheduledAt);
+    if (!confirm(`Cancel this ${t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} batch (${batchBookings.length} client${batchBookings.length !== 1 ? "s" : ""}) and notify them via WhatsApp?`)) return;
+    for (const bk of batchBookings) { await markAttendance(bk.id, "cancelled"); }
+    const msg = `❌ *Session Cancelled*\n\nHi! Your ${t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} session on ${t.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })} has been cancelled.\n\nWe'll reschedule soon. Sorry for the inconvenience!\n\n— Your Coach via CoachMe.life`;
+    batchBookings.forEach((bk, i) => { const phone = resolveClientPhone(bk); if (phone) setTimeout(() => sendWhatsAppToClient(phone, msg), i * 800); });
+    alert(`Batch cancelled. WhatsApp notifications sent to ${batchBookings.filter(bk => resolveClientPhone(bk)).length} of ${batchBookings.length} client(s).`);
+  };
+
   const cancelDayAndNotify = async () => {
     const dayBk = getDateBookings(selDate);
     if (dayBk.length === 0) { alert("No sessions to cancel"); return; }
@@ -304,7 +318,7 @@ export default function BookingsPage({ onNav }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "12px 0 8px" }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{new Date(selDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}{isHoliday && <Badge color={C.dg} style={{ marginLeft: 8 }}>Holiday</Badge>}</span>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          {db.filter(b => (b.status || "").toLowerCase() === "confirmed").length > 1 && <button onClick={() => setActiveSession(db.filter(b => (b.status || "").toLowerCase() === "confirmed"))} style={{ padding: "4px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.ac + "25", color: C.ac }}>🎙️ Group Session</button>}
+          {db.filter(b => (b.status || "").toLowerCase() === "confirmed").length > 1 && <button onClick={() => openActivePreview(db.filter(b => (b.status || "").toLowerCase() === "confirmed"))} style={{ padding: "4px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.ac + "25", color: C.ac }}>🎙️ Group Session</button>}
           <span style={{ fontSize: 12, color: C.mt }}>{db.length} session(s)</span>
         </div>
       </div>
@@ -398,7 +412,10 @@ export default function BookingsPage({ onNav }) {
                       <div style={{ fontSize: 15, fontWeight: 800, color: C.ac }}>{t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} Batch</div>
                       <div style={{ fontSize: 10.5, color: C.mt, marginTop: 1 }}>{first.duration || 60}min · {first.sessionType === "IN_PERSON" ? "📍 Offline" : first.sessionType === "HYBRID" ? "🔀 Hybrid" : "💻 Online"} · {batchBookings.length} participants</div>
                     </div>
-                    <button onClick={() => { setBatchMessageBookings(batchBookings); setBatchMessageText(""); setShowBatchMessage(true); }} style={{ padding: "5px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: "#25D36620", color: "#25D366" }}>📢 Message Batch</button>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => { setBatchMessageBookings(batchBookings); setBatchMessageText(""); setShowBatchMessage(true); }} style={{ padding: "5px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: "#25D36620", color: "#25D366" }}>📢 Message Batch</button>
+                      <button onClick={() => cancelBatchAndNotify(batchBookings)} style={{ padding: "5px 10px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, background: C.dg + "20", color: C.dg }}>❌ Cancel Batch</button>
+                    </div>
                   </div>
                   {batchBookings.map(b => {
                     const clientName = cName(b.client) || b.type || "Session";
