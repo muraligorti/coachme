@@ -68,6 +68,13 @@ export async function me(req, res) {
   } catch (err) { sendError(err, res, "Failed to load profile"); }
 }
 
+export async function updateProfile(req, res) {
+  try {
+    const result = await authService.updateProfile(req.user.id, req.body || {});
+    res.json(result);
+  } catch (err) { sendError(err, res, "Failed to update profile"); }
+}
+
 export async function forgotPassword(req, res) {
   try {
     const result = await authService.forgotPassword(req.body.email, req.body.phone);
