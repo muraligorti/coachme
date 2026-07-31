@@ -89,10 +89,10 @@ export default function BookingsPage({ onNav }) {
   // horizontal week strip without the coach needing to scroll to find it
   // manually — this fires on mount (today) and whenever selDate changes.
   useEffect(() => {
-    if (viewMode !== "week") return;
+    if (viewMode !== "week" || loading) return;
     const btn = dateButtonRefs.current[selDate];
     if (btn) btn.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-  }, [selDate, viewMode]);
+  }, [selDate, viewMode, loading]);
 
   const createBooking = async (bookingData) => api.post("/bookings", bookingData);
 
