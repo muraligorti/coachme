@@ -125,3 +125,16 @@ export const PBar = ({ value, max = 100, color = C.ac }) => (
     <div style={{ height: "100%", width: `${Math.min((value / max) * 100, 100)}%`, borderRadius: 3, background: color, transition: "width .5s" }} />
   </div>
 );
+
+// Real profile photo when a client/coach has uploaded one; falls back to
+// an initials-in-gradient circle otherwise. Used anywhere a person needs
+// a visual identifier — client lists, batch rosters, etc.
+export const Avatar = ({ src, name, size = 42, radius }) => {
+  const r = radius ?? Math.round(size * 0.28);
+  const initial = (name || "?")[0]?.toUpperCase() || "?";
+  return src ? (
+    <img src={src} alt="" style={{ width: size, height: size, borderRadius: r, objectFit: "cover", flexShrink: 0 }} />
+  ) : (
+    <div style={{ width: size, height: size, borderRadius: r, background: C.gr, display: "flex", alignItems: "center", justifyContent: "center", fontSize: Math.round(size * 0.38), fontWeight: 700, color: "#fff", flexShrink: 0 }}>{initial}</div>
+  );
+};
