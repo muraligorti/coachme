@@ -55,6 +55,11 @@ export function AuthProvider({ children }) {
     if (payload.role === "COACH" && Array.isArray(pl.specializations) && pl.specializations.length) {
       try { await api.put("/coach-profile/specializations", { specializations: pl.specializations }); } catch { /* non-fatal, editable later in Settings */ }
     }
+    // Same safe-follow-up pattern for an optional signup photo — works for
+    // either role via the real PUT /auth/profile endpoint.
+    if (pl.avatar) {
+      try { await api.put("/auth/profile", { avatar: pl.avatar }); } catch { /* non-fatal, editable later in Settings */ }
+    }
   };
 
   const googleLogin = async (credential, role) => {
