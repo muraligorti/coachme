@@ -19,6 +19,7 @@ router.post("/login", loginLimiter, sanitizeBody, audit("login", "user"), authCo
 router.post("/logout", authenticate, audit("logout", "user"), authController.logout);
 router.post("/refresh", authController.refresh);
 router.get("/me", authenticate, authController.me);
+router.put("/profile", authenticate, sanitizeBody, audit("update_profile", "user"), authController.updateProfile);
 router.post("/forgot-password", sanitizeBody, authController.forgotPassword);
 router.post("/reset-password", sanitizeBody, authController.resetPassword);
 
