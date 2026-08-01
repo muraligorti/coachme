@@ -39,11 +39,17 @@ export async function removeExercise(userId, exerciseId) {
   return { message: "Exercise removed" };
 }
 
-export async function addTemplate(userId, { name, description, level, specialization, exercises }) {
+export async function addTemplate(userId, { name, description, level, specialization, sections }) {
   if (!name || !name.trim()) throw new AppError(400, "Template name is required");
-  if (!Array.isArray(exercises) || exercises.length === 0) throw new AppError(400, "A template needs at least one exercise");
+  if (!Array.isArray(sections) || sections.length === 0) throw new AppError(400, "A template needs at least one section");
+  for (const s of sections) {
+    if (!s.name || !s.name.trim()) throw new AppError(400, "Every section needs a name");
+    if (!Array.isArray(s.exercises) || s.exercises.length === 0) throw new AppError(400, `Section "${s.name}" needs at least one exercise`);
+    if (s.daysOfWeek && s.daysOfWeek.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) throw new AppError(400, `Section "${s.name}" has an invalid day value`);
+  }
   const coach = await getCoachProfileOrThrow(userId);
-  return repo.createTemplate(coach.id, { name: name.trim(), description: description || null, level: level || null, specialization: specialization || null, exercises });
+  const cleanSections = sections.map((s) => ({ name: s.name.trim(), icon: s.icon || null, daysOfWeek: s.daysOfWeek || [], exercises: s.exercises }));
+  return repo.createTemplate(coach.id, { name: name.trim(), description: description || null, level: level || null, specialization: specialization || null, sections: cleanSections });
 }
 
 export async function removeTemplate(userId, templateId) {

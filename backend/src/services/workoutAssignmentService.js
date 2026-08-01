@@ -108,3 +108,28 @@ export async function getTodaysWorkout(userId, clientId) {
     };
   }));
 }
+
+// Maps a multi-section template to one or more clients — creates a real,
+// independent WorkoutPlan + WorkoutPlanAssignment per (client, section)
+// pair, seeded from the template's current content and default days.
+// This is a COPY: editing the template afterward never retroactively
+// changes what was already mapped here, and adjusting one client's days
+// afterward is just editing that resulting plan's own assignment
+// (already-existing functionality) — no separate "override" system needed.
+export async function mapTemplateToClients(userId, templateId, clientIds) {
+  if (!Array.isArray(clientIds) || clientIds.length === 0) throw new AppError(400, "Select at least one client");
+  const coach = await getCoachProfileOrThrow(userId);
+
+  const template = await repo.findTemplateById(templateId);
+  if (!template) throw new AppError(404, "Template not found");
+  if (template.coachId && template.coachId !== coach.id) throw new AppError(403, "This isn't your template");
+  if (!Array.isArray(template.sections) || template.sections.length === 0) throw new AppError(400, "This template has no sections to map");
+
+  for (const clientId of clientIds) {
+    const rel = await repo.findActiveRelationship(coach.id, clientId);
+    if (!rel) throw new AppError(403, `Client ${clientId} is not on your roster`);
+  }
+
+  const created = await repo.mapTemplateToClients(coach.id, template, clientIds);
+  return { created, clientCount: clientIds.length };
+}
