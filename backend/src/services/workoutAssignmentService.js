@@ -24,11 +24,23 @@ export async function getAssignedClients(userId, planId) {
   const coach = await getCoachProfileOrThrow(userId);
   await verifyPlanOwnership(coach, planId);
   const rows = await repo.findAssignedClientIds(planId);
-  return rows.map((r) => r.clientId);
+  // daysOfWeek is technically per (plan, client) row, but setAssignedClients
+  // always writes the SAME days across every client in one save action —
+  // so the first row's days is a reasonable pre-fill default when
+  // reopening this plan to edit, even though in principle two different
+  // save actions over time could have left different clients with
+  // different days (edge case, not the common flow).
+  return { clientIds: rows.map((r) => r.clientId), daysOfWeek: rows[0]?.daysOfWeek || [] };
 }
 
-export async function setAssignedClients(userId, planId, clientIds) {
+const DAY_VALIDATION = (days) => {
+  if (!Array.isArray(days)) throw new AppError(400, "daysOfWeek must be an array");
+  if (days.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) throw new AppError(400, "daysOfWeek values must be integers 0-6 (0=Sunday)");
+};
+
+export async function setAssignedClients(userId, planId, clientIds, daysOfWeek = []) {
   if (!Array.isArray(clientIds)) throw new AppError(400, "clientIds must be an array");
+  DAY_VALIDATION(daysOfWeek);
   const coach = await getCoachProfileOrThrow(userId);
   await verifyPlanOwnership(coach, planId);
 
@@ -39,8 +51,8 @@ export async function setAssignedClients(userId, planId, clientIds) {
     if (!rel) throw new AppError(403, `Client ${clientId} is not on your roster`);
   }
 
-  await repo.setAssignments(planId, clientIds);
-  return { clientIds };
+  await repo.setAssignments(planId, clientIds, daysOfWeek);
+  return { clientIds, daysOfWeek };
 }
 
 export async function getPlansForClient(userId, clientId) {
@@ -48,11 +60,51 @@ export async function getPlansForClient(userId, clientId) {
   const rel = await repo.findActiveRelationship(coach.id, clientId);
   if (!rel) throw new AppError(403, "This client is not on your roster");
   const rows = await repo.findPlansForClient(clientId);
-  return rows.map((r) => r.workoutPlan);
+  // Include daysOfWeek alongside each plan so the frontend can show a
+  // real weekly-split view (see mockup "Client's Weekly Split") without
+  // a second round-trip.
+  return rows.map((r) => ({ ...r.workoutPlan, daysOfWeek: r.daysOfWeek }));
 }
 
 export async function getAssignedClientIdsForCoach(userId) {
   const coach = await getCoachProfileOrThrow(userId);
   const rows = await repo.findAssignedClientIdsForCoach(coach.id);
   return rows.map((r) => r.clientId);
+}
+
+// ── Day-wise scheduling: today's plan + weekly completion ──────────────
+
+function currentWeekBounds() {
+  const now = new Date();
+  const day = now.getDay(); // 0=Sunday
+  const weekStart = new Date(now); weekStart.setDate(now.getDate() - day); weekStart.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6); weekEnd.setHours(23, 59, 59, 999);
+  return { weekStart, weekEnd };
+}
+
+// Returns whatever plan(s) are scheduled for TODAY for this client, each
+// enriched with this week's completion count and the last time it was
+// logged. Returns an empty array if nothing is scheduled today — the
+// frontend falls back to showing the client's generic assigned plans
+// (see mockup: Ananya with "no plan scheduled today").
+export async function getTodaysWorkout(userId, clientId) {
+  const coach = await getCoachProfileOrThrow(userId);
+  const rel = await repo.findActiveRelationship(coach.id, clientId);
+  if (!rel) throw new AppError(403, "This client is not on your roster");
+
+  const todayDow = new Date().getDay();
+  const assignments = await repo.findAssignmentsForDay(clientId, todayDow);
+  const { weekStart, weekEnd } = currentWeekBounds();
+
+  return Promise.all(assignments.map(async (a) => {
+    const sessions = await repo.findSessionDatesForPlanThisWeek(clientId, a.workoutPlanId, weekStart, weekEnd);
+    const distinctDays = new Set(sessions.map((s) => s.completedAt.toISOString().slice(0, 10)));
+    const last = await repo.findLastSessionForPlan(clientId, a.workoutPlanId);
+    return {
+      plan: a.workoutPlan,
+      completedThisWeek: distinctDays.size,
+      lastCompletedAt: last?.completedAt || null,
+      lastExerciseName: last?.exerciseName || null,
+    };
+  }));
 }
