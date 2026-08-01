@@ -33,6 +33,8 @@ export default function BookingsPage({ onNav }) {
   const [liveBatch, setLiveBatch] = useState(null); // bookings currently "in session" based on the clock, or null
   const [showActivePreview, setShowActivePreview] = useState(false);
   const [activePreviewPlans, setActivePreviewPlans] = useState({}); // clientId -> plans[]
+  const [activePreviewToday, setActivePreviewToday] = useState({}); // clientId -> today's workout(s) with weekly count
+  const [activeSessionTodayPlans, setActiveSessionTodayPlans] = useState({}); // carried into LiveSessionPage for exercise pre-fill
   const [activePreviewLoading, setActivePreviewLoading] = useState(false);
 
   const load = () => { Promise.all([api.get("/bookings").catch(() => ({})), api.get("/clients").catch(() => ({}))]).then(([b, c]) => {
@@ -75,13 +77,15 @@ export default function BookingsPage({ onNav }) {
     if (!target || target.length === 0) return;
     if (bookingsForPreview) setLiveBatch(bookingsForPreview); // so the modal's "Start Recording" button and header both reflect whichever batch is being previewed, not just the auto-detected one
     setShowActivePreview(true); setActivePreviewLoading(true);
-    const plansByClient = {};
+    const plansByClient = {}; const todayByClient = {};
     await Promise.all(target.map(async (b) => {
       const cid = b.clientId || b.client?.id;
       if (!cid) return;
       try { const r = await api.get(`/workout-assignments/client/${cid}`); plansByClient[cid] = r.plans || []; } catch { plansByClient[cid] = []; }
+      try { const rt = await api.get(`/workout-assignments/today/${cid}`); todayByClient[cid] = rt.workouts || []; } catch { todayByClient[cid] = []; }
     }));
     setActivePreviewPlans(plansByClient);
+    setActivePreviewToday(todayByClient);
     setActivePreviewLoading(false);
   };
 
@@ -248,7 +252,7 @@ export default function BookingsPage({ onNav }) {
   const isHoliday = holidays.includes(selDate);
 
   if (loading) return <Spin />;
-  if (activeSession) return <LiveSessionPage booking={activeSession} clients={clients} onBack={() => setActiveSession(null)} onComplete={() => { setActiveSession(null); load(); }} />;
+  if (activeSession) return <LiveSessionPage booking={activeSession} clients={clients} todaysWorkouts={activeSessionTodayPlans} onBack={() => setActiveSession(null)} onComplete={() => { setActiveSession(null); load(); }} />;
 
   return (
     <div>
@@ -511,30 +515,53 @@ export default function BookingsPage({ onNav }) {
               {(liveBatch || []).map(b => {
                 const cid = b.clientId || b.client?.id;
                 const plans = activePreviewPlans[cid] || [];
+                const today = activePreviewToday[cid] || [];
                 return (
                   <div key={b.id} style={{ flex: "0 0 150px", background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 14, padding: 12 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, paddingBottom: 8, borderBottom: `1px solid ${C.bd}` }}>
                       <Avatar src={b.client?.avatar} name={resolveClientName(b)} size={26} radius={8} />
                       <div style={{ fontSize: 12.5, fontWeight: 700, color: C.tx, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resolveClientName(b)}</div>
                     </div>
-                    {plans.length === 0 ? (
+                    {today.length > 0 ? (
+                      // Scheduled for today (via day-wise mapping) — shown
+                      // prominently, distinct from just "one of their plans".
+                      today.map(tw => (
+                        <div key={tw.plan.id} style={{ marginBottom: 8 }}>
+                          <div style={{ fontSize: 9, fontWeight: 700, color: C.ac, letterSpacing: .3, marginBottom: 2 }}>TODAY</div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: C.tx, marginBottom: 4 }}>{tw.plan.title || tw.plan.name}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9.5, color: tw.completedThisWeek > 0 ? C.ok : C.wn, background: C.s2, borderRadius: 8, padding: "4px 6px", marginBottom: 6 }}>
+                            {tw.completedThisWeek > 0 ? "✓" : "○"} {tw.completedThisWeek > 0 ? `Done ${tw.completedThisWeek}× this week` : "Not done yet this week"}
+                          </div>
+                          {tw.plan.exercises && Array.isArray(tw.plan.exercises) && tw.plan.exercises.slice(0, 8).map((ex, i) => (
+                            <div key={i} style={{ fontSize: 10.5, color: C.tx, background: C.s2, borderRadius: 6, padding: "5px 7px", marginBottom: 4, lineHeight: 1.3 }}>
+                              {ex.name || ex}{ex.sets ? <span style={{ color: C.ac, fontWeight: 700 }}> {ex.sets}×{ex.reps}</span> : ""}
+                            </div>
+                          ))}
+                        </div>
+                      ))
+                    ) : plans.length === 0 ? (
                       <div style={{ fontSize: 11, color: C.mt }}>No plan assigned</div>
-                    ) : plans.map(p => (
-                      <div key={p.id} style={{ marginBottom: 6 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: C.ac, marginBottom: 4 }}>{p.title || p.name}</div>
-                        {p.exercises && Array.isArray(p.exercises) && p.exercises.slice(0, 8).map((ex, i) => (
-                          <div key={i} style={{ fontSize: 10.5, color: C.tx, background: C.s2, borderRadius: 6, padding: "5px 7px", marginBottom: 4, lineHeight: 1.3 }}>
-                            {ex.name || ex}{ex.sets ? <span style={{ color: C.ac, fontWeight: 700 }}> {ex.sets}×{ex.reps}</span> : ""}
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: C.mt, letterSpacing: .3, marginBottom: 6 }}>NO PLAN SCHEDULED TODAY</div>
+                        {plans.map(p => (
+                          <div key={p.id} style={{ marginBottom: 6 }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: C.ac, marginBottom: 4 }}>{p.title || p.name}</div>
+                            {p.exercises && Array.isArray(p.exercises) && p.exercises.slice(0, 8).map((ex, i) => (
+                              <div key={i} style={{ fontSize: 10.5, color: C.tx, background: C.s2, borderRadius: 6, padding: "5px 7px", marginBottom: 4, lineHeight: 1.3 }}>
+                                {ex.name || ex}{ex.sets ? <span style={{ color: C.ac, fontWeight: 700 }}> {ex.sets}×{ex.reps}</span> : ""}
+                              </div>
+                            ))}
                           </div>
                         ))}
-                      </div>
-                    ))}
+                      </>
+                    )}
                   </div>
                 );
               })}
             </div>
           )}
-          <Btn onClick={() => { setShowActivePreview(false); setActiveSession(liveBatch); }} style={{ width: "100%" }}>🎙️ Start Recording This Session</Btn>
+          <Btn onClick={() => { setShowActivePreview(false); setActiveSessionTodayPlans(activePreviewToday); setActiveSession(liveBatch); }} style={{ width: "100%" }}>🎙️ Start Recording This Session</Btn>
         </div>
       </Modal>
     </div>

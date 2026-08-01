@@ -10,7 +10,7 @@ import { api } from "../lib/api.js";
 import { cName } from "../lib/utils.js";
 import { Card, Badge, Btn, Input, TextArea, Spin } from "../components/ui.jsx";
 
-export default function LiveSessionPage({ booking, clients, onBack, onComplete }) {
+export default function LiveSessionPage({ booking, clients, todaysWorkouts, onBack, onComplete }) {
   const bookings = Array.isArray(booking) ? booking : [booking];
   const isGroup = bookings.length > 1;
   const [phase, setPhase] = useState("recording"); // recording -> processing -> review -> done
@@ -18,6 +18,36 @@ export default function LiveSessionPage({ booking, clients, onBack, onComplete }
   const [manualNotes, setManualNotes] = useState("");
   const [timer, setTimer] = useState(0);
   const [exercises, setExercises] = useState([]);
+  const [todaysPlan, setTodaysPlan] = useState(null); // 1:1 only — {plan, completedThisWeek, lastCompletedAt, lastExerciseName} or null
+  const [prefilledFromPlan, setPrefilledFromPlan] = useState(false);
+
+  // Today's scheduled workout (1:1 only — a group's per-client schedules
+  // were already shown in the roster preview before reaching this screen,
+  // and a single shared transcript can't cleanly attribute exercises to
+  // different clients' different plans). Uses the roster preview's fetch
+  // if it was already done (todaysWorkouts prop); falls back to fetching
+  // directly here for the "🎙️ Live Session" quick-button path, which
+  // skips the roster preview entirely.
+  useEffect(() => {
+    if (isGroup) return;
+    const cid = bookings[0].clientId || bookings[0].client?.id;
+    if (!cid) return;
+    const provided = todaysWorkouts?.[cid];
+    if (provided) { setTodaysPlan(provided[0] || null); return; }
+    api.get(`/workout-assignments/today/${cid}`).then(r => setTodaysPlan((r.workouts || [])[0] || null)).catch(() => {});
+  }, []);
+
+  // Pre-fill the exercise list from today's plan, once, only if the coach
+  // hasn't already started building a list some other way (manually or
+  // via a template) — never silently overwrites something already there.
+  useEffect(() => {
+    if (isGroup || !todaysPlan || prefilledFromPlan || exercises.length > 0) return;
+    const planExercises = todaysPlan.plan?.exercises;
+    if (Array.isArray(planExercises) && planExercises.length > 0) {
+      setExercises(planExercises.map(e => ({ name: e.name || e, sets: e.sets || 3, reps: e.reps || 10, weight: "", notes: "", formNotes: "", formScore: null })));
+      setPrefilledFromPlan(true);
+    }
+  }, [todaysPlan]);
   const [comparisons, setComparisons] = useState({}); // exerciseName -> comparison result, 1:1 sessions only
 
   // "vs last time" comparison — deterministic math (see backend
@@ -190,7 +220,14 @@ For "formNotes" specifically: listen for anything the coach says about HOW the e
         for (const ex of validExercises) {
           // formScore/formNotes confirmed accepted directly by POST /workouts/sessions
           // (verified against the real backend) — no separate follow-up call needed.
-          await api.post("/workouts/sessions", { clientId: b.clientId || b.client?.id, exerciseName: ex.name, sets: parseInt(ex.sets) || 0, reps: parseInt(ex.reps) || 0, intensity: ex.weight || null, durationSeconds: timer, notes: ex.notes || null, formScore: ex.formScore || null, formNotes: ex.formNotes || null });
+          // Link to today's plan (1:1 only) so future weekly-completion
+          // counts pick this session up — matches by exercise NAME against
+          // the plan's own list, since the coach may have added/edited
+          // exercises beyond what was pre-filled and only genuinely
+          // plan-sourced ones should count toward that plan's weekly total.
+          const planExerciseNames = !isGroup && todaysPlan?.plan?.exercises ? new Set(todaysPlan.plan.exercises.map(e => (e.name || e).toLowerCase())) : null;
+          const matchedPlanId = planExerciseNames && planExerciseNames.has(ex.name.toLowerCase()) ? todaysPlan.plan.id : null;
+          await api.post("/workouts/sessions", { clientId: b.clientId || b.client?.id, planId: matchedPlanId, exerciseName: ex.name, sets: parseInt(ex.sets) || 0, reps: parseInt(ex.reps) || 0, intensity: ex.weight || null, durationSeconds: timer, notes: ex.notes || null, formScore: ex.formScore || null, formNotes: ex.formNotes || null });
         }
       }
       onComplete?.();
@@ -200,6 +237,23 @@ For "formNotes" specifically: listen for anything the coach says about HOW the e
   if (phase === "recording") return (
     <div style={{ minHeight: "100dvh", background: C.bg, padding: 20, display: "flex", flexDirection: "column" }}>
       <div style={{ textAlign: "center", marginBottom: 20 }}><div style={{ fontSize: 12, color: C.mt, marginBottom: 4 }}>LIVE SESSION</div><div style={{ fontSize: 16, fontWeight: 700, color: C.tx }}>{clientName}</div></div>
+      {!isGroup && todaysPlan && (
+        <Card style={{ marginBottom: 16, background: `linear-gradient(160deg, ${C.s2} 0%, ${C.sf} 100%)`, borderColor: C.ac + "40" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontSize: 10, color: C.ac, fontWeight: 700, letterSpacing: .5, marginBottom: 2 }}>TODAY'S PLANNED WORKOUT</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: C.tx }}>{todaysPlan.plan?.title || todaysPlan.plan?.name}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.bd}` }}>
+            <span style={{ fontSize: 14 }}>{todaysPlan.completedThisWeek > 0 ? "✅" : "⭕"}</span>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.tx }}>{todaysPlan.completedThisWeek > 0 ? `Done ${todaysPlan.completedThisWeek}× this week` : "Not done yet this week"}</div>
+              {todaysPlan.lastCompletedAt && <div style={{ fontSize: 10, color: C.mt }}>Last: {new Date(todaysPlan.lastCompletedAt).toLocaleDateString("en-US", { weekday: "long" })}{todaysPlan.lastExerciseName ? ` — ${todaysPlan.lastExerciseName}` : ""}</div>}
+            </div>
+          </div>
+        </Card>
+      )}
       <Card style={{ textAlign: "center", marginBottom: 16 }}>
         <div style={{ fontSize: 48, fontWeight: 800, color: C.ac, fontVariantNumeric: "tabular-nums" }}>{formatTime(timer)}</div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 8 }}><div style={{ width: 10, height: 10, borderRadius: 5, background: C.dg, animation: "pulse 1.5s ease infinite" }} /><span style={{ fontSize: 13, color: C.dg, fontWeight: 600 }}>Recording</span></div>

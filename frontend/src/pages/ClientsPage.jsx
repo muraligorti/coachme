@@ -35,7 +35,14 @@ function ClientWorkoutsTab({ clientId }) {
       {plans.map(p => (
         <Card key={p.id} style={{ padding: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: C.tx }}>{p.title || p.name}</div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: C.tx }}>{p.title || p.name}</div>
+              {p.daysOfWeek && p.daysOfWeek.length > 0 ? (
+                <div style={{ fontSize: 11, color: C.ac, marginTop: 2, fontWeight: 600 }}>{p.daysOfWeek.slice().sort().map(d => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]).join(", ")}</div>
+              ) : (
+                <div style={{ fontSize: 11, color: C.mt, marginTop: 2 }}>No days set — flexible</div>
+              )}
+            </div>
             <Badge color={p.status === "active" ? C.ok : C.mt}>{p.status || "draft"}</Badge>
           </div>
           {p.description && <div style={{ color: C.mt, fontSize: 12, marginTop: 4 }}>{p.description}</div>}

@@ -27,6 +27,7 @@ export default function WorkoutsPage() {
   const [editPlan, setEditPlan] = useState(null);
   const [form, setForm] = useState({ title: "", description: "", focus: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] });
   const [assignedClientIds, setAssignedClientIds] = useState(new Set());
+  const [assignedDays, setAssignedDays] = useState(new Set()); // 0=Sunday...6=Saturday, empty = flexible/no fixed schedule
   const [saveError, setSaveError] = useState("");
   const [planTypeFilter, setPlanTypeFilter] = useState("all");
 
@@ -88,10 +89,10 @@ export default function WorkoutsPage() {
     // into the plan create/update payload itself, since that field was
     // the source of the earlier "client not getting stored" bug.
     if (planId && !String(planId).startsWith("pending_") && !String(planId).startsWith("workout_")) {
-      try { await api.put(`/workout-assignments/plan/${planId}`, { clientIds }); }
+      try { await api.put(`/workout-assignments/plan/${planId}`, { clientIds, daysOfWeek: [...assignedDays] }); }
       catch (e) { setSaveError(`Plan saved, but assigning to client(s) failed: ${e.message}`); return; }
     }
-    setEditPlan(null); setShowB(false); setAssignedClientIds(new Set()); setForm({ title: "", description: "", focus: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] });
+    setEditPlan(null); setShowB(false); setAssignedClientIds(new Set()); setAssignedDays(new Set()); setForm({ title: "", description: "", focus: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] });
   };
 
   const deletePlan = async (p) => {
@@ -105,9 +106,9 @@ export default function WorkoutsPage() {
     setSaveError("");
     setEditPlan(p);
     setForm({ title: p.title || p.name || "", description: p.description || "", focus: p.focus || "", exercises: (p.exercises && p.exercises.length > 0) ? p.exercises.map(e => ({ name: e.name || e, sets: e.sets || 3, reps: e.reps || 12, rest: e.rest || 60 })) : [{ name: "", sets: 3, reps: 12, rest: 60 }] });
-    setAssignedClientIds(new Set());
+    setAssignedClientIds(new Set()); setAssignedDays(new Set());
     if (!String(p.id).startsWith("workout_") && !String(p.id).startsWith("pending_")) {
-      api.get(`/workout-assignments/plan/${p.id}`).then(r => setAssignedClientIds(new Set(r.clientIds || []))).catch(() => {});
+      api.get(`/workout-assignments/plan/${p.id}`).then(r => { setAssignedClientIds(new Set(r.clientIds || [])); setAssignedDays(new Set(r.daysOfWeek || [])); }).catch(() => {});
     }
     setShowB(true);
   };
@@ -118,7 +119,7 @@ export default function WorkoutsPage() {
   const useTemplate = (t) => {
     setEditPlan(null); setSaveError("");
     setForm({ title: t.name, description: t.description || "", exercises: (t.exercises || []).map(e => ({ name: e.name, sets: e.sets || 3, reps: e.reps || 12, rest: e.rest || 60 })) });
-    setAssignedClientIds(new Set());
+    setAssignedClientIds(new Set()); setAssignedDays(new Set());
     setShowB(true);
   };
 
@@ -159,7 +160,7 @@ export default function WorkoutsPage() {
 
   return (
     <div>
-      <ST right={<Btn onClick={() => { setEditPlan(null); setSaveError(""); setAssignedClientIds(new Set()); setForm({ title: "", description: "", focus: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] }); setShowB(true); }} style={{ padding: "8px 16px", fontSize: 13 }}>+ Create</Btn>}>Workouts</ST>
+      <ST right={<Btn onClick={() => { setEditPlan(null); setSaveError(""); setAssignedClientIds(new Set()); setAssignedDays(new Set()); setForm({ title: "", description: "", focus: "", exercises: [{ name: "", sets: 3, reps: 12, rest: 60 }] }); setShowB(true); }} style={{ padding: "8px 16px", fontSize: 13 }}>+ Create</Btn>}>Workouts</ST>
       <Tabs tabs={[{ id: "plans", label: "My Plans" }, { id: "library", label: "Exercise Library" }, { id: "templates", label: "Templates" }]} active={tab} onChange={setTab} />
 
       {tab === "plans" && (plans.length === 0 ? <Empty icon="💪" text="No workout plans yet" /> : (
@@ -264,6 +265,21 @@ export default function WorkoutsPage() {
                 })}
               </div>
               {assignedClientIds.size > 0 && <div style={{ fontSize: 11, color: C.mt, marginTop: 4 }}>{assignedClientIds.size} client{assignedClientIds.size !== 1 ? "s" : ""} selected</div>}
+              {assignedClientIds.size > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <label style={{ fontSize: 13, color: C.mt, fontWeight: 500, marginBottom: 6, display: "block" }}>Recurs on <span style={{ opacity: .6 }}>(optional — leave blank for a one-off plan)</span></label>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label, dow) => {
+                      const checked = assignedDays.has(dow);
+                      return (
+                        <button key={dow} type="button" onClick={() => setAssignedDays(prev => { const next = new Set(prev); next.has(dow) ? next.delete(dow) : next.add(dow); return next; })}
+                          style={{ width: 38, height: 38, borderRadius: 12, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700, background: checked ? C.ac : C.s2, color: checked ? "#000" : C.mt }}>{label}</button>
+                      );
+                    })}
+                  </div>
+                  {assignedDays.size > 0 && <div style={{ fontSize: 10.5, color: C.mt, marginTop: 6 }}>Applies to every client selected above.</div>}
+                </div>
+              )}
             </div>
           )}
           <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginTop: 8 }}>Exercises</div>
