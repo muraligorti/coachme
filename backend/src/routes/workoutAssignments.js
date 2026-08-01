@@ -13,6 +13,7 @@ const router = Router();
 router.get("/plan/:planId", authenticate, authorize("COACH", "ADMIN"), workoutAssignmentController.getAssignedClients);
 router.put("/plan/:planId", authenticate, authorize("COACH", "ADMIN"), sanitizeBody, audit("set_workout_assignments", "workout_plan"), workoutAssignmentController.setAssignedClients);
 router.get("/client/:clientId", authenticate, authorize("COACH", "ADMIN"), workoutAssignmentController.getPlansForClient);
+router.get("/today/:clientId", authenticate, authorize("COACH", "ADMIN"), workoutAssignmentController.getTodaysWorkout);
 router.get("/mine", authenticate, authorize("COACH", "ADMIN"), workoutAssignmentController.getAssignedClientIdsForCoach);
 
 export default router;
