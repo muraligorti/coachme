@@ -679,6 +679,7 @@ model WorkoutPlanAssignment {
   workoutPlan   WorkoutPlan  @relation(fields: [workoutPlanId], references: [id], onDelete: Cascade)
   clientId      String
   client        ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  daysOfWeek    Int[]        @default([]) // 0=Sunday...6=Saturday. Empty = flexible/no fixed schedule, purely optional.
   assignedAt    DateTime     @default(now())
 
   @@unique([workoutPlanId, clientId])
