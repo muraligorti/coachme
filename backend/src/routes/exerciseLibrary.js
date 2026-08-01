@@ -15,6 +15,7 @@ router.delete("/exercises/:id", authenticate, authorize("COACH", "ADMIN"), audit
 
 router.get("/templates", authenticate, authorize("COACH", "ADMIN"), exerciseLibraryController.listTemplates);
 router.post("/templates", authenticate, authorize("COACH", "ADMIN"), sanitizeBody, audit("add_template", "template"), exerciseLibraryController.addTemplate);
+router.put("/templates/:id", authenticate, authorize("COACH", "ADMIN"), sanitizeBody, audit("update_template", "template"), exerciseLibraryController.updateTemplate);
 router.delete("/templates/:id", authenticate, authorize("COACH", "ADMIN"), audit("remove_template", "template"), exerciseLibraryController.removeTemplate);
 
 export default router;
