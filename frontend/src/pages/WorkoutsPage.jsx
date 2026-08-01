@@ -35,6 +35,14 @@ export default function WorkoutsPage() {
   const [newEx, setNewEx] = useState({ name: "", muscleGroup: "", equipment: "", specialization: "" });
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [templateMeta, setTemplateMeta] = useState({ name: "", description: "", level: "Intermediate", specialization: "" });
+  const [showNewTemplate, setShowNewTemplate] = useState(false);
+  const [newTemplateMeta, setNewTemplateMeta] = useState({ name: "", description: "", level: "Intermediate", specialization: "" });
+  const [newTemplateSections, setNewTemplateSections] = useState([{ name: "", icon: "💪", daysOfWeek: new Set(), exercises: [{ name: "", sets: 3, reps: 10 }] }]);
+  const [showMapTemplate, setShowMapTemplate] = useState(false);
+  const [mapTemplateTarget, setMapTemplateTarget] = useState(null);
+  const [mapTemplateClientIds, setMapTemplateClientIds] = useState(new Set());
+  const [mapTemplateError, setMapTemplateError] = useState("");
+  const [mapTemplateSaving, setMapTemplateSaving] = useState(false);
 
   const loadAll = () => {
     Promise.all([
@@ -113,14 +121,52 @@ export default function WorkoutsPage() {
     setShowB(true);
   };
 
-  // Use a template: pre-fill the create form with its exercises so the
-  // coach can immediately assign it to a client and tweak anything —
-  // this button previously did nothing at all.
-  const useTemplate = (t) => {
-    setEditPlan(null); setSaveError("");
-    setForm({ title: t.name, description: t.description || "", exercises: (t.exercises || []).map(e => ({ name: e.name, sets: e.sets || 3, reps: e.reps || 12, rest: e.rest || 60 })) });
-    setAssignedClientIds(new Set()); setAssignedDays(new Set());
-    setShowB(true);
+  // Using a multi-section template no longer means "pre-fill one plan's
+  // form" — a template can have several sections, each becoming its own
+  // real plan. This opens the map-to-client(s) flow instead.
+  const openMapTemplate = (t) => {
+    setMapTemplateTarget(t); setMapTemplateClientIds(new Set()); setMapTemplateError("");
+    setShowMapTemplate(true);
+  };
+
+  const confirmMapTemplate = async () => {
+    if (mapTemplateClientIds.size === 0) { setMapTemplateError("Select at least one client"); return; }
+    setMapTemplateSaving(true); setMapTemplateError("");
+    try {
+      await api.post(`/workout-assignments/map-template/${mapTemplateTarget.id}`, { clientIds: [...mapTemplateClientIds] });
+      setShowMapTemplate(false); setMapTemplateTarget(null);
+      loadAll();
+    } catch (e) { setMapTemplateError(e.message); }
+    setMapTemplateSaving(false);
+  };
+
+  // ── Multi-day template builder (from scratch, not derived from a plan-in-progress) ──
+  const addSection = () => setNewTemplateSections([...newTemplateSections, { name: "", icon: "💪", daysOfWeek: new Set(), exercises: [{ name: "", sets: 3, reps: 10 }] }]);
+  const removeSection = (i) => setNewTemplateSections(newTemplateSections.filter((_, j) => j !== i));
+  const updateSection = (i, field, value) => setNewTemplateSections(newTemplateSections.map((s, j) => j === i ? { ...s, [field]: value } : s));
+  const toggleSectionDay = (i, dow) => setNewTemplateSections(newTemplateSections.map((s, j) => {
+    if (j !== i) return s;
+    const next = new Set(s.daysOfWeek); next.has(dow) ? next.delete(dow) : next.add(dow);
+    return { ...s, daysOfWeek: next };
+  }));
+  const addSectionExercise = (i) => setNewTemplateSections(newTemplateSections.map((s, j) => j === i ? { ...s, exercises: [...s.exercises, { name: "", sets: 3, reps: 10 }] } : s));
+  const removeSectionExercise = (i, exI) => setNewTemplateSections(newTemplateSections.map((s, j) => j === i ? { ...s, exercises: s.exercises.filter((_, k) => k !== exI) } : s));
+  const updateSectionExercise = (i, exI, field, value) => setNewTemplateSections(newTemplateSections.map((s, j) => j === i ? { ...s, exercises: s.exercises.map((e, k) => k === exI ? { ...e, [field]: value } : e) } : s));
+
+  const saveNewTemplate = async () => {
+    if (!newTemplateMeta.name.trim()) { setSaveError("Template name is required"); return; }
+    const sections = newTemplateSections.filter(s => s.name.trim() && s.exercises.some(e => e.name.trim()));
+    if (sections.length === 0) { setSaveError("Add at least one section with a name and at least one exercise"); return; }
+    try {
+      await api.post("/exercise-library/templates", {
+        ...newTemplateMeta,
+        sections: sections.map(s => ({ name: s.name.trim(), icon: s.icon, daysOfWeek: [...s.daysOfWeek], exercises: s.exercises.filter(e => e.name.trim()) })),
+      });
+      setShowNewTemplate(false);
+      setNewTemplateMeta({ name: "", description: "", level: "Intermediate", specialization: "" });
+      setNewTemplateSections([{ name: "", icon: "💪", daysOfWeek: new Set(), exercises: [{ name: "", sets: 3, reps: 10 }] }]);
+      loadAll();
+    } catch (e) { alert("Could not save template: " + e.message); }
   };
 
   const addCustomExercise = async () => {
@@ -141,7 +187,8 @@ export default function WorkoutsPage() {
   const saveAsTemplate = async () => {
     if (!templateMeta.name.trim()) return;
     try {
-      await api.post("/exercise-library/templates", { ...templateMeta, exercises: form.exercises.filter(e => e.name) });
+      const section = { name: templateMeta.name.trim(), icon: "💪", daysOfWeek: [], exercises: form.exercises.filter(e => e.name) };
+      await api.post("/exercise-library/templates", { ...templateMeta, sections: [section] });
       setShowSaveTemplate(false);
       setTemplateMeta({ name: "", description: "", level: "Intermediate", specialization: "" });
       loadAll();
@@ -218,22 +265,40 @@ export default function WorkoutsPage() {
       )}
 
       {tab === "templates" && (
-        templates.length === 0 ? <Empty icon="📋" text="No templates yet" /> : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {templates.map((t) => (
-            <Card key={t.id} style={{ padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{t.name}{t.coachId && <span style={{ fontSize: 9, fontWeight: 700, background: C.ac + "20", color: C.ac, padding: "2px 6px", borderRadius: 20, marginLeft: 6 }}>Mine</span>}</div>
-                <div style={{ fontSize: 12, color: C.mt }}>{(t.exercises || []).length} exercises{t.level ? ` · ${t.level}` : ""}</div>
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <Btn variant="secondary" onClick={() => useTemplate(t)} style={{ padding: "6px 12px", fontSize: 12 }}>Use</Btn>
-                {t.coachId && <button onClick={() => removeTemplate(t.id)} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", background: C.dg + "15", color: C.dg, fontSize: 12 }}>🗑️</button>}
-              </div>
-            </Card>
-          ))}
+        <div>
+          <Btn onClick={() => setShowNewTemplate(true)} style={{ marginBottom: 14, padding: "8px 16px", fontSize: 12 }}>+ New Multi-Day Template</Btn>
+          {templates.length === 0 ? <Empty icon="📋" text="No templates yet" /> : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {templates.map((t) => {
+              const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+              return (
+                <Card key={t.id} style={{ padding: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{t.name}{t.coachId && <span style={{ fontSize: 9, fontWeight: 700, background: C.ac + "20", color: C.ac, padding: "2px 6px", borderRadius: 20, marginLeft: 6 }}>Mine</span>}</div>
+                      <div style={{ fontSize: 12, color: C.mt }}>{(t.sections || []).length} section{(t.sections || []).length !== 1 ? "s" : ""}{t.level ? ` · ${t.level}` : ""}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Btn onClick={() => openMapTemplate(t)} style={{ padding: "6px 12px", fontSize: 12 }}>Map to Client(s)</Btn>
+                      {t.coachId && <button onClick={() => removeTemplate(t.id)} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", background: C.dg + "15", color: C.dg, fontSize: 12 }}>🗑️</button>}
+                    </div>
+                  </div>
+                  {(t.sections || []).length > 0 && (
+                    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+                      {t.sections.map((s, i) => (
+                        <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, padding: "5px 8px", background: C.s2, borderRadius: 8 }}>
+                          <span style={{ color: C.tx, fontWeight: 500 }}>{s.icon} {s.name}</span>
+                          <span style={{ color: C.mt }}>{s.daysOfWeek && s.daysOfWeek.length > 0 ? s.daysOfWeek.slice().sort().map(d => dayNames[d]).join(", ") : "flexible"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+          )}
         </div>
-        )
       )}
 
       <Modal open={showB} onClose={() => { setShowB(false); setEditPlan(null); }} title={editPlan ? "Edit Workout" : "Create Workout"} wide>
@@ -321,6 +386,79 @@ export default function WorkoutsPage() {
             <Input label="Specialization (optional)" value={templateMeta.specialization} onChange={e => setTemplateMeta({ ...templateMeta, specialization: e.target.value })} placeholder="e.g. yoga" />
           </div>
           <Btn onClick={saveAsTemplate} style={{ width: "100%" }}>Save Template</Btn>
+        </div>
+      </Modal>
+
+      <Modal open={showNewTemplate} onClose={() => setShowNewTemplate(false)} title="New Multi-Day Template" wide>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Input label="Template Name" value={newTemplateMeta.name} onChange={e => setNewTemplateMeta({ ...newTemplateMeta, name: e.target.value })} placeholder="e.g. Beginner" />
+          <TextArea label="Description" value={newTemplateMeta.description} onChange={e => setNewTemplateMeta({ ...newTemplateMeta, description: e.target.value })} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <Sel label="Level" value={newTemplateMeta.level} onChange={e => setNewTemplateMeta({ ...newTemplateMeta, level: e.target.value })} options={[{ value: "Beginner", label: "Beginner" }, { value: "Intermediate", label: "Intermediate" }, { value: "Advanced", label: "Advanced" }]} />
+            <Input label="Specialization (optional)" value={newTemplateMeta.specialization} onChange={e => setNewTemplateMeta({ ...newTemplateMeta, specialization: e.target.value })} placeholder="e.g. yoga" />
+          </div>
+
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.tx, marginTop: 6 }}>Sections <span style={{ fontSize: 11, color: C.mt, fontWeight: 400 }}>(add as many as this program needs)</span></div>
+          {newTemplateSections.map((s, i) => (
+            <Card key={i} style={{ padding: 12, background: C.s2, borderLeft: `3px solid ${C.ac}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <Input value={s.name} onChange={e => updateSection(i, "name", e.target.value)} placeholder="e.g. Upper Body" style={{ flex: 1, marginRight: 8 }} />
+                {newTemplateSections.length > 1 && <button onClick={() => removeSection(i)} style={{ background: "none", border: "none", cursor: "pointer", color: C.dg, fontSize: 18 }}>✕</button>}
+              </div>
+              <div style={{ display: "flex", gap: 5, marginBottom: 10 }}>
+                {["S", "M", "T", "W", "T", "F", "S"].map((label, dow) => {
+                  const checked = s.daysOfWeek.has(dow);
+                  return <button key={dow} type="button" onClick={() => toggleSectionDay(i, dow)} style={{ width: 32, height: 32, borderRadius: 9, border: "none", cursor: "pointer", fontSize: 10, fontWeight: 700, background: checked ? C.ac : C.sf, color: checked ? "#fff" : C.mt }}>{label}</button>;
+                })}
+              </div>
+              {s.exercises.map((ex, exI) => (
+                <div key={exI} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "flex-end" }}>
+                  <Sel value={ex.name} onChange={e => updateSectionExercise(i, exI, "name", e.target.value)} options={[{ value: "", label: "— Pick —" }, ...exercises.map(e => ({ value: e.name, label: e.name }))]} style={{ flex: 2 }} />
+                  <Input type="number" value={ex.sets} onChange={e => updateSectionExercise(i, exI, "sets", +e.target.value)} placeholder="Sets" style={{ flex: 1 }} />
+                  <Input type="number" value={ex.reps} onChange={e => updateSectionExercise(i, exI, "reps", +e.target.value)} placeholder="Reps" style={{ flex: 1 }} />
+                  {s.exercises.length > 1 && <button onClick={() => removeSectionExercise(i, exI)} style={{ background: "none", border: "none", cursor: "pointer", color: C.dg, fontSize: 16, flexShrink: 0 }}>✕</button>}
+                </div>
+              ))}
+              <button onClick={() => addSectionExercise(i)} style={{ fontSize: 11, color: C.ac, background: "none", border: "none", cursor: "pointer", padding: 0, marginTop: 4 }}>+ Add exercise</button>
+            </Card>
+          ))}
+          <Btn variant="secondary" onClick={addSection} style={{ width: "100%" }}>+ Add Section</Btn>
+          {saveError && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10 }}>{saveError}</div>}
+          <Btn onClick={saveNewTemplate} style={{ width: "100%" }}>Save Template</Btn>
+        </div>
+      </Modal>
+
+      <Modal open={showMapTemplate} onClose={() => setShowMapTemplate(false)} title={`Map "${mapTemplateTarget?.name || ""}" to Client(s)`} wide>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ fontSize: 11, color: C.mt }}>Uses the template's default days as a starting point — you can adjust any resulting plan's days per client afterward, same as editing any other plan's assignment.</div>
+          {mapTemplateTarget?.sections?.length > 0 && (
+            <Card style={{ padding: 12 }}>
+              <div style={{ fontSize: 11, color: C.mt, marginBottom: 8 }}>This will create, for each selected client:</div>
+              {mapTemplateTarget.sections.map((s, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "6px 0", borderBottom: i < mapTemplateTarget.sections.length - 1 ? `1px solid ${C.bd}` : "none" }}>
+                  <span style={{ color: C.tx }}>{s.icon} {s.name}</span>
+                  <span style={{ color: C.ac, fontWeight: 600 }}>{s.daysOfWeek && s.daysOfWeek.length > 0 ? s.daysOfWeek.slice().sort().map(d => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]).join(", ") : "flexible"}</span>
+                </div>
+              ))}
+            </Card>
+          )}
+          <div>
+            <label style={{ fontSize: 13, color: C.mt, fontWeight: 500, marginBottom: 8, display: "block" }}>Assign to</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto", border: `1px solid ${C.bd}`, borderRadius: 10, padding: 8 }}>
+              {clients.map(c => {
+                const checked = mapTemplateClientIds.has(c.id);
+                return (
+                  <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, cursor: "pointer", background: checked ? C.ac + "12" : "transparent" }}
+                    onClick={() => setMapTemplateClientIds(prev => { const next = new Set(prev); next.has(c.id) ? next.delete(c.id) : next.add(c.id); return next; })}>
+                    <div style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${checked ? C.ac : C.bd}`, background: checked ? C.ac : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "#fff", flexShrink: 0 }}>{checked ? "✓" : ""}</div>
+                    <span style={{ fontSize: 13, color: C.tx }}>{cName(c)}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+          {mapTemplateError && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10 }}>{mapTemplateError}</div>}
+          <Btn onClick={confirmMapTemplate} disabled={mapTemplateSaving} style={{ width: "100%" }}>{mapTemplateSaving ? "Mapping…" : "Confirm Mapping"}</Btn>
         </div>
       </Modal>
     </div>
