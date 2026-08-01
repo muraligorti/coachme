@@ -84,3 +84,43 @@ export const findLastSessionForPlan = (clientId, planId, client = prisma) =>
     where: { clientId, planId },
     orderBy: { completedAt: "desc" },
   });
+
+// ── Template mapping ─────────────────────────────────────────────────
+
+export const findTemplateById = (templateId, client = prisma) =>
+  client.workoutTemplate.findUnique({ where: { id: templateId } });
+
+// Creates one real WorkoutPlan + WorkoutPlanAssignment per (client,
+// section) pair — a deliberate COPY, not a live link back to the
+// template. Editing the template later never retroactively changes what
+// was already mapped; each mapped plan is fully independent from the
+// moment it's created, same as if the coach had built it by hand.
+export async function mapTemplateToClients(coachId, template, clientIds, client = prisma) {
+  const created = [];
+  for (const section of template.sections) {
+    const plan = await client.workoutPlan.create({
+      data: {
+        coachId, name: `${template.name}: ${section.name}`, description: template.description || null,
+        intensity: "moderate", durationWeeks: 4, focus: guessFocusFromSectionName(section.name), exercises: section.exercises,
+      },
+    });
+    for (const clientId of clientIds) {
+      await client.workoutPlanAssignment.create({ data: { workoutPlanId: plan.id, clientId, daysOfWeek: section.daysOfWeek || [] } });
+    }
+    created.push({ planId: plan.id, sectionName: section.name, daysOfWeek: section.daysOfWeek || [] });
+  }
+  return created;
+}
+
+// Best-effort tag guess from a free-text section name (e.g. "Upper Body"
+// -> "upper_body") so mapped plans still show up correctly in the
+// existing workout-type filter — never blocks on a miss, just leaves
+// focus unset if nothing matches.
+function guessFocusFromSectionName(name) {
+  const n = (name || "").toLowerCase();
+  if (n.includes("upper")) return "upper_body";
+  if (n.includes("lower") || n.includes("leg")) return "lower_body";
+  if (n.includes("full") || n.includes("composite") || n.includes("circuit")) return "full_body";
+  if (n.includes("cardio")) return "cardio";
+  return null;
+}
