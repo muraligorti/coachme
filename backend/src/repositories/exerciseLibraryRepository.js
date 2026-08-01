@@ -50,3 +50,5 @@ export const createTemplate = (coachId, data, client = prisma) =>
 export const findTemplateById = (id, client = prisma) => client.workoutTemplate.findUnique({ where: { id } });
 
 export const deleteTemplate = (id, client = prisma) => client.workoutTemplate.delete({ where: { id } });
+
+export const updateTemplate = (id, data, client = prisma) => client.workoutTemplate.update({ where: { id }, data });

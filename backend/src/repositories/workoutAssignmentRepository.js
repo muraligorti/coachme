@@ -124,3 +124,12 @@ function guessFocusFromSectionName(name) {
   if (n.includes("cardio")) return "cardio";
   return null;
 }
+
+// Updates ONE (plan, client) assignment row only — unlike setAssignments,
+// which replaces the whole client list for a plan in one shot, this
+// targets a single existing assignment so editing one client's schedule
+// never disturbs other clients who happen to share the same plan.
+export const updateOneAssignment = (planId, clientId, daysOfWeek, client = prisma) =>
+  client.workoutPlanAssignment.update({ where: { workoutPlanId_clientId: { workoutPlanId: planId, clientId } }, data: { daysOfWeek } });
+
+export const updatePlan = (planId, data, client = prisma) => client.workoutPlan.update({ where: { id: planId }, data });
