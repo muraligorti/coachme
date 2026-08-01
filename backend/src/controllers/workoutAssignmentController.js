@@ -9,13 +9,18 @@ function sendError(err, res, fallback) {
 }
 
 export async function getAssignedClients(req, res) {
-  try { res.json({ clientIds: await workoutAssignmentService.getAssignedClients(req.user.id, req.params.planId) }); }
+  try { res.json(await workoutAssignmentService.getAssignedClients(req.user.id, req.params.planId)); }
   catch (err) { sendError(err, res, "Failed to load plan assignments"); }
 }
 
 export async function setAssignedClients(req, res) {
-  try { res.json(await workoutAssignmentService.setAssignedClients(req.user.id, req.params.planId, req.body?.clientIds || [])); }
+  try { res.json(await workoutAssignmentService.setAssignedClients(req.user.id, req.params.planId, req.body?.clientIds || [], req.body?.daysOfWeek || [])); }
   catch (err) { sendError(err, res, "Failed to update plan assignments"); }
+}
+
+export async function getTodaysWorkout(req, res) {
+  try { res.json({ workouts: await workoutAssignmentService.getTodaysWorkout(req.user.id, req.params.clientId) }); }
+  catch (err) { sendError(err, res, "Failed to load today's workout"); }
 }
 
 export async function getPlansForClient(req, res) {
