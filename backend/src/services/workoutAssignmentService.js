@@ -55,6 +55,32 @@ export async function setAssignedClients(userId, planId, clientIds, daysOfWeek =
   return { clientIds, daysOfWeek };
 }
 
+// Edits a plan's content AND one client's specific schedule for it, in
+// one call — this is what powers "edit workout at client level" from a
+// client's own profile. Note: the plan's name/description/exercises are
+// shared with anyone else who has this exact plan assigned (same as
+// editing from the main Workouts tab already does) — only daysOfWeek is
+// genuinely per-client, via updateOneAssignment.
+export async function updateClientWorkout(userId, planId, clientId, { name, description, exercises, daysOfWeek }) {
+  const coach = await getCoachProfileOrThrow(userId);
+  const plan = await verifyPlanOwnership(coach, planId);
+  const rel = await repo.findActiveRelationship(coach.id, clientId);
+  if (!rel) throw new AppError(403, "This client is not on your roster");
+
+  const planUpdate = {};
+  if (name !== undefined) planUpdate.name = name;
+  if (description !== undefined) planUpdate.description = description;
+  if (Array.isArray(exercises)) planUpdate.exercises = exercises;
+  if (Object.keys(planUpdate).length > 0) await repo.updatePlan(planId, planUpdate);
+
+  if (Array.isArray(daysOfWeek)) {
+    DAY_VALIDATION(daysOfWeek);
+    await repo.updateOneAssignment(planId, clientId, daysOfWeek);
+  }
+
+  return { message: "Workout updated" };
+}
+
 export async function getPlansForClient(userId, clientId) {
   const coach = await getCoachProfileOrThrow(userId);
   const rel = await repo.findActiveRelationship(coach.id, clientId);
