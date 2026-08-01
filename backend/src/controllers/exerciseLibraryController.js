@@ -37,3 +37,8 @@ export async function removeTemplate(req, res) {
   try { res.json(await exerciseLibraryService.removeTemplate(req.user.id, req.params.id)); }
   catch (err) { sendError(err, res, "Failed to remove template"); }
 }
+
+export async function updateTemplate(req, res) {
+  try { res.json(await exerciseLibraryService.updateTemplate(req.user.id, req.params.id, req.body || {})); }
+  catch (err) { sendError(err, res, "Failed to update template"); }
+}

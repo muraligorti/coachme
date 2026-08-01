@@ -37,3 +37,8 @@ export async function mapTemplate(req, res) {
   try { res.status(201).json(await workoutAssignmentService.mapTemplateToClients(req.user.id, req.params.templateId, req.body?.clientIds || [])); }
   catch (err) { sendError(err, res, "Failed to map template"); }
 }
+
+export async function updateClientWorkout(req, res) {
+  try { res.json(await workoutAssignmentService.updateClientWorkout(req.user.id, req.params.planId, req.params.clientId, req.body || {})); }
+  catch (err) { sendError(err, res, "Failed to update workout"); }
+}
