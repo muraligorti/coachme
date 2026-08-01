@@ -15,5 +15,6 @@ router.put("/plan/:planId", authenticate, authorize("COACH", "ADMIN"), sanitizeB
 router.get("/client/:clientId", authenticate, authorize("COACH", "ADMIN"), workoutAssignmentController.getPlansForClient);
 router.get("/today/:clientId", authenticate, authorize("COACH", "ADMIN"), workoutAssignmentController.getTodaysWorkout);
 router.get("/mine", authenticate, authorize("COACH", "ADMIN"), workoutAssignmentController.getAssignedClientIdsForCoach);
+router.post("/map-template/:templateId", authenticate, authorize("COACH", "ADMIN"), sanitizeBody, audit("map_template", "workout_template"), workoutAssignmentController.mapTemplate);
 
 export default router;
