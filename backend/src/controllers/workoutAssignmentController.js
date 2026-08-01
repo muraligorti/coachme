@@ -32,3 +32,8 @@ export async function getAssignedClientIdsForCoach(req, res) {
   try { res.json({ clientIds: await workoutAssignmentService.getAssignedClientIdsForCoach(req.user.id) }); }
   catch (err) { sendError(err, res, "Failed to load assigned clients"); }
 }
+
+export async function mapTemplate(req, res) {
+  try { res.status(201).json(await workoutAssignmentService.mapTemplateToClients(req.user.id, req.params.templateId, req.body?.clientIds || [])); }
+  catch (err) { sendError(err, res, "Failed to map template"); }
+}
