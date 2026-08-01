@@ -665,7 +665,7 @@ model WorkoutTemplate {
   description    String?
   level          String?       // "Beginner" | "Intermediate" | "Advanced"
   specialization String?
-  exercises      Json          // [{ name, sets, reps }]
+  sections       Json          // [{ name, icon?, daysOfWeek: number[], exercises: [{name,sets,reps}] }] — a template is a multi-day container; mapping it to a client creates one real WorkoutPlan per section (see workoutAssignmentService.mapTemplateToClients)
   coachId        String?       // null = global/seeded; set = one coach's own saved template
   coach          CoachProfile? @relation(fields: [coachId], references: [id], onDelete: Cascade)
   createdAt      DateTime      @default(now())

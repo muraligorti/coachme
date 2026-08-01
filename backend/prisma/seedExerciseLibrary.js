@@ -66,14 +66,23 @@ const EXERCISES = [
   { name: "Double Unders", muscleGroup: "Cardio/Calves", equipment: "Jump Rope", specialization: "crossfit" },
 ];
 
+// Each template is now a multi-day container — TEMPLATES here are kept
+// as simple single-section examples (matching the previous flat
+// behavior); BEGINNER_SPLIT below shows a real multi-section template,
+// the actual point of this feature.
 const TEMPLATES = [
-  { name: "Push Day", level: "Intermediate", specialization: "strength", exercises: [{ name: "Bench Press", sets: 4, reps: 8 }, { name: "Overhead Press", sets: 3, reps: 10 }, { name: "Incline DB Press", sets: 3, reps: 10 }, { name: "Lateral Raise", sets: 3, reps: 15 }, { name: "Tricep Pushdown", sets: 3, reps: 12 }] },
-  { name: "Pull Day", level: "Intermediate", specialization: "strength", exercises: [{ name: "Deadlift", sets: 4, reps: 6 }, { name: "Barbell Row", sets: 4, reps: 8 }, { name: "Lat Pulldown", sets: 3, reps: 10 }, { name: "Face Pull", sets: 3, reps: 15 }, { name: "Dumbbell Curl", sets: 3, reps: 12 }] },
-  { name: "Leg Day", level: "Intermediate", specialization: "strength", exercises: [{ name: "Barbell Squat", sets: 4, reps: 8 }, { name: "Romanian Deadlift", sets: 3, reps: 10 }, { name: "Leg Press", sets: 3, reps: 12 }, { name: "Leg Curl", sets: 3, reps: 12 }, { name: "Calf Raise", sets: 4, reps: 15 }] },
-  { name: "Full Body Beginner", level: "Beginner", specialization: "general", exercises: [{ name: "Barbell Squat", sets: 3, reps: 10 }, { name: "Bench Press", sets: 3, reps: 10 }, { name: "Barbell Row", sets: 3, reps: 10 }, { name: "Plank", sets: 3, reps: 30 }] },
-  { name: "Morning Flow", level: "Beginner", specialization: "yoga", exercises: [{ name: "Sun Salutation Flow", sets: 3, reps: 1 }, { name: "Downward-Facing Dog", sets: 3, reps: 1 }, { name: "Warrior II", sets: 2, reps: 1 }, { name: "Child's Pose", sets: 1, reps: 1 }] },
-  { name: "Core Foundations", level: "Beginner", specialization: "pilates", exercises: [{ name: "The Hundred", sets: 1, reps: 100 }, { name: "Roll-Up", sets: 3, reps: 8 }, { name: "Single Leg Circle", sets: 3, reps: 10 }] },
-  { name: "WOD — Metcon Basics", level: "Intermediate", specialization: "crossfit", exercises: [{ name: "Kettlebell Swing", sets: 5, reps: 15 }, { name: "Box Jump", sets: 5, reps: 10 }, { name: "Burpee", sets: 5, reps: 10 }, { name: "Rowing (Erg)", sets: 1, reps: 1 }] },
+  { name: "Push Day", level: "Intermediate", specialization: "strength", sections: [{ name: "Push Day", daysOfWeek: [], exercises: [{ name: "Bench Press", sets: 4, reps: 8 }, { name: "Overhead Press", sets: 3, reps: 10 }, { name: "Incline DB Press", sets: 3, reps: 10 }, { name: "Lateral Raise", sets: 3, reps: 15 }, { name: "Tricep Pushdown", sets: 3, reps: 12 }] }] },
+  { name: "Pull Day", level: "Intermediate", specialization: "strength", sections: [{ name: "Pull Day", daysOfWeek: [], exercises: [{ name: "Deadlift", sets: 4, reps: 6 }, { name: "Barbell Row", sets: 4, reps: 8 }, { name: "Lat Pulldown", sets: 3, reps: 10 }, { name: "Face Pull", sets: 3, reps: 15 }, { name: "Dumbbell Curl", sets: 3, reps: 12 }] }] },
+  { name: "Leg Day", level: "Intermediate", specialization: "strength", sections: [{ name: "Leg Day", daysOfWeek: [], exercises: [{ name: "Barbell Squat", sets: 4, reps: 8 }, { name: "Romanian Deadlift", sets: 3, reps: 10 }, { name: "Leg Press", sets: 3, reps: 12 }, { name: "Leg Curl", sets: 3, reps: 12 }, { name: "Calf Raise", sets: 4, reps: 15 }] }] },
+  { name: "Morning Flow", level: "Beginner", specialization: "yoga", sections: [{ name: "Morning Flow", daysOfWeek: [], exercises: [{ name: "Sun Salutation Flow", sets: 3, reps: 1 }, { name: "Downward-Facing Dog", sets: 3, reps: 1 }, { name: "Warrior II", sets: 2, reps: 1 }, { name: "Child's Pose", sets: 1, reps: 1 }] }] },
+  { name: "Core Foundations", level: "Beginner", specialization: "pilates", sections: [{ name: "Core Foundations", daysOfWeek: [], exercises: [{ name: "The Hundred", sets: 1, reps: 100 }, { name: "Roll-Up", sets: 3, reps: 8 }, { name: "Single Leg Circle", sets: 3, reps: 10 }] }] },
+  { name: "WOD — Metcon Basics", level: "Intermediate", specialization: "crossfit", sections: [{ name: "Metcon", daysOfWeek: [], exercises: [{ name: "Kettlebell Swing", sets: 5, reps: 15 }, { name: "Box Jump", sets: 5, reps: 10 }, { name: "Burpee", sets: 5, reps: 10 }, { name: "Rowing (Erg)", sets: 1, reps: 1 }] }] },
+  // A real multi-section example — the actual point of this feature.
+  { name: "Full Body Beginner", level: "Beginner", specialization: "general", sections: [
+    { name: "Upper Body", icon: "💪", daysOfWeek: [1, 4], exercises: [{ name: "Bench Press", sets: 3, reps: 10 }, { name: "Barbell Row", sets: 3, reps: 10 }] },
+    { name: "Core", icon: "🧘", daysOfWeek: [3], exercises: [{ name: "Plank", sets: 3, reps: 30 }] },
+    { name: "Legs", icon: "🦵", daysOfWeek: [5], exercises: [{ name: "Barbell Squat", sets: 3, reps: 10 }] },
+  ] },
 ];
 
 async function main() {
@@ -86,14 +95,19 @@ async function main() {
   }
   console.log(`Exercises: ${exCreated} created, ${exSkipped} already existed`);
 
-  let tCreated = 0, tSkipped = 0;
+  // Upsert (not skip-if-exists) — a prior run of this script may have
+  // created templates in the OLD flat "exercises" format, which the
+  // schema no longer has a column for. Re-running now fixes those rows
+  // to the new multi-section "sections" format rather than leaving them
+  // broken.
+  let tCreated = 0, tUpdated = 0;
   for (const t of TEMPLATES) {
     const existing = await prisma.workoutTemplate.findFirst({ where: { name: t.name, specialization: t.specialization, coachId: null } });
-    if (existing) { tSkipped++; continue; }
+    if (existing) { await prisma.workoutTemplate.update({ where: { id: existing.id }, data: { sections: t.sections } }); tUpdated++; continue; }
     await prisma.workoutTemplate.create({ data: { ...t, coachId: null } });
     tCreated++;
   }
-  console.log(`Templates: ${tCreated} created, ${tSkipped} already existed`);
+  console.log(`Templates: ${tCreated} created, ${tUpdated} updated to the new sections format`);
   console.log("\nDone. Coaches will now see exercises/templates matching their own CoachProfile.specializations, plus anything tagged 'general'.");
 }
 
