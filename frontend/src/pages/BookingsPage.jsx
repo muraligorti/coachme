@@ -253,7 +253,7 @@ export default function BookingsPage({ onNav }) {
   return (
     <div>
       {liveBatch && (
-        <div onClick={openActivePreview} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 14, background: "linear-gradient(135deg, #ff4757 0%, #ff6348 100%)", marginBottom: 14, cursor: "pointer", boxShadow: "0 4px 16px rgba(255,71,87,.35)" }}>
+        <div onClick={() => openActivePreview()} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 14, background: "linear-gradient(135deg, #ff4757 0%, #ff6348 100%)", marginBottom: 14, cursor: "pointer", boxShadow: "0 4px 16px rgba(255,71,87,.35)" }}>
           <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#fff", animation: "pulse 1.2s ease infinite" }} />
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>🔴 Live Now — {new Date(liveBatch[0].date || liveBatch[0].startTime || liveBatch[0].scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} Batch</div>
