@@ -32,7 +32,7 @@ export default function NotificationPreferencesCard({ showClientReminders = fals
   const save = async () => {
     setSaving(true); setError("");
     try {
-      const body = { sessionReminderMinutes: prefs.sessionReminderMinutes };
+      const body = { sessionReminderMinutes: prefs.sessionReminderMinutes > 0 ? Math.max(1, Number(prefs.sessionReminderMinutes)) : 0 };
       if (showClientReminders) {
         for (const t of REMINDER_TYPES) {
           body[`${t.key}ReminderEnabled`] = prefs[`${t.key}ReminderEnabled`];
@@ -66,7 +66,7 @@ export default function NotificationPreferencesCard({ showClientReminders = fals
         </div>
         {prefs.sessionReminderMinutes > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
-            <Input type="number" min="1" value={prefs.sessionReminderMinutes} onChange={e => setPrefs({ ...prefs, sessionReminderMinutes: Math.max(1, +e.target.value) })} style={{ width: 90 }} />
+            <Input type="number" min="1" value={prefs.sessionReminderMinutes} onChange={e => setPrefs({ ...prefs, sessionReminderMinutes: e.target.value === "" ? "" : +e.target.value })} onBlur={e => setPrefs(p => ({ ...p, sessionReminderMinutes: Math.max(1, Number(e.target.value) || 1) }))} style={{ width: 90 }} />
             <span style={{ fontSize: 12, color: C.mt }}>minutes before</span>
           </div>
         )}
