@@ -9,6 +9,7 @@ import { api } from "../lib/api.js";
 import { ls } from "../lib/storage.js";
 import { compressImage } from "../lib/utils.js";
 import { Card, Badge, Btn, Input, ST } from "../components/ui.jsx";
+import NotificationPreferencesCard from "../components/NotificationPreferencesCard.jsx";
 import { ALL_TABS, DEFAULT_BOTTOM, getBottomTabs } from "../navigation/BottomNav.jsx";
 
 const SPECIALIZATION_OPTIONS = [{ v: "strength", l: "💪 Strength" }, { v: "yoga", l: "🧘 Yoga" }, { v: "pilates", l: "🤸 Pilates" }, { v: "crossfit", l: "🏋️ CrossFit" }, { v: "general", l: "✨ General" }];
@@ -121,6 +122,8 @@ export default function SettingsPage() {
           <Btn onClick={saveSpecializations} style={{ width: "100%" }}>{specSaved ? "✓ Saved!" : "Save Specialization"}</Btn>
         </Card>
       )}
+
+      <NotificationPreferencesCard showClientReminders={false} />
 
       <Card style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 12 }}>Theme</div>

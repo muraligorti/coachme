@@ -34,6 +34,7 @@ import workoutAssignmentRoutes from "./routes/workoutAssignments.js";
 import coachProfileRoutes from "./routes/coachProfile.js";
 import exerciseTrendRoutes from "./routes/exerciseTrends.js";
 import pushRoutes from "./routes/push.js";
+import notificationPreferenceRoutes from "./routes/notificationPreferences.js";
 
 // ─── Initialize Services ────────────────────────────────────────────
 
@@ -176,6 +177,7 @@ app.use("/api/workout-assignments", workoutAssignmentRoutes);
 app.use("/api/coach-profile", coachProfileRoutes);
 app.use("/api/exercise-trends", exerciseTrendRoutes);
 app.use("/api/push", pushRoutes);
+app.use("/api/notification-preferences", notificationPreferenceRoutes);
 
 // Health check
 app.get("/api/health", async (req, res) => {
