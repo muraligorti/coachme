@@ -11,8 +11,11 @@ import { ls } from "../lib/storage.js";
 import { unwrap, cName, cPhone, log } from "../lib/utils.js";
 import { Card, Badge, Btn, Input, TextArea, Sel, Modal, Empty, ST, Spin, Avatar } from "../components/ui.jsx";
 import LiveSessionPage from "./LiveSessionPage.jsx";
+import { refreshSessionReminders } from "../lib/localReminders.js";
+import { useAuth } from "../context/AuthContext.jsx";
 
 export default function BookingsPage({ onNav }) {
+  const { user } = useAuth();
   const [bookings, setBookings] = useState([]); const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false); const [showRepeat, setShowRepeat] = useState(false);
   const [clients, setClients] = useState([]); const [viewMode, setViewMode] = useState("week");
@@ -38,7 +41,9 @@ export default function BookingsPage({ onNav }) {
   const [activePreviewLoading, setActivePreviewLoading] = useState(false);
 
   const load = () => { Promise.all([api.get("/bookings").catch(() => ({})), api.get("/clients").catch(() => ({}))]).then(([b, c]) => {
-    setBookings(unwrap(b, "bookings", "sessions")); setClients(unwrap(c, "clients"));
+    const bk = unwrap(b, "bookings", "sessions");
+    setBookings(bk); setClients(unwrap(c, "clients"));
+    if (user?.id) refreshSessionReminders(user.id, bk); // keeps THIS account's local reminders in sync — never touches another account's schedule if this device switches identities
   }).finally(() => setLoading(false)); };
   useEffect(() => { load(); }, []);
 

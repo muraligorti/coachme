@@ -12,14 +12,17 @@ import { unwrap, cName, log } from "../../lib/utils.js";
 import { Card, Badge, Btn, TextArea, Modal, Empty, ST, Spin } from "../../components/ui.jsx";
 import RequestSessionModal from "./RequestSessionModal.jsx";
 import RescheduleRequestModal from "./RescheduleRequestModal.jsx";
+import { refreshSessionReminders } from "../../lib/localReminders.js";
+import { useAuth } from "../../context/AuthContext.jsx";
 
 export default function ClientSchedulePage() {
+  const { user } = useAuth();
   const [bookings, setBookings] = useState([]); const [loading, setLoading] = useState(true);
   const [cancelId, setCancelId] = useState(null); const [cancelReason, setCancelReason] = useState("");
   const [showRequest, setShowRequest] = useState(false);
   const [rescheduleTarget, setRescheduleTarget] = useState(null);
 
-  const load = () => api.get("/bookings").then(d => { const bk = unwrap(d, "bookings", "sessions"); log("Client bookings loaded:", bk.length); setBookings(bk); }).catch(e => { log("Client bookings error:", e.message); }).finally(() => setLoading(false));
+  const load = () => api.get("/bookings").then(d => { const bk = unwrap(d, "bookings", "sessions"); log("Client bookings loaded:", bk.length); setBookings(bk); if (user?.id) refreshSessionReminders(user.id, bk); }).catch(e => { log("Client bookings error:", e.message); }).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
 
   const requestCancel = async () => {
