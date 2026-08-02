@@ -145,3 +145,23 @@ export async function refreshSessionReminders(userId, bookings) {
     await scheduleSessionReminders(userId, bookings, prefs?.sessionReminderMinutes ?? 60);
   } catch (e) { console.error("Failed to refresh session reminders:", e.message); }
 }
+
+// Debug helper — returns every locally-scheduled notification currently
+// pending on this device, across ALL accounts that have ever logged in
+// here (not just the current one, since Android's scheduler itself has
+// no concept of "which app account" a notification belongs to — that's
+// purely our own ID-derivation scheme). Useful for confirming whether
+// scheduling actually happened, without waiting and hoping.
+export async function getPendingLocalReminders() {
+  const plugin = await getPlugin();
+  if (!plugin) return [];
+  try {
+    const result = await plugin.getPending();
+    return (result.notifications || []).map(n => ({
+      id: n.id,
+      title: n.title,
+      body: n.body,
+      fireAt: n.schedule?.at || (n.schedule?.on ? `daily at ${String(n.schedule.on.hour).padStart(2, "0")}:${String(n.schedule.on.minute).padStart(2, "0")}` : "unknown"),
+    }));
+  } catch (e) { console.error("Failed to get pending reminders:", e.message); return []; }
+}
