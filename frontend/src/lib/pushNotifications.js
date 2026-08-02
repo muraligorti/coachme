@@ -24,6 +24,23 @@ export async function initPushNotifications() {
     }
     if (permStatus.receive !== "granted") return; // respect a decline, don't nag
 
+    // Android 8+ routes every notification through a "channel," and the
+    // channel's own importance level decides whether it shows as a
+    // heads-up banner or just quietly sits in the tray. Without this,
+    // the plugin falls back to a default channel that isn't guaranteed
+    // to be high-importance — which is exactly why reminders weren't
+    // "hovering over the top" like other apps' notifications do.
+    if (Capacitor.getPlatform() === "android") {
+      await PushNotifications.createChannel({
+        id: "reminders",
+        name: "Reminders",
+        description: "Session, check-in, habit, nutrition, and sync reminders",
+        importance: 5, // IMPORTANCE_HIGH — required for heads-up/banner display
+        visibility: 1, // VISIBILITY_PUBLIC — shows full content on the lock screen
+        vibration: true,
+      }).catch(() => {});
+    }
+
     await PushNotifications.register();
 
     PushNotifications.addListener("registration", (token) => {

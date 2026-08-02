@@ -52,12 +52,22 @@ export default function NotificationPreferencesCard({ showClientReminders = fals
       <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 4 }}>🔔 Notifications</div>
       <div style={{ fontSize: 11, color: C.mt, marginBottom: 14 }}>Push notifications must be allowed for these to actually arrive — you'll be prompted the first time you log in on the app.</div>
 
-      <div style={{ marginBottom: showClientReminders ? 16 : 0 }}>
-        <label style={{ fontSize: 13, color: C.tx, fontWeight: 500, marginBottom: 6, display: "block" }}>Session Reminder</label>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Input type="number" value={prefs.sessionReminderMinutes ?? 60} onChange={e => setPrefs({ ...prefs, sessionReminderMinutes: +e.target.value })} style={{ width: 90 }} />
-          <span style={{ fontSize: 12, color: C.mt }}>minutes before a session (0 = off)</span>
+      <div style={{ marginBottom: 14, paddingBottom: showClientReminders ? 14 : 0, borderBottom: showClientReminders ? `1px solid ${C.bd}` : "none" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>Session Reminder</div>
+            <div style={{ fontSize: 11, color: C.mt }}>A heads-up before your next session starts</div>
+          </div>
+          <button onClick={() => setPrefs({ ...prefs, sessionReminderMinutes: prefs.sessionReminderMinutes > 0 ? 0 : 60 })} style={{ width: 42, height: 24, borderRadius: 12, border: "none", cursor: "pointer", background: prefs.sessionReminderMinutes > 0 ? C.ac : C.s2, position: "relative", flexShrink: 0 }}>
+            <div style={{ width: 18, height: 18, borderRadius: 9, background: "#fff", position: "absolute", top: 3, left: prefs.sessionReminderMinutes > 0 ? 21 : 3, transition: "left .15s" }} />
+          </button>
         </div>
+        {prefs.sessionReminderMinutes > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
+            <Input type="number" min="1" value={prefs.sessionReminderMinutes} onChange={e => setPrefs({ ...prefs, sessionReminderMinutes: Math.max(1, +e.target.value) })} style={{ width: 90 }} />
+            <span style={{ fontSize: 12, color: C.mt }}>minutes before</span>
+          </div>
+        )}
       </div>
 
       {showClientReminders && REMINDER_TYPES.map(t => (

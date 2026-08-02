@@ -34,6 +34,10 @@ export async function sendPushToUser(userId, { title, body, data }) {
         token: t.token,
         notification: { title, body },
         data: data ? Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])) : undefined, // FCM data payloads must be string-only
+        android: {
+          priority: "high", // required for timely, heads-up-style delivery, not just eventual quiet delivery
+          notification: { channelId: "reminders" }, // must match the channel created client-side in pushNotifications.js — this is what actually makes it show as a banner, not just sit in the tray
+        },
       });
       sent++;
     } catch (err) {

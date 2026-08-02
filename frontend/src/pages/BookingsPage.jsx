@@ -48,14 +48,14 @@ export default function BookingsPage({ onNav }) {
   // of which date is currently selected in the strip above. Re-checked
   // every 30s so the banner appears/disappears live, not just on reload.
   useEffect(() => {
-    const GRACE_MS = 15 * 60000;
+    const END_GRACE_MS = 15 * 60000; // still shows for a bit after the scheduled end, in case the session is running long
     const checkLive = () => {
       const now = Date.now();
       const confirmed = bookings.filter(b => (b.status || "").toUpperCase() === "CONFIRMED");
       const inWindow = confirmed.filter(b => {
         const start = new Date(b.date || b.startTime || b.scheduledAt).getTime();
         const end = start + (b.durationMinutes || b.duration || 60) * 60000;
-        return now >= start - GRACE_MS && now <= end + GRACE_MS;
+        return now >= start && now <= end + END_GRACE_MS; // no pre-start grace — was showing "Live Now" up to 15 minutes before the session actually began
       });
       if (inWindow.length === 0) { setLiveBatch(null); return; }
       // Group by exact start time — the "batch" is whichever time-window
