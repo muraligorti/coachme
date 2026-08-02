@@ -7,7 +7,11 @@ android {
         applicationId "life.coachme.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        // Play Store requires versionCode to increase on every release
+        // upload. The release CI workflow passes -PversionCode=<run
+        // number>, which auto-increments on every run; local/debug
+        // builds (no property passed) just fall back to 1.
+        versionCode project.hasProperty('versionCode') ? project.property('versionCode').toInteger() : 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -16,10 +20,32 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Release signing reads from environment variables ONLY — never a
+    // committed file, never a hardcoded value. Locally, set these four
+    // env vars yourself before running a release build. In CI, the
+    // release workflow decodes the keystore secret to a temp file and
+    // sets these same variables before invoking Gradle. If they're not
+    // set (e.g. a normal debug build), this whole block is skipped and
+    // debug builds work exactly as before — nothing about the existing
+    // build-android.yml workflow changes.
+    def hasReleaseSigning = System.getenv("ANDROID_KEYSTORE_PATH") != null
+    if (hasReleaseSigning) {
+        signingConfigs {
+            release {
+                storeFile file(System.getenv("ANDROID_KEYSTORE_PATH"))
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
