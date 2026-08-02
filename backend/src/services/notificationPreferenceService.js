@@ -118,12 +118,14 @@ async function runSessionReminders() {
 }
 
 export async function runReminderScan() {
-  const results = {
-    session: await runSessionReminders(),
-    checkin: await runDailyReminderType("checkin", "Check-in Reminder", () => "How's your day going? Log a quick check-in with your coach."),
-    habit: await runDailyReminderType("habit", "Habit Reminder", () => "Don't forget to log today's habits!"),
-    nutrition: await runDailyReminderType("nutrition", "Nutrition Reminder", () => "Time to log your meals for today."),
-    sync: await runDailyReminderType("sync", "Sync Reminder", () => "Open the app to sync your latest health data."),
-  };
-  return results;
+  // Session/check-in/habit/nutrition/sync reminders are now scheduled
+  // client-side, on-device (see frontend/src/lib/localReminders.js) —
+  // more reliable than this server cron for personal recurring
+  // reminders (no timezone conversion needed, no dependency on GitHub
+  // Actions' schedule trigger being exactly on time). Actually sending
+  // from here too would double-notify. The scan logic below is left in
+  // place, structurally intact but not invoked, in case server-side
+  // sending becomes useful again for some future case (e.g. a web-only
+  // client without local notification support) — not deleted outright.
+  return { note: "Reminder sending moved client-side — see localReminders.js. This endpoint is now a no-op.", session: { sent: 0, checked: 0 }, checkin: { sent: 0, checked: 0 }, habit: { sent: 0, checked: 0 }, nutrition: { sent: 0, checked: 0 }, sync: { sent: 0, checked: 0 } };
 }

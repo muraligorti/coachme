@@ -5,9 +5,10 @@
 // ═══════════════════════════════════════════════════════════════════════
 import { createContext, useContext, useState, useEffect } from "react";
 import { api } from "../lib/api.js";
-import { xToken, xUser } from "../lib/utils.js";
+import { xToken, xUser, unwrap } from "../lib/utils.js";
 import { Splash } from "../components/Loading.jsx";
 import { initPushNotifications } from "../lib/pushNotifications.js";
+import { initLocalReminders, scheduleDailyReminders, scheduleSessionReminders } from "../lib/localReminders.js";
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
@@ -22,6 +23,24 @@ export function AuthProvider({ children }) {
   // there's a valid auth token for that request to succeed with.
   useEffect(() => {
     if (user) initPushNotifications();
+  }, [user]);
+
+  // Local, on-device reminder scheduling — separate from push, and
+  // deliberately not dependent on it. Runs on every login/session-restore
+  // so schedules stay current even if preferences or bookings changed
+  // since the last time the app was opened.
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      await initLocalReminders();
+      try {
+        const prefs = await api.get("/notification-preferences/me");
+        await scheduleDailyReminders(prefs);
+        const bookingsRes = await api.get("/bookings");
+        const bookings = unwrap(bookingsRes, "bookings", "sessions");
+        await scheduleSessionReminders(bookings, prefs?.sessionReminderMinutes ?? 60);
+      } catch (e) { console.error("Local reminder scheduling failed:", e.message); }
+    })();
   }, [user]);
 
   useEffect(() => {
