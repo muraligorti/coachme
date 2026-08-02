@@ -83,6 +83,7 @@ model User {
   sessions        Session[]
   auditLogs       AuditLog[]
   notifications   Notification[]
+  pushTokens      PushToken[]
   sentMessages    Message[]     @relation("SentMessages")
   receivedMessages Message[]    @relation("ReceivedMessages")
   googleAuthToken GoogleAuthToken?
@@ -446,6 +447,19 @@ model Notification {
 
   @@index([userId, read])
   @@index([createdAt])
+}
+
+// â”€â”€â”€ PUSH TOKENS (Firebase Cloud Messaging device registration) â”€â”€â”€â”€â”€â”€â”€
+
+model PushToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique // FCM registration token — unique because the same physical token can only ever belong to one user at a time (whoever registered most recently)
+  platform  String   // "android" | "ios" | "web"
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 // â”€â”€â”€ AUDIT LOG (Security tracking) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
