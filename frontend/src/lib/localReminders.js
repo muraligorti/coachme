@@ -120,3 +120,16 @@ export async function scheduleSessionReminders(bookings, leadMinutes) {
     try { await plugin.schedule({ notifications: toSchedule }); } catch (e) { console.error("Failed to schedule session reminders:", e.message); }
   }
 }
+
+// Convenience wrapper for calling from schedule-loading pages (not just
+// AuthContext's one-time login effect) — fetches the current preference
+// itself, so callers just need to pass whatever bookings they already
+// fetched. This is what actually keeps reminders in sync when a setting
+// or a new booking changes mid-session, not just at login.
+export async function refreshSessionReminders(bookings) {
+  const { api } = await import("./api.js");
+  try {
+    const prefs = await api.get("/notification-preferences/me");
+    await scheduleSessionReminders(bookings, prefs?.sessionReminderMinutes ?? 60);
+  } catch (e) { console.error("Failed to refresh session reminders:", e.message); }
+}
