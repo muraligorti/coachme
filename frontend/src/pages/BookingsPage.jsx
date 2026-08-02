@@ -11,6 +11,7 @@ import { ls } from "../lib/storage.js";
 import { unwrap, cName, cPhone, log } from "../lib/utils.js";
 import { Card, Badge, Btn, Input, TextArea, Sel, Modal, Empty, ST, Spin, Avatar } from "../components/ui.jsx";
 import LiveSessionPage from "./LiveSessionPage.jsx";
+import { refreshSessionReminders } from "../lib/localReminders.js";
 
 export default function BookingsPage({ onNav }) {
   const [bookings, setBookings] = useState([]); const [loading, setLoading] = useState(true);
@@ -38,7 +39,9 @@ export default function BookingsPage({ onNav }) {
   const [activePreviewLoading, setActivePreviewLoading] = useState(false);
 
   const load = () => { Promise.all([api.get("/bookings").catch(() => ({})), api.get("/clients").catch(() => ({}))]).then(([b, c]) => {
-    setBookings(unwrap(b, "bookings", "sessions")); setClients(unwrap(c, "clients"));
+    const bk = unwrap(b, "bookings", "sessions");
+    setBookings(bk); setClients(unwrap(c, "clients"));
+    refreshSessionReminders(bk); // keeps local reminders in sync whenever the schedule is actually viewed, not just at login — this is what was missing
   }).finally(() => setLoading(false)); };
   useEffect(() => { load(); }, []);
 

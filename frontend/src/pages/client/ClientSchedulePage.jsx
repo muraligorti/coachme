@@ -12,6 +12,7 @@ import { unwrap, cName, log } from "../../lib/utils.js";
 import { Card, Badge, Btn, TextArea, Modal, Empty, ST, Spin } from "../../components/ui.jsx";
 import RequestSessionModal from "./RequestSessionModal.jsx";
 import RescheduleRequestModal from "./RescheduleRequestModal.jsx";
+import { refreshSessionReminders } from "../../lib/localReminders.js";
 
 export default function ClientSchedulePage() {
   const [bookings, setBookings] = useState([]); const [loading, setLoading] = useState(true);
@@ -19,7 +20,7 @@ export default function ClientSchedulePage() {
   const [showRequest, setShowRequest] = useState(false);
   const [rescheduleTarget, setRescheduleTarget] = useState(null);
 
-  const load = () => api.get("/bookings").then(d => { const bk = unwrap(d, "bookings", "sessions"); log("Client bookings loaded:", bk.length); setBookings(bk); }).catch(e => { log("Client bookings error:", e.message); }).finally(() => setLoading(false));
+  const load = () => api.get("/bookings").then(d => { const bk = unwrap(d, "bookings", "sessions"); log("Client bookings loaded:", bk.length); setBookings(bk); refreshSessionReminders(bk); }).catch(e => { log("Client bookings error:", e.message); }).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
 
   const requestCancel = async () => {
