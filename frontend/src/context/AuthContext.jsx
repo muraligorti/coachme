@@ -35,10 +35,10 @@ export function AuthProvider({ children }) {
       await initLocalReminders();
       try {
         const prefs = await api.get("/notification-preferences/me");
-        await scheduleDailyReminders(prefs);
+        await scheduleDailyReminders(user.id, prefs);
         const bookingsRes = await api.get("/bookings");
         const bookings = unwrap(bookingsRes, "bookings", "sessions");
-        await scheduleSessionReminders(bookings, prefs?.sessionReminderMinutes ?? 60);
+        await scheduleSessionReminders(user.id, bookings, prefs?.sessionReminderMinutes ?? 60);
       } catch (e) { console.error("Local reminder scheduling failed:", e.message); }
     })();
   }, [user]);

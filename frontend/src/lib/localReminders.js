@@ -7,29 +7,41 @@
 // timezone for "remind me at MY 6pm"), and no dependency on a
 // third-party scheduler's timing being exact.
 //
+// MULTI-IDENTITY SAFE: one device can log in as different accounts at
+// different times (e.g. testing as both coach and client). Every
+// notification ID is deterministically derived from (userId + type) or
+// (userId + bookingId), so logging in as a different account never
+// cancels or overwrites another account's already-scheduled reminders —
+// each account's schedule lives in its own ID space, and each account
+// only ever touches its own tracked IDs when rescheduling.
+//
 // Event-driven notifications (like "a client requested a cancellation")
 // are NOT part of this — those still go through real push, since they
 // react to someone else's action and this device has no way to know
 // about that on its own. See pushService.js on the backend for those.
-//
-// ID ranges, so re-scheduling can cleanly cancel-and-recreate without
-// accumulating duplicates or leftovers:
-//   1000-1099: daily reminders (checkin/habit/nutrition/sync), one fixed
-//              ID per type
-//   2000+:     session reminders, one per currently-known upcoming
-//              booking, IDs tracked in localStorage so stale ones (from
-//              a cancelled/rescheduled booking) get cancelled properly
 // ═══════════════════════════════════════════════════════════════════════
 import { Capacitor } from "@capacitor/core";
 import { ls } from "./storage.js";
 
-const DAILY_IDS = { checkin: 1001, habit: 1002, nutrition: 1003, sync: 1004 };
 const DAILY_TITLES = {
   checkin: { title: "Check-in Reminder", body: "How's your day going? Log a quick check-in with your coach." },
   habit: { title: "Habit Reminder", body: "Don't forget to log today's habits!" },
   nutrition: { title: "Nutrition Reminder", body: "Time to log your meals for today." },
   sync: { title: "Sync Reminder", body: "Open the app to sync your latest health data." },
 };
+
+// Simple deterministic string hash -> positive int, kept within a safe
+// range for Android notification IDs (32-bit). Not cryptographic —
+// doesn't need to be, this just needs to reliably avoid collisions
+// between different (userId, key) pairs for a personal reminder app,
+// not resist a deliberate attacker.
+function hashToId(str, rangeOffset) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) | 0;
+  return (Math.abs(hash) % 900000) + rangeOffset;
+}
+const dailyId = (userId, type) => hashToId(`${userId}:daily:${type}`, 100000); // 100000-999999 range
+const sessionId = (userId, bookingId) => hashToId(`${userId}:session:${bookingId}`, 2000000); // 2000000-2899999 range, non-overlapping with daily
 
 let LocalNotificationsPlugin = null;
 async function getPlugin() {
@@ -50,29 +62,27 @@ export async function initLocalReminders() {
   } catch (e) { console.error("Local notification permission request failed:", e.message); }
 }
 
-// Schedules (or re-schedules) the four repeating daily reminders based
-// on the user's current preferences — call this on login and again
-// immediately after saving Settings, so a change takes effect right away
-// rather than waiting for the next app restart.
-export async function scheduleDailyReminders(prefs) {
+// Schedules (or re-schedules) this SPECIFIC user's four repeating daily
+// reminders — only ever touches IDs derived from this userId, so another
+// account's daily reminders (scheduled during a previous login on this
+// same device) are left completely alone.
+export async function scheduleDailyReminders(userId, prefs) {
   const plugin = await getPlugin();
-  if (!plugin || !prefs) return;
+  if (!plugin || !prefs || !userId) return;
 
-  // Cancel all four first, unconditionally — simplest way to guarantee
-  // no stale/duplicate schedule survives a preference change (e.g.
-  // toggling a reminder off, or changing its time).
-  try { await plugin.cancel({ notifications: Object.values(DAILY_IDS).map(id => ({ id })) }); } catch {}
+  const ids = ["checkin", "habit", "nutrition", "sync"].map(type => dailyId(userId, type));
+  try { await plugin.cancel({ notifications: ids.map(id => ({ id })) }); } catch {}
 
   const toSchedule = [];
   for (const type of ["checkin", "habit", "nutrition", "sync"]) {
     if (!prefs[`${type}ReminderEnabled`]) continue;
     const [hour, minute] = (prefs[`${type}ReminderTime`] || "08:00").split(":").map(Number);
     toSchedule.push({
-      id: DAILY_IDS[type],
+      id: dailyId(userId, type),
       title: DAILY_TITLES[type].title,
       body: DAILY_TITLES[type].body,
       channelId: "reminders",
-      schedule: { on: { hour, minute }, allowWhileIdle: true }, // "on: {hour,minute}" repeats daily at that time, using the device's own local time
+      schedule: { on: { hour, minute }, allowWhileIdle: true },
     });
   }
   if (toSchedule.length > 0) {
@@ -80,31 +90,33 @@ export async function scheduleDailyReminders(prefs) {
   }
 }
 
-// Schedules one-time reminders for each upcoming confirmed booking, at
-// (scheduledAt - leadMinutes) in the device's own local time. Call this
-// whenever the schedule is loaded/refreshed, so cancelled/rescheduled
-// bookings don't leave stale reminders behind.
-export async function scheduleSessionReminders(bookings, leadMinutes) {
+// Schedules one-time reminders for each of THIS user's upcoming confirmed
+// bookings. Tracks previously-scheduled booking IDs per-user (storage key
+// includes userId), so cancelling stale ones (a booking that got
+// cancelled/rescheduled since last sync) never touches another account's
+// tracked reminders on the same device.
+export async function scheduleSessionReminders(userId, bookings, leadMinutes) {
   const plugin = await getPlugin();
-  if (!plugin) return;
+  if (!plugin || !userId) return;
 
-  const previousIds = ls.get("scheduled_session_reminder_ids", []);
+  const storageKey = `scheduled_session_reminder_ids_${userId}`;
+  const previousIds = ls.get(storageKey, []);
   if (previousIds.length > 0) {
     try { await plugin.cancel({ notifications: previousIds.map(id => ({ id })) }); } catch {}
   }
 
-  if (!leadMinutes || leadMinutes <= 0 || !Array.isArray(bookings)) { ls.set("scheduled_session_reminder_ids", []); return; }
+  if (!leadMinutes || leadMinutes <= 0 || !Array.isArray(bookings)) { ls.set(storageKey, []); return; }
 
   const now = Date.now();
   const toSchedule = [];
   const newIds = [];
   bookings
     .filter(b => (b.status || "").toUpperCase() === "CONFIRMED")
-    .forEach((b, i) => {
+    .forEach((b) => {
       const start = new Date(b.scheduledAt || b.date).getTime();
       const fireAt = start - leadMinutes * 60000;
-      if (fireAt <= now) return; // reminder time already passed, or the session is sooner than the lead time — nothing to schedule
-      const id = 2000 + i; // stable within one scheduling pass; fully replaced (cancel-all-then-recreate) on every call, so reuse across calls doesn't matter
+      if (fireAt <= now) return; // reminder time already passed, or session is sooner than the lead time
+      const id = sessionId(userId, b.id); // deterministic from the booking's own ID — stable across repeated calls, never collides with another user's reminders
       newIds.push(id);
       toSchedule.push({
         id,
@@ -115,7 +127,7 @@ export async function scheduleSessionReminders(bookings, leadMinutes) {
       });
     });
 
-  ls.set("scheduled_session_reminder_ids", newIds);
+  ls.set(storageKey, newIds);
   if (toSchedule.length > 0) {
     try { await plugin.schedule({ notifications: toSchedule }); } catch (e) { console.error("Failed to schedule session reminders:", e.message); }
   }
@@ -123,13 +135,13 @@ export async function scheduleSessionReminders(bookings, leadMinutes) {
 
 // Convenience wrapper for calling from schedule-loading pages (not just
 // AuthContext's one-time login effect) — fetches the current preference
-// itself, so callers just need to pass whatever bookings they already
-// fetched. This is what actually keeps reminders in sync when a setting
-// or a new booking changes mid-session, not just at login.
-export async function refreshSessionReminders(bookings) {
+// itself, so callers just need to pass the userId and whatever bookings
+// they already fetched.
+export async function refreshSessionReminders(userId, bookings) {
+  if (!userId) return;
   const { api } = await import("./api.js");
   try {
     const prefs = await api.get("/notification-preferences/me");
-    await scheduleSessionReminders(bookings, prefs?.sessionReminderMinutes ?? 60);
+    await scheduleSessionReminders(userId, bookings, prefs?.sessionReminderMinutes ?? 60);
   } catch (e) { console.error("Failed to refresh session reminders:", e.message); }
 }
