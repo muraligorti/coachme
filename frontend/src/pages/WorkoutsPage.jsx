@@ -36,6 +36,7 @@ export default function WorkoutsPage() {
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [templateMeta, setTemplateMeta] = useState({ name: "", description: "", level: "Intermediate", specialization: "" });
   const [showNewTemplate, setShowNewTemplate] = useState(false);
+  const [editTemplate, setEditTemplate] = useState(null); // null = creating new, template object = editing existing
   const [newTemplateMeta, setNewTemplateMeta] = useState({ name: "", description: "", level: "Intermediate", specialization: "" });
   const [newTemplateSections, setNewTemplateSections] = useState([{ name: "", icon: "💪", daysOfWeek: new Set(), exercises: [{ name: "", sets: 3, reps: 10 }] }]);
   const [showMapTemplate, setShowMapTemplate] = useState(false);
@@ -140,6 +141,13 @@ export default function WorkoutsPage() {
     setMapTemplateSaving(false);
   };
 
+  const openEditTemplate = (t) => {
+    setEditTemplate(t); setSaveError("");
+    setNewTemplateMeta({ name: t.name || "", description: t.description || "", level: t.level || "Intermediate", specialization: t.specialization || "" });
+    setNewTemplateSections((t.sections || []).map(s => ({ name: s.name || "", icon: s.icon || "💪", daysOfWeek: new Set(s.daysOfWeek || []), exercises: (s.exercises || []).map(e => ({ name: e.name || e, sets: e.sets || 3, reps: e.reps || 10 })) })));
+    setShowNewTemplate(true);
+  };
+
   // ── Multi-day template builder (from scratch, not derived from a plan-in-progress) ──
   const addSection = () => setNewTemplateSections([...newTemplateSections, { name: "", icon: "💪", daysOfWeek: new Set(), exercises: [{ name: "", sets: 3, reps: 10 }] }]);
   const removeSection = (i) => setNewTemplateSections(newTemplateSections.filter((_, j) => j !== i));
@@ -157,16 +165,15 @@ export default function WorkoutsPage() {
     if (!newTemplateMeta.name.trim()) { setSaveError("Template name is required"); return; }
     const sections = newTemplateSections.filter(s => s.name.trim() && s.exercises.some(e => e.name.trim()));
     if (sections.length === 0) { setSaveError("Add at least one section with a name and at least one exercise"); return; }
+    const payload = { ...newTemplateMeta, sections: sections.map(s => ({ name: s.name.trim(), icon: s.icon, daysOfWeek: [...s.daysOfWeek], exercises: s.exercises.filter(e => e.name.trim()) })) };
     try {
-      await api.post("/exercise-library/templates", {
-        ...newTemplateMeta,
-        sections: sections.map(s => ({ name: s.name.trim(), icon: s.icon, daysOfWeek: [...s.daysOfWeek], exercises: s.exercises.filter(e => e.name.trim()) })),
-      });
-      setShowNewTemplate(false);
+      if (editTemplate) await api.put(`/exercise-library/templates/${editTemplate.id}`, payload);
+      else await api.post("/exercise-library/templates", payload);
+      setShowNewTemplate(false); setEditTemplate(null); setSaveError("");
       setNewTemplateMeta({ name: "", description: "", level: "Intermediate", specialization: "" });
       setNewTemplateSections([{ name: "", icon: "💪", daysOfWeek: new Set(), exercises: [{ name: "", sets: 3, reps: 10 }] }]);
       loadAll();
-    } catch (e) { alert("Could not save template: " + e.message); }
+    } catch (e) { setSaveError((editTemplate ? "Could not update template: " : "Could not save template: ") + e.message); }
   };
 
   const addCustomExercise = async () => {
@@ -266,7 +273,7 @@ export default function WorkoutsPage() {
 
       {tab === "templates" && (
         <div>
-          <Btn onClick={() => setShowNewTemplate(true)} style={{ marginBottom: 14, padding: "8px 16px", fontSize: 12 }}>+ New Multi-Day Template</Btn>
+          <Btn onClick={() => { setEditTemplate(null); setSaveError(""); setNewTemplateMeta({ name: "", description: "", level: "Intermediate", specialization: "" }); setNewTemplateSections([{ name: "", icon: "💪", daysOfWeek: new Set(), exercises: [{ name: "", sets: 3, reps: 10 }] }]); setShowNewTemplate(true); }} style={{ marginBottom: 14, padding: "8px 16px", fontSize: 12 }}>+ New Multi-Day Template</Btn>
           {templates.length === 0 ? <Empty icon="📋" text="No templates yet" /> : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {templates.map((t) => {
@@ -280,6 +287,7 @@ export default function WorkoutsPage() {
                     </div>
                     <div style={{ display: "flex", gap: 6 }}>
                       <Btn onClick={() => openMapTemplate(t)} style={{ padding: "6px 12px", fontSize: 12 }}>Map to Client(s)</Btn>
+                      {t.coachId && <button onClick={() => openEditTemplate(t)} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", background: C.wn + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>✏️</button>}
                       {t.coachId && <button onClick={() => removeTemplate(t.id)} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", background: C.dg + "15", color: C.dg, fontSize: 12 }}>🗑️</button>}
                     </div>
                   </div>
@@ -389,7 +397,7 @@ export default function WorkoutsPage() {
         </div>
       </Modal>
 
-      <Modal open={showNewTemplate} onClose={() => setShowNewTemplate(false)} title="New Multi-Day Template" wide>
+      <Modal open={showNewTemplate} onClose={() => { setShowNewTemplate(false); setEditTemplate(null); }} title={editTemplate ? `Edit "${editTemplate.name}"` : "New Multi-Day Template"} wide>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <Input label="Template Name" value={newTemplateMeta.name} onChange={e => setNewTemplateMeta({ ...newTemplateMeta, name: e.target.value })} placeholder="e.g. Beginner" />
           <TextArea label="Description" value={newTemplateMeta.description} onChange={e => setNewTemplateMeta({ ...newTemplateMeta, description: e.target.value })} />
@@ -424,7 +432,7 @@ export default function WorkoutsPage() {
           ))}
           <Btn variant="secondary" onClick={addSection} style={{ width: "100%" }}>+ Add Section</Btn>
           {saveError && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10 }}>{saveError}</div>}
-          <Btn onClick={saveNewTemplate} style={{ width: "100%" }}>Save Template</Btn>
+          <Btn onClick={saveNewTemplate} style={{ width: "100%" }}>{editTemplate ? "Update Template" : "Save Template"}</Btn>
         </div>
       </Modal>
 
