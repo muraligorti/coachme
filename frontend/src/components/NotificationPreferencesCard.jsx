@@ -10,6 +10,7 @@ import { useState, useEffect } from "react";
 import { C } from "../theme/theme.js";
 import { api } from "../lib/api.js";
 import { Card, Btn, Input } from "./ui.jsx";
+import { scheduleDailyReminders } from "../lib/localReminders.js";
 
 const REMINDER_TYPES = [
   { key: "checkin", label: "Check-in Reminder", desc: "A daily nudge to log a check-in with your coach" },
@@ -40,6 +41,7 @@ export default function NotificationPreferencesCard({ showClientReminders = fals
       }
       const updated = await api.put("/notification-preferences/me", body);
       setPrefs(updated);
+      if (showClientReminders) await scheduleDailyReminders(updated); // takes effect immediately, not just next login — session-reminder-minute changes propagate on next app open instead, since rescheduling those needs the full bookings list this component doesn't have
       setSaved(true); setTimeout(() => setSaved(false), 2000);
     } catch (e) { setError(e.message); }
     setSaving(false);
