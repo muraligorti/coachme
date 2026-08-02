@@ -1,6 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════
 // CLIENT SCHEDULE — a client's upcoming/past sessions. Clients can only
-// *request* cancellation (never unilaterally cancel) — the coach approves.
+// *request* cancellation or reschedule (never unilaterally act) — the
+// coach approves. Available for both PENDING and CONFIRMED sessions —
+// a client should be able to withdraw or adjust a request they made
+// themselves before the coach has even acted on it, not just after.
 // ═══════════════════════════════════════════════════════════════════════
 import { useState, useEffect } from "react";
 import { C } from "../../theme/theme.js";
@@ -8,11 +11,13 @@ import { api } from "../../lib/api.js";
 import { unwrap, cName, log } from "../../lib/utils.js";
 import { Card, Badge, Btn, TextArea, Modal, Empty, ST, Spin } from "../../components/ui.jsx";
 import RequestSessionModal from "./RequestSessionModal.jsx";
+import RescheduleRequestModal from "./RescheduleRequestModal.jsx";
 
 export default function ClientSchedulePage() {
   const [bookings, setBookings] = useState([]); const [loading, setLoading] = useState(true);
   const [cancelId, setCancelId] = useState(null); const [cancelReason, setCancelReason] = useState("");
   const [showRequest, setShowRequest] = useState(false);
+  const [rescheduleTarget, setRescheduleTarget] = useState(null);
 
   const load = () => api.get("/bookings").then(d => { const bk = unwrap(d, "bookings", "sessions"); log("Client bookings loaded:", bk.length); setBookings(bk); }).catch(e => { log("Client bookings error:", e.message); }).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
@@ -31,6 +36,10 @@ export default function ClientSchedulePage() {
   const upcoming = bookings.filter(b => { try { const st = (b.status || "").toUpperCase(); return new Date(b.scheduledAt || b.date) >= now && st !== "CANCELLED"; } catch { return false; } }).sort((a, b) => new Date(a.scheduledAt || a.date) - new Date(b.scheduledAt || b.date));
   const past = bookings.filter(b => { try { return new Date(b.scheduledAt || b.date) < now; } catch { return false; } }).sort((a, b) => new Date(b.scheduledAt || b.date) - new Date(a.scheduledAt || a.date)).slice(0, 20);
   const statusColors = { confirmed: C.ok, pending: C.wn, completed: C.a2, cancelled: C.mt, cancel_requested: C.or, no_show: C.dg };
+  // A client can act on their own session whether it's already confirmed
+  // OR still awaiting the coach's decision — a pending request is still
+  // theirs to withdraw or adjust, not just something to wait on silently.
+  const canRequestChange = (st) => st === "confirmed" || st === "pending";
 
   return (
     <div>
@@ -50,7 +59,17 @@ export default function ClientSchedulePage() {
                   </div>
                   <Badge color={statusColors[st] || C.wn}>{st === "cancel_requested" ? "Cancel Pending" : st === "pending" && b.initiatedBy === "client" ? "Awaiting Coach" : st}</Badge>
                 </div>
-                {st === "confirmed" && <button onClick={() => setCancelId(b.id)} style={{ width: "100%", padding: "8px", borderRadius: 8, border: `1px solid ${C.dg}30`, background: C.dg + "10", color: C.dg, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Request Cancellation</button>}
+                {canRequestChange(st) && !b.requestedRescheduleAt && (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => setRescheduleTarget(b)} style={{ flex: 1, padding: "8px", borderRadius: 8, border: `1px solid ${C.ac}30`, background: C.ac + "10", color: C.ac, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Request Reschedule</button>
+                    <button onClick={() => setCancelId(b.id)} style={{ flex: 1, padding: "8px", borderRadius: 8, border: `1px solid ${C.dg}30`, background: C.dg + "10", color: C.dg, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Request Cancellation</button>
+                  </div>
+                )}
+                {b.requestedRescheduleAt && (
+                  <div style={{ fontSize: 12, color: C.ac, textAlign: "center", padding: 8, background: C.ac + "10", borderRadius: 8 }}>
+                    🔄 Reschedule to {new Date(b.requestedRescheduleAt).toLocaleDateString()} {new Date(b.requestedRescheduleAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} — awaiting your coach's approval
+                  </div>
+                )}
                 {st === "cancel_requested" && <div style={{ fontSize: 12, color: C.or, textAlign: "center", padding: 4 }}>Waiting for coach approval</div>}
               </Card>
             );
@@ -81,6 +100,7 @@ export default function ClientSchedulePage() {
         </div>
       </Modal>
       <RequestSessionModal open={showRequest} onClose={() => setShowRequest(false)} onRequested={load} />
+      <RescheduleRequestModal booking={rescheduleTarget} onClose={() => setRescheduleTarget(null)} onRequested={load} />
     </div>
   );
 }

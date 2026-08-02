@@ -50,22 +50,19 @@ export default function FitnessDevicesPage() {
     }
   }, []);
 
+  // Only genuinely configurable options here — real OAuth connections or
+  // real native bridges. Manual-only "devices" (Garmin, Mi Band, Noise,
+  // boAt, Polar, COROS, WHOOP — none of which publish a public API),
+  // the deprecated Google Fit, and the OnePlus/Samsung info-redirects
+  // (which just point at Health Connect) were removed — none of them let
+  // a user actually configure or connect anything. Manual health-data
+  // logging is still available via the "✏️ Manual" button in the header.
   const devices = [
     { id: "fitbit", name: "Fitbit", icon: "⌚", color: "#00B0B9", desc: "Steps, heart rate, sleep, SpO2", type: "oauth" },
     { id: "strava", name: "Strava", icon: "🧡", color: "#FC4C02", desc: "Running, cycling, swimming activities", type: "oauth" },
     { id: "healthConnect", name: "Health Connect", icon: "💚", color: "#0F9D58", desc: "Android's unified health hub — covers OnePlus, Samsung & most Android trackers", type: "native-bridge", note: "Reads directly from the CoachMe Android app. Not available in this web version — install the app to connect." },
     { id: "appleHealth", name: "Apple Health", icon: "🍎", color: "#FF3B30", desc: "All metrics synced to HealthKit", type: "native-bridge", note: "Reads directly from the CoachMe iOS app. Not available in this web version — install the app to connect." },
-    { id: "oneplus", name: "OnePlus Health", icon: "🔴", color: "#F5010C", desc: "Syncs into Android Health Connect — connect that instead", type: "info", note: "OnePlus doesn't publish its own API. On a modern OnePlus phone, its health data flows into Health Connect automatically — connect Health Connect above to pull it in." },
     { id: "huawei", name: "Huawei Health", icon: "🔴", color: "#CF0A2C", desc: "Steps, heart rate, sleep, SpO2, stress", type: "oauth", note: "Requires a Huawei Developer account with Health Kit scope approved — heavier setup than Fitbit/Strava." },
-    { id: "googleFit", name: "Google Fit", icon: "❤️", color: "#4285F4", desc: "Discontinued by Google", type: "deprecated", note: "Google stopped issuing new Google Fit API access in 2024 and is shutting it down entirely by end of 2026. Use Health Connect above instead — it's Google's official replacement." },
-    { id: "samsung", name: "Samsung Health", icon: "💙", color: "#1428A0", desc: "Syncs into Android Health Connect — connect that instead", type: "info", note: "Samsung Health data flows into Health Connect on modern Android — connect Health Connect above to pull it in." },
-    { id: "garmin", name: "Garmin Connect", icon: "🏃", color: "#007CC3", desc: "GPS, VO2 max, training load, recovery", type: "manual-only", note: "No public API for third-party apps. Log your Garmin data manually below after checking the Garmin Connect app." },
-    { id: "miband", name: "Mi Band / Zepp", icon: "🟠", color: "#FF6900", desc: "Steps, heart rate, sleep, stress", type: "manual-only", note: "No public API. Log manually below after checking the Zepp app." },
-    { id: "noise", name: "Noise Fit", icon: "🟢", color: "#00C853", desc: "Steps, heart rate, sleep, SpO2", type: "manual-only", note: "No public API. Log manually below after checking the NoiseFit app." },
-    { id: "boat", name: "boAt Crest", icon: "🔵", color: "#1E88E5", desc: "Steps, heart rate, sleep, SpO2", type: "manual-only", note: "No public API. Log manually below after checking the boAt Crest app." },
-    { id: "polar", name: "Polar", icon: "⬜", color: "#D0021B", desc: "HR zones, running index, recovery", type: "manual-only", note: "No public API for third-party apps. Log manually below after checking Polar Flow." },
-    { id: "coros", name: "COROS", icon: "🟤", color: "#E65100", desc: "Running, cycling, swimming metrics", type: "manual-only", note: "No public API for third-party apps. Log manually below after checking the COROS app." },
-    { id: "whoop", name: "WHOOP", icon: "⚫", color: "#E31937", desc: "Strain, recovery, sleep performance", type: "manual-only", note: "WHOOP's API requires a partnership agreement. Log manually below after checking the WHOOP app." },
   ];
 
   const toggleConnect = async (id) => {
