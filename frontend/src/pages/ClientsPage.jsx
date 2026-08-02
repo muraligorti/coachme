@@ -25,9 +25,42 @@ import ExerciseTrendChart from "./ExerciseTrendChart.jsx";
 // Workouts screen, which remains the single place plans are authored.
 function ClientWorkoutsTab({ clientId }) {
   const [plans, setPlans] = useState(null);
-  useEffect(() => {
-    api.get(`/workout-assignments/client/${clientId}`).then(d => setPlans(d.plans || [])).catch(() => setPlans([]));
-  }, [clientId]);
+  const [editingPlan, setEditingPlan] = useState(null); // the plan object being edited, or null
+  const [editForm, setEditForm] = useState({ name: "", description: "", exercises: [], daysOfWeek: new Set() });
+  const [editError, setEditError] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+
+  const load = () => api.get(`/workout-assignments/client/${clientId}`).then(d => setPlans(d.plans || [])).catch(() => setPlans([]));
+  useEffect(() => { load(); }, [clientId]);
+
+  const openEdit = (p) => {
+    setEditingPlan(p); setEditError("");
+    setEditForm({
+      name: p.title || p.name || "", description: p.description || "",
+      exercises: (p.exercises && p.exercises.length > 0) ? p.exercises.map(e => ({ name: e.name || e, sets: e.sets || 3, reps: e.reps || 10, rest: e.rest || 60 })) : [{ name: "", sets: 3, reps: 10, rest: 60 }],
+      daysOfWeek: new Set(p.daysOfWeek || []),
+    });
+  };
+
+  const addEditExercise = () => setEditForm(f => ({ ...f, exercises: [...f.exercises, { name: "", sets: 3, reps: 10, rest: 60 }] }));
+  const removeEditExercise = (i) => setEditForm(f => ({ ...f, exercises: f.exercises.filter((_, j) => j !== i) }));
+  const updateEditExercise = (i, field, value) => setEditForm(f => ({ ...f, exercises: f.exercises.map((e, j) => j === i ? { ...e, [field]: value } : e) }));
+  const toggleEditDay = (dow) => setEditForm(f => { const next = new Set(f.daysOfWeek); next.has(dow) ? next.delete(dow) : next.add(dow); return { ...f, daysOfWeek: next }; });
+
+  const saveEdit = async () => {
+    if (!editForm.name.trim()) { setEditError("Workout name is required"); return; }
+    setEditSaving(true); setEditError("");
+    try {
+      await api.req(`/workout-assignments/plan/${editingPlan.id}/client/${clientId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: editForm.name.trim(), description: editForm.description, exercises: editForm.exercises.filter(e => e.name.trim()), daysOfWeek: [...editForm.daysOfWeek] }),
+      });
+      setEditingPlan(null);
+      load();
+    } catch (e) { setEditError(e.message); }
+    setEditSaving(false);
+  };
+
   if (plans === null) return <Spin />;
   if (plans.length === 0) return <Empty icon="💪" text="No workout plan assigned yet — create one from the Workouts tab and assign it to this client." />;
   return (
@@ -43,7 +76,10 @@ function ClientWorkoutsTab({ clientId }) {
                 <div style={{ fontSize: 11, color: C.mt, marginTop: 2 }}>No days set — flexible</div>
               )}
             </div>
-            <Badge color={p.status === "active" ? C.ok : C.mt}>{p.status || "draft"}</Badge>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <Badge color={p.status === "active" ? C.ok : C.mt}>{p.status || "draft"}</Badge>
+              <button onClick={() => openEdit(p)} style={{ width: 28, height: 28, borderRadius: 8, border: "none", cursor: "pointer", background: C.wn + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>✏️</button>
+            </div>
           </div>
           {p.description && <div style={{ color: C.mt, fontSize: 12, marginTop: 4 }}>{p.description}</div>}
           {p.exercises && Array.isArray(p.exercises) && (
@@ -58,6 +94,41 @@ function ClientWorkoutsTab({ clientId }) {
           )}
         </Card>
       ))}
+
+      <Modal open={!!editingPlan} onClose={() => setEditingPlan(null)} title={`Edit "${editingPlan?.title || editingPlan?.name || ""}"`} wide>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ fontSize: 11, color: C.mt }}>Changes here apply to this client only — if this plan happens to be shared with someone else, their copy is unaffected for the schedule, though the exercise list itself is shared (same as editing from the main Workouts tab).</div>
+          <Input label="Name" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
+          <Input label="Description" value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} />
+          <div>
+            <label style={{ fontSize: 13, color: C.mt, fontWeight: 500, marginBottom: 6, display: "block" }}>This client's days <span style={{ opacity: .6 }}>(optional)</span></label>
+            <div style={{ display: "flex", gap: 6 }}>
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label, dow) => {
+                const checked = editForm.daysOfWeek.has(dow);
+                return <button key={dow} type="button" onClick={() => toggleEditDay(dow)} style={{ width: 36, height: 36, borderRadius: 10, border: "none", cursor: "pointer", fontSize: 10.5, fontWeight: 700, background: checked ? C.ac : C.s2, color: checked ? "#fff" : C.mt }}>{label}</button>;
+              })}
+            </div>
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.tx, marginTop: 4 }}>Exercises</div>
+          {editForm.exercises.map((ex, i) => (
+            <Card key={i} style={{ padding: 10, background: C.s2 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 11, color: C.mt, fontWeight: 600 }}>#{i + 1}</span>
+                {editForm.exercises.length > 1 && <button onClick={() => removeEditExercise(i)} style={{ background: "none", border: "none", cursor: "pointer", color: C.dg, fontSize: 16 }}>✕</button>}
+              </div>
+              <Input value={ex.name} onChange={e => updateEditExercise(i, "name", e.target.value)} placeholder="Exercise name" style={{ marginBottom: 6 }} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                <Input type="number" label="Sets" value={ex.sets} onChange={e => updateEditExercise(i, "sets", +e.target.value)} />
+                <Input type="number" label="Reps" value={ex.reps} onChange={e => updateEditExercise(i, "reps", +e.target.value)} />
+                <Input type="number" label="Rest(s)" value={ex.rest} onChange={e => updateEditExercise(i, "rest", +e.target.value)} />
+              </div>
+            </Card>
+          ))}
+          <Btn variant="secondary" onClick={addEditExercise} style={{ width: "100%" }}>+ Exercise</Btn>
+          {editError && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10 }}>{editError}</div>}
+          <Btn onClick={saveEdit} disabled={editSaving} style={{ width: "100%" }}>{editSaving ? "Saving…" : "Save Changes"}</Btn>
+        </div>
+      </Modal>
     </div>
   );
 }
