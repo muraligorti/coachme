@@ -118,10 +118,15 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Global rate limiter: 100 requests per 15 minutes per IP
+// Global rate limiter: 1000 requests per 15 minutes per IP — raised from
+// the original 100, which was far too tight for how request-heavy this
+// app actually is (many small granular endpoints, plus background
+// polling like the live-batch checker every 30s) and was triggering on
+// ordinary use, not actual abuse. Per-endpoint limiters (login, register)
+// stay much tighter separately — this one is just the outer safety net.
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.ip || req.headers["x-forwarded-for"] || "unknown",
