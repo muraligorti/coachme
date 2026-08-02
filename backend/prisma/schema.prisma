@@ -84,6 +84,7 @@ model User {
   auditLogs       AuditLog[]
   notifications   Notification[]
   pushTokens      PushToken[]
+  notificationPreference NotificationPreference?
   sentMessages    Message[]     @relation("SentMessages")
   receivedMessages Message[]    @relation("ReceivedMessages")
   googleAuthToken GoogleAuthToken?
@@ -347,6 +348,8 @@ model Booking {
   initiatedBy     String        @default("coach")
   requestedRescheduleAt DateTime?
   rescheduleReason      String?
+  clientReminderSentAt  DateTime? // session reminder already sent to the client for this booking — prevents re-sending on every cron scan
+  coachReminderSentAt   DateTime? // same, for the coach — separate flag since each can have a different reminder lead time
   
   @@index([coachId, scheduledAt])
   @@index([clientId, scheduledAt])
@@ -460,6 +463,46 @@ model PushToken {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// â”€â”€â”€ NOTIFICATION PREFERENCES (per-user reminder configuration) â”€â”€â”€â”€â”€â”€â”€
+//
+// One row per user. Session reminders apply to both coaches and clients
+// (each cares about their own upcoming sessions, possibly at different
+// lead times). Check-in/habit/nutrition/sync reminders are client-
+// oriented activities, but the fields aren't role-restricted at the
+// schema level — the Settings UI just only shows the relevant subset per
+// role, keeping this one flexible model rather than forking it per role.
+//
+// v1 scope, stated plainly: these fire at the configured time whether or
+// not the action was already done that day — not "smart" enough yet to
+// check completion first and skip a redundant reminder. That's a
+// reasonable next refinement, not something silently promised now.
+
+model NotificationPreference {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  sessionReminderMinutes Int? @default(60) // minutes before a session to remind; null/0 = off
+
+  checkinReminderEnabled Boolean @default(true)
+  checkinReminderTime    String  @default("18:00") // "HH:MM", 24-hour, server-local time
+  lastCheckinReminderDate String? // "YYYY-MM-DD" — prevents re-sending within the same day
+
+  habitReminderEnabled  Boolean @default(true)
+  habitReminderTime     String  @default("08:00")
+  lastHabitReminderDate String?
+
+  nutritionReminderEnabled  Boolean @default(true)
+  nutritionReminderTime     String  @default("12:00")
+  lastNutritionReminderDate String?
+
+  syncReminderEnabled  Boolean @default(false) // off by default — not everyone has a wearable to sync
+  syncReminderTime     String  @default("20:00")
+  lastSyncReminderDate String?
+
+  updatedAt DateTime @updatedAt
 }
 
 // â”€â”€â”€ AUDIT LOG (Security tracking) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -19,6 +19,7 @@ import { useTheme } from "../../context/ThemeContext.jsx";
 import { api } from "../../lib/api.js";
 import { compressImage } from "../../lib/utils.js";
 import { Card, Btn, Input, ST } from "../../components/ui.jsx";
+import NotificationPreferencesCard from "../../components/NotificationPreferencesCard.jsx";
 
 export default function ClientSettingsPage() {
   const { user, logout } = useAuth();
@@ -75,6 +76,7 @@ export default function ClientSettingsPage() {
           <Btn onClick={save} style={{ width: "100%" }}>{saved ? "✓ Saved!" : "Save Profile"}</Btn>
         </div>
       </Card>
+      <NotificationPreferencesCard showClientReminders={true} />
       <Card style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 12 }}>Theme</div>
         <div style={{ display: "flex", gap: 8 }}>
