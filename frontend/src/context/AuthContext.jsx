@@ -7,6 +7,7 @@ import { createContext, useContext, useState, useEffect } from "react";
 import { api } from "../lib/api.js";
 import { xToken, xUser } from "../lib/utils.js";
 import { Splash } from "../components/Loading.jsx";
+import { initPushNotifications } from "../lib/pushNotifications.js";
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
@@ -14,6 +15,14 @@ export const useAuth = () => useContext(AuthCtx);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Fires once a user is authenticated, regardless of which path got
+  // them there (session-restore, login, register, Google) — registers
+  // this device for push and sends the token to the backend, now that
+  // there's a valid auth token for that request to succeed with.
+  useEffect(() => {
+    if (user) initPushNotifications();
+  }, [user]);
 
   useEffect(() => {
     if (!api.token) return setLoading(false);

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "826623010865",
+    "project_id": "coachme-1983",
+    "storage_bucket": "coachme-1983.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:826623010865:android:7109cf4c45893ac1618d10",
+        "android_client_info": {
+          "package_name": "life.coachme.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA8oM7dDS00xph_wWEcqNul1Ku6f70b2as"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

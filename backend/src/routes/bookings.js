@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma, logger } from "../server.js";
 import { authenticate, authorize, ownsResource, sanitizeBody, audit } from "../middleware/auth.js";
+import { sendPushToUser } from "../services/pushService.js";
 const router = Router();
 
 // POST /api/bookings — Create booking (client, coach, or admin)
@@ -80,11 +81,15 @@ router.post("/:id/cancel-request", authenticate, authorize("CLIENT"), sanitizeBo
     try {
       const coachProfile = await prisma.coachProfile.findUnique({ where: { id: booking.coachId } });
       if (coachProfile) {
+        const title = "Cancellation Request";
+        const body = `${clientProfile.displayName} requested to cancel session on ${new Date(booking.scheduledAt).toLocaleDateString()}`;
         await prisma.notification.create({
-          data: { userId: coachProfile.userId, type: "booking", title: "Cancellation Request",
-            body: `${clientProfile.displayName} requested to cancel session on ${new Date(booking.scheduledAt).toLocaleDateString()}`,
-            data: { bookingId: booking.id } }
+          data: { userId: coachProfile.userId, type: "booking", title, body, data: { bookingId: booking.id } }
         });
+        // Real push, alongside the in-app record above — first wired
+        // case for the new push infrastructure; more notification
+        // points get this the same way once this one's confirmed working.
+        sendPushToUser(coachProfile.userId, { title, body, data: { bookingId: booking.id, type: "booking" } }).catch(() => {});
       }
     } catch {}
     res.json(updated);
