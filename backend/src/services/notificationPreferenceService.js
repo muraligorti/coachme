@@ -18,14 +18,28 @@ const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const SCAN_WINDOW_MINUTES = 15; // must match the cron schedule's interval
 
 function toMinutes(hhmm) { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; }
-function nowMinutesLocal() { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
-function todayDateStr() { return new Date().toISOString().slice(0, 10); }
+// Explicitly IST, regardless of what timezone the server's own clock is
+// set to (Railway defaults to UTC) — this app's users are India-based,
+// so reminder times configured as "18:00" mean 6pm IST, not 6pm wherever
+// the server happens to think it is. Using Intl's timezone conversion
+// rather than a manual UTC+5:30 offset so this stays correct even across
+// any DST-like edge cases (India doesn't observe DST, but this is the
+// more robust way to express "IST" than hardcoded arithmetic).
+function nowMinutesIST() {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date());
+  const h = Number(parts.find(p => p.type === "hour").value);
+  const m = Number(parts.find(p => p.type === "minute").value);
+  return h * 60 + m;
+}
+function todayDateStrIST() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()); // en-CA gives YYYY-MM-DD directly
+}
 
 // Is the configured HH:MM within the last SCAN_WINDOW_MINUTES of now?
 // (i.e. would a cron run right now be the first one to notice it's time)
 function isTimeDue(hhmm) {
   const target = toMinutes(hhmm);
-  const now = nowMinutesLocal();
+  const now = nowMinutesIST();
   const diff = now - target;
   return diff >= 0 && diff < SCAN_WINDOW_MINUTES;
 }
@@ -59,17 +73,18 @@ export async function updateMyPreferences(userId, data) {
 
 async function runDailyReminderType(type, title, bodyFn) {
   const rows = await repo.findEnabledForType(type);
-  let sent = 0;
+  let sent = 0, checked = 0;
   for (const pref of rows) {
     if (pref.user.role !== "CLIENT") continue; // these four are client-oriented activities, regardless of who might have a row
+    checked++;
     const timeField = `${type}ReminderTime`, lastField = `last${type[0].toUpperCase()}${type.slice(1)}ReminderDate`;
     if (!isTimeDue(pref[timeField])) continue;
-    if (pref[lastField] === todayDateStr()) continue; // already sent today
+    if (pref[lastField] === todayDateStrIST()) continue; // already sent today
     await sendPushToUser(pref.userId, { title, body: bodyFn(), data: { type: `reminder_${type}` } });
-    await repo.markDailyReminderSent(pref.userId, type, todayDateStr());
+    await repo.markDailyReminderSent(pref.userId, type, todayDateStrIST());
     sent++;
   }
-  return sent;
+  return { sent, checked };
 }
 
 async function runSessionReminders() {
@@ -99,7 +114,7 @@ async function runSessionReminders() {
       }
     }
   }
-  return sent;
+  return { sent, checked: bookings.length };
 }
 
 export async function runReminderScan() {
