@@ -8,20 +8,43 @@
 // third-party scheduler's timing being exact.
 //
 // MULTI-IDENTITY SAFE: one device can log in as different accounts at
-// different times (e.g. testing as both coach and client). Every
-// notification ID is deterministically derived from (userId + type) or
-// (userId + bookingId), so logging in as a different account never
-// cancels or overwrites another account's already-scheduled reminders —
-// each account's schedule lives in its own ID space, and each account
-// only ever touches its own tracked IDs when rescheduling.
+// different times. Every notification ID is deterministically derived
+// from (userId + type) or (userId + bookingId), so logging in as a
+// different account never cancels or overwrites another account's
+// already-scheduled reminders.
 //
 // Event-driven notifications (like "a client requested a cancellation")
-// are NOT part of this — those still go through real push, since they
-// react to someone else's action and this device has no way to know
-// about that on its own. See pushService.js on the backend for those.
+// are NOT part of this — those still go through real push. See
+// pushService.js on the backend for those.
+//
+// DEBUG LOGGING: every significant step (plugin availability, permission
+// status, each schedule attempt and its outcome) is written to a
+// persistent, cappped log in localStorage — visible via the debug
+// section in Notification Settings. This exists because console.error()
+// is invisible on a real installed device with no dev tools attached;
+// without this, a silent failure here is genuinely undiagnosable from
+// outside the device.
 // ═══════════════════════════════════════════════════════════════════════
 import { Capacitor } from "@capacitor/core";
 import { ls } from "./storage.js";
+
+const DEBUG_LOG_KEY = "local_reminders_debug_log";
+const MAX_LOG_ENTRIES = 50;
+
+function debugLog(message) {
+  const entries = ls.get(DEBUG_LOG_KEY, []);
+  entries.unshift({ at: new Date().toISOString(), message });
+  ls.set(DEBUG_LOG_KEY, entries.slice(0, MAX_LOG_ENTRIES));
+  console.log("[localReminders]", message);
+}
+
+export function getDebugLog() {
+  return ls.get(DEBUG_LOG_KEY, []);
+}
+
+export function clearDebugLog() {
+  ls.set(DEBUG_LOG_KEY, []);
+}
 
 const DAILY_TITLES = {
   checkin: { title: "Check-in Reminder", body: "How's your day going? Log a quick check-in with your coach." },
@@ -30,25 +53,22 @@ const DAILY_TITLES = {
   sync: { title: "Sync Reminder", body: "Open the app to sync your latest health data." },
 };
 
-// Simple deterministic string hash -> positive int, kept within a safe
-// range for Android notification IDs (32-bit). Not cryptographic —
-// doesn't need to be, this just needs to reliably avoid collisions
-// between different (userId, key) pairs for a personal reminder app,
-// not resist a deliberate attacker.
 function hashToId(str, rangeOffset) {
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) | 0;
   return (Math.abs(hash) % 900000) + rangeOffset;
 }
-const dailyId = (userId, type) => hashToId(`${userId}:daily:${type}`, 100000); // 100000-999999 range
-const sessionId = (userId, bookingId) => hashToId(`${userId}:session:${bookingId}`, 2000000); // 2000000-2899999 range, non-overlapping with daily
+const dailyId = (userId, type) => hashToId(`${userId}:daily:${type}`, 100000);
+const sessionId = (userId, bookingId) => hashToId(`${userId}:session:${bookingId}`, 2000000);
 
 let LocalNotificationsPlugin = null;
 async function getPlugin() {
-  if (!Capacitor.isNativePlatform()) return null;
+  if (!Capacitor.isNativePlatform()) { debugLog("Not a native platform — local reminders are a no-op on web"); return null; }
   if (!LocalNotificationsPlugin) {
-    try { ({ LocalNotifications: LocalNotificationsPlugin } = await import("@capacitor/local-notifications")); }
-    catch (e) { console.error("Local notifications unavailable:", e.message); return null; }
+    try {
+      ({ LocalNotifications: LocalNotificationsPlugin } = await import("@capacitor/local-notifications"));
+      debugLog("Plugin loaded successfully");
+    } catch (e) { debugLog(`Plugin failed to load: ${e.message}`); return null; }
   }
   return LocalNotificationsPlugin;
 }
@@ -58,20 +78,24 @@ export async function initLocalReminders() {
   if (!plugin) return;
   try {
     const perm = await plugin.checkPermissions();
-    if (perm.display === "prompt") await plugin.requestPermissions();
-  } catch (e) { console.error("Local notification permission request failed:", e.message); }
+    debugLog(`Permission status: ${perm.display}`);
+    if (perm.display === "prompt") {
+      const result = await plugin.requestPermissions();
+      debugLog(`Permission requested, result: ${result.display}`);
+    } else if (perm.display === "denied") {
+      debugLog("⚠️ Permission is DENIED — reminders cannot fire until this is granted in Android system settings");
+    }
+  } catch (e) { debugLog(`Permission check/request failed: ${e.message}`); }
 }
 
-// Schedules (or re-schedules) this SPECIFIC user's four repeating daily
-// reminders — only ever touches IDs derived from this userId, so another
-// account's daily reminders (scheduled during a previous login on this
-// same device) are left completely alone.
 export async function scheduleDailyReminders(userId, prefs) {
   const plugin = await getPlugin();
-  if (!plugin || !prefs || !userId) return;
+  if (!plugin) { debugLog("scheduleDailyReminders: no plugin, aborting"); return; }
+  if (!prefs) { debugLog("scheduleDailyReminders: no prefs provided, aborting"); return; }
+  if (!userId) { debugLog("scheduleDailyReminders: no userId provided, aborting"); return; }
 
   const ids = ["checkin", "habit", "nutrition", "sync"].map(type => dailyId(userId, type));
-  try { await plugin.cancel({ notifications: ids.map(id => ({ id })) }); } catch {}
+  try { await plugin.cancel({ notifications: ids.map(id => ({ id })) }); } catch (e) { debugLog(`Cancel existing daily reminders failed (may be harmless if none existed): ${e.message}`); }
 
   const toSchedule = [];
   for (const type of ["checkin", "habit", "nutrition", "sync"]) {
@@ -85,73 +109,72 @@ export async function scheduleDailyReminders(userId, prefs) {
       schedule: { on: { hour, minute }, allowWhileIdle: true },
     });
   }
+  debugLog(`scheduleDailyReminders: ${toSchedule.length} reminder(s) to schedule (${toSchedule.map(t => t.title).join(", ") || "none enabled"})`);
   if (toSchedule.length > 0) {
-    try { await plugin.schedule({ notifications: toSchedule }); } catch (e) { console.error("Failed to schedule daily reminders:", e.message); }
+    try { await plugin.schedule({ notifications: toSchedule }); debugLog(`Daily reminders scheduled successfully: IDs ${toSchedule.map(t => t.id).join(", ")}`); }
+    catch (e) { debugLog(`❌ Failed to schedule daily reminders: ${e.message}`); }
   }
 }
 
-// Schedules one-time reminders for each of THIS user's upcoming confirmed
-// bookings. Tracks previously-scheduled booking IDs per-user (storage key
-// includes userId), so cancelling stale ones (a booking that got
-// cancelled/rescheduled since last sync) never touches another account's
-// tracked reminders on the same device.
 export async function scheduleSessionReminders(userId, bookings, leadMinutes) {
   const plugin = await getPlugin();
-  if (!plugin || !userId) return;
+  if (!plugin) { debugLog("scheduleSessionReminders: no plugin, aborting"); return; }
+  if (!userId) { debugLog("scheduleSessionReminders: no userId, aborting"); return; }
 
   const storageKey = `scheduled_session_reminder_ids_${userId}`;
   const previousIds = ls.get(storageKey, []);
   if (previousIds.length > 0) {
-    try { await plugin.cancel({ notifications: previousIds.map(id => ({ id })) }); } catch {}
+    try { await plugin.cancel({ notifications: previousIds.map(id => ({ id })) }); } catch (e) { debugLog(`Cancel existing session reminders failed: ${e.message}`); }
   }
 
-  if (!leadMinutes || leadMinutes <= 0 || !Array.isArray(bookings)) { ls.set(storageKey, []); return; }
+  if (!leadMinutes || leadMinutes <= 0) { debugLog(`scheduleSessionReminders: lead time is ${leadMinutes} (reminder disabled or invalid) — nothing scheduled`); ls.set(storageKey, []); return; }
+  if (!Array.isArray(bookings)) { debugLog("scheduleSessionReminders: bookings is not an array, aborting"); ls.set(storageKey, []); return; }
 
   const now = Date.now();
   const toSchedule = [];
   const newIds = [];
-  bookings
-    .filter(b => (b.status || "").toUpperCase() === "CONFIRMED")
-    .forEach((b) => {
-      const start = new Date(b.scheduledAt || b.date).getTime();
-      const fireAt = start - leadMinutes * 60000;
-      if (fireAt <= now) return; // reminder time already passed, or session is sooner than the lead time
-      const id = sessionId(userId, b.id); // deterministic from the booking's own ID — stable across repeated calls, never collides with another user's reminders
-      newIds.push(id);
-      toSchedule.push({
-        id,
-        title: "Upcoming Session",
-        body: `Your session is at ${new Date(start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
-        channelId: "reminders",
-        schedule: { at: new Date(fireAt) },
-      });
+  const confirmedBookings = bookings.filter(b => (b.status || "").toUpperCase() === "CONFIRMED");
+  debugLog(`scheduleSessionReminders: ${bookings.length} booking(s) total, ${confirmedBookings.length} confirmed, lead time ${leadMinutes}min`);
+
+  confirmedBookings.forEach((b) => {
+    const start = new Date(b.scheduledAt || b.date).getTime();
+    const fireAt = start - leadMinutes * 60000;
+    const minutesUntilFire = Math.round((fireAt - now) / 60000);
+    if (fireAt <= now) {
+      debugLog(`Skipping booking ${b.id}: fire time already passed (was ${Math.abs(minutesUntilFire)} min ago)`);
+      return;
+    }
+    const id = sessionId(userId, b.id);
+    newIds.push(id);
+    toSchedule.push({
+      id,
+      title: "Upcoming Session",
+      body: `Your session is at ${new Date(start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+      channelId: "reminders",
+      schedule: { at: new Date(fireAt) },
     });
+    debugLog(`Queued booking ${b.id}: will fire in ${minutesUntilFire} min (at ${new Date(fireAt).toLocaleString()})`);
+  });
 
   ls.set(storageKey, newIds);
   if (toSchedule.length > 0) {
-    try { await plugin.schedule({ notifications: toSchedule }); } catch (e) { console.error("Failed to schedule session reminders:", e.message); }
+    try { await plugin.schedule({ notifications: toSchedule }); debugLog(`✅ Session reminders scheduled successfully: ${toSchedule.length} notification(s)`); }
+    catch (e) { debugLog(`❌ Failed to schedule session reminders: ${e.message}`); }
+  } else {
+    debugLog("scheduleSessionReminders: nothing to schedule (no confirmed bookings within the lead-time window)");
   }
 }
 
-// Convenience wrapper for calling from schedule-loading pages (not just
-// AuthContext's one-time login effect) — fetches the current preference
-// itself, so callers just need to pass the userId and whatever bookings
-// they already fetched.
 export async function refreshSessionReminders(userId, bookings) {
-  if (!userId) return;
+  if (!userId) { debugLog("refreshSessionReminders: no userId, aborting"); return; }
   const { api } = await import("./api.js");
   try {
     const prefs = await api.get("/notification-preferences/me");
+    debugLog(`refreshSessionReminders: fetched prefs, sessionReminderMinutes=${prefs?.sessionReminderMinutes}`);
     await scheduleSessionReminders(userId, bookings, prefs?.sessionReminderMinutes ?? 60);
-  } catch (e) { console.error("Failed to refresh session reminders:", e.message); }
+  } catch (e) { debugLog(`❌ refreshSessionReminders: failed to fetch preferences: ${e.message}`); }
 }
 
-// Debug helper — returns every locally-scheduled notification currently
-// pending on this device, across ALL accounts that have ever logged in
-// here (not just the current one, since Android's scheduler itself has
-// no concept of "which app account" a notification belongs to — that's
-// purely our own ID-derivation scheme). Useful for confirming whether
-// scheduling actually happened, without waiting and hoping.
 export async function getPendingLocalReminders() {
   const plugin = await getPlugin();
   if (!plugin) return [];
@@ -163,5 +186,5 @@ export async function getPendingLocalReminders() {
       body: n.body,
       fireAt: n.schedule?.at || (n.schedule?.on ? `daily at ${String(n.schedule.on.hour).padStart(2, "0")}:${String(n.schedule.on.minute).padStart(2, "0")}` : "unknown"),
     }));
-  } catch (e) { console.error("Failed to get pending reminders:", e.message); return []; }
+  } catch (e) { debugLog(`getPendingLocalReminders failed: ${e.message}`); return []; }
 }

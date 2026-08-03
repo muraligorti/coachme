@@ -10,7 +10,7 @@ import { useState, useEffect } from "react";
 import { C } from "../theme/theme.js";
 import { api } from "../lib/api.js";
 import { Card, Btn, Input } from "./ui.jsx";
-import { scheduleDailyReminders, getPendingLocalReminders } from "../lib/localReminders.js";
+import { scheduleDailyReminders, getPendingLocalReminders, getDebugLog } from "../lib/localReminders.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const REMINDER_TYPES = [
@@ -28,12 +28,14 @@ export default function NotificationPreferencesCard({ showClientReminders = fals
   const [saving, setSaving] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [pendingReminders, setPendingReminders] = useState(null);
+  const [debugLog, setDebugLog] = useState([]);
   const [debugLoading, setDebugLoading] = useState(false);
 
   const loadDebugInfo = async () => {
     setDebugLoading(true);
     const pending = await getPendingLocalReminders();
     setPendingReminders(pending);
+    setDebugLog(getDebugLog());
     setDebugLoading(false);
   };
 
@@ -126,6 +128,21 @@ export default function NotificationPreferencesCard({ showClientReminders = fals
               </div>
             )}
             <button onClick={loadDebugInfo} style={{ marginTop: 8, background: "none", border: "none", cursor: "pointer", fontSize: 10.5, color: C.ac, padding: 0 }}>↻ Refresh</button>
+
+            <div style={{ marginTop: 14, paddingTop: 10, borderTop: `1px solid ${C.bd}` }}>
+              <div style={{ fontSize: 10.5, color: C.mt, marginBottom: 6, fontWeight: 600 }}>Activity log (most recent first)</div>
+              {debugLog.length === 0 ? (
+                <div style={{ fontSize: 10.5, color: C.mt }}>No activity recorded yet.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 3, maxHeight: 220, overflowY: "auto" }}>
+                  {debugLog.map((entry, i) => (
+                    <div key={i} style={{ fontSize: 10, color: entry.message.includes("❌") || entry.message.includes("⚠️") ? C.dg : C.mt, fontFamily: "monospace" }}>
+                      <span style={{ opacity: .6 }}>{new Date(entry.at).toLocaleTimeString()}</span> {entry.message}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
