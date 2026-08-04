@@ -28,6 +28,12 @@
 import { Capacitor } from "@capacitor/core";
 import { ls } from "./storage.js";
 
+// Bumped with every change to this file — displayed directly in the
+// debug UI so there is ZERO ambiguity about whether a given device is
+// actually running current code. If this doesn't match what's expected,
+// the build itself is stale, full stop — no further guessing needed.
+export const BUILD_MARKER = "reminders-v22-2026-08-04";
+
 const DEBUG_LOG_KEY = "local_reminders_debug_log";
 const MAX_LOG_ENTRIES = 50;
 
@@ -207,12 +213,13 @@ export async function getPendingLocalReminders() {
   let plugin; try { plugin = await getPlugin(); } catch (e) { debugLog(`❌ getPlugin() threw unexpectedly: ${e.message}`); return []; }
   if (!plugin) return [];
   try {
-    const result = await plugin.getPending();
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("getPending() timed out after 5s — the native call may be hanging")), 5000));
+    const result = await Promise.race([plugin.getPending(), timeout]);
     return (result.notifications || []).map(n => ({
       id: n.id,
       title: n.title,
       body: n.body,
       fireAt: n.schedule?.at || (n.schedule?.on ? `daily at ${String(n.schedule.on.hour).padStart(2, "0")}:${String(n.schedule.on.minute).padStart(2, "0")}` : "unknown"),
     }));
-  } catch (e) { debugLog(`getPendingLocalReminders failed: ${e.message}`); return []; }
+  } catch (e) { debugLog(`❌ getPendingLocalReminders failed: ${e.message}`); return []; }
 }

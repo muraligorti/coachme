@@ -10,7 +10,7 @@ import { useState, useEffect } from "react";
 import { C } from "../theme/theme.js";
 import { api } from "../lib/api.js";
 import { Card, Btn, Input } from "./ui.jsx";
-import { scheduleDailyReminders, getPendingLocalReminders, getDebugLog } from "../lib/localReminders.js";
+import { scheduleDailyReminders, getPendingLocalReminders, getDebugLog, BUILD_MARKER } from "../lib/localReminders.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const REMINDER_TYPES = [
@@ -66,6 +66,7 @@ export default function NotificationPreferencesCard({ showClientReminders = fals
   return (
     <Card style={{ marginBottom: 12 }}>
       <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 4 }}>🔔 Notifications</div>
+      <div style={{ fontSize: 9, color: C.mt, opacity: .6, marginBottom: 4, fontFamily: "monospace" }}>build: {BUILD_MARKER}</div>
       <div style={{ fontSize: 11, color: C.mt, marginBottom: 14 }}>Push notifications must be allowed for these to actually arrive — you'll be prompted the first time you log in on the app.</div>
 
       <div style={{ marginBottom: 14, paddingBottom: showClientReminders ? 14 : 0, borderBottom: showClientReminders ? `1px solid ${C.bd}` : "none" }}>
