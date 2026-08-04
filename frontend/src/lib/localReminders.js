@@ -32,7 +32,7 @@ import { ls } from "./storage.js";
 // debug UI so there is ZERO ambiguity about whether a given device is
 // actually running current code. If this doesn't match what's expected,
 // the build itself is stale, full stop — no further guessing needed.
-export const BUILD_MARKER = "reminders-v23-2026-08-04";
+export const BUILD_MARKER = "reminders-v24-2026-08-04";
 
 const DEBUG_LOG_KEY = "local_reminders_debug_log";
 const MAX_LOG_ENTRIES = 50;
@@ -73,6 +73,17 @@ const dailyId = (userId, type) => hashToId(`${userId}:daily:${type}`, 100000);
 const sessionId = (userId, bookingId) => hashToId(`${userId}:session:${bookingId}`, 2000000);
 
 let LocalNotificationsPlugin = null;
+// Wraps ANY native plugin call with a timeout — several of these calls
+// have turned out to hang (not throw, just never resolve) on this
+// specific device rather than reject cleanly, and every unprotected
+// await was a silent dead-end for the whole scheduling chain. Applied
+// uniformly to every native call in this file now, not just the ones
+// already found hanging, since the same risk applies to all of them.
+function withTimeout(promise, ms, label) {
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms — native call is hanging, not throwing`)), ms));
+  return Promise.race([promise, timeout]);
+}
+
 async function getPlugin() {
   try {
     if (!Capacitor.isNativePlatform()) { debugLog("Not a native platform — local reminders are a no-op on web"); return null; }
@@ -91,10 +102,10 @@ export async function initLocalReminders() {
   try { plugin = await getPlugin(); } catch (e) { debugLog(`❌ getPlugin() threw unexpectedly: ${e.message}`); return; }
   if (!plugin) { debugLog("initLocalReminders: no plugin available, stopping here"); return; }
   try {
-    const perm = await plugin.checkPermissions();
+    const perm = await withTimeout(plugin.checkPermissions(), 5000, "checkPermissions()");
     debugLog(`Notification permission status: ${perm.display}`);
     if (perm.display === "prompt") {
-      const result = await plugin.requestPermissions();
+      const result = await withTimeout(plugin.requestPermissions(), 10000, "requestPermissions()");
       debugLog(`Notification permission requested, result: ${result.display}`);
     } else if (perm.display === "denied") {
       debugLog("⚠️ Notification permission is DENIED — reminders cannot fire until this is granted in Android system settings");
@@ -110,11 +121,11 @@ export async function initLocalReminders() {
   // screen than regular notifications, easy to miss entirely.
   try {
     if (typeof plugin.checkExactNotificationSetting === "function") {
-      const exactPerm = await plugin.checkExactNotificationSetting();
+      const exactPerm = await withTimeout(plugin.checkExactNotificationSetting(), 5000, "checkExactNotificationSetting()");
       debugLog(`Exact alarm permission status: ${exactPerm.exact_alarm}`);
       if (exactPerm.exact_alarm !== "granted" && typeof plugin.changeExactNotificationSetting === "function") {
         debugLog("Exact alarm permission not granted — prompting user via system settings");
-        const changed = await plugin.changeExactNotificationSetting();
+        const changed = await withTimeout(plugin.changeExactNotificationSetting(), 30000, "changeExactNotificationSetting()");
         debugLog(`Exact alarm permission after prompt: ${changed.exact_alarm}`);
       }
     } else {
@@ -130,7 +141,7 @@ export async function scheduleDailyReminders(userId, prefs) {
   if (!userId) { debugLog("scheduleDailyReminders: no userId provided, aborting"); return; }
 
   const ids = ["checkin", "habit", "nutrition", "sync"].map(type => dailyId(userId, type));
-  try { await plugin.cancel({ notifications: ids.map(id => ({ id })) }); } catch (e) { debugLog(`Cancel existing daily reminders failed (may be harmless if none existed): ${e.message}`); }
+  try { await withTimeout(plugin.cancel({ notifications: ids.map(id => ({ id })) }), 5000, "cancel() [daily]"); } catch (e) { debugLog(`Cancel existing daily reminders failed (may be harmless if none existed): ${e.message}`); }
 
   const toSchedule = [];
   for (const type of ["checkin", "habit", "nutrition", "sync"]) {
@@ -146,7 +157,7 @@ export async function scheduleDailyReminders(userId, prefs) {
   }
   debugLog(`scheduleDailyReminders: ${toSchedule.length} reminder(s) to schedule (${toSchedule.map(t => t.title).join(", ") || "none enabled"})`);
   if (toSchedule.length > 0) {
-    try { await plugin.schedule({ notifications: toSchedule }); debugLog(`Daily reminders scheduled successfully: IDs ${toSchedule.map(t => t.id).join(", ")}`); }
+    try { await withTimeout(plugin.schedule({ notifications: toSchedule }), 5000, "schedule() [daily]"); debugLog(`Daily reminders scheduled successfully: IDs ${toSchedule.map(t => t.id).join(", ")}`); }
     catch (e) { debugLog(`❌ Failed to schedule daily reminders: ${e.message}`); }
   }
 }
@@ -159,7 +170,7 @@ export async function scheduleSessionReminders(userId, bookings, leadMinutes) {
   const storageKey = `scheduled_session_reminder_ids_${userId}`;
   const previousIds = ls.get(storageKey, []);
   if (previousIds.length > 0) {
-    try { await plugin.cancel({ notifications: previousIds.map(id => ({ id })) }); } catch (e) { debugLog(`Cancel existing session reminders failed: ${e.message}`); }
+    try { await withTimeout(plugin.cancel({ notifications: previousIds.map(id => ({ id })) }), 5000, "cancel() [session]"); } catch (e) { debugLog(`❌ Cancel existing session reminders failed/timed out: ${e.message}`); }
   }
 
   if (!leadMinutes || leadMinutes <= 0) { debugLog(`scheduleSessionReminders: lead time is ${leadMinutes} (reminder disabled or invalid) — nothing scheduled`); ls.set(storageKey, []); return; }
@@ -193,7 +204,7 @@ export async function scheduleSessionReminders(userId, bookings, leadMinutes) {
 
   ls.set(storageKey, newIds);
   if (toSchedule.length > 0) {
-    try { await plugin.schedule({ notifications: toSchedule }); debugLog(`✅ Session reminders scheduled successfully: ${toSchedule.length} notification(s)`); }
+    try { await withTimeout(plugin.schedule({ notifications: toSchedule }), 5000, "schedule() [session]"); debugLog(`✅ Session reminders scheduled successfully: ${toSchedule.length} notification(s)`); }
     catch (e) { debugLog(`❌ Failed to schedule session reminders: ${e.message}`); }
   } else {
     debugLog("scheduleSessionReminders: nothing to schedule (no confirmed bookings within the lead-time window)");
