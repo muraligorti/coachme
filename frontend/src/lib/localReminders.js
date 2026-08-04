@@ -32,7 +32,7 @@ import { ls } from "./storage.js";
 // debug UI so there is ZERO ambiguity about whether a given device is
 // actually running current code. If this doesn't match what's expected,
 // the build itself is stale, full stop — no further guessing needed.
-export const BUILD_MARKER = "reminders-v24-2026-08-04";
+export const BUILD_MARKER = "reminders-v25-2026-08-04";
 
 const DEBUG_LOG_KEY = "local_reminders_debug_log";
 const MAX_LOG_ENTRIES = 50;
@@ -116,22 +116,44 @@ export async function initLocalReminders() {
   // specifically for precisely-timed alarms, denied by default on
   // Android 13+ fresh installs. Without it, scheduling still succeeds
   // (shows up as "pending") but delivery silently falls back to inexact
-  // timing, which can be delayed arbitrarily by the OS. This is
-  // genuinely a different permission living in a different settings
-  // screen than regular notifications, easy to miss entirely.
+  // timing, which can be delayed arbitrarily by the OS.
+  //
+  // IMPORTANT: only CHECKING the status here, never automatically
+  // PROMPTING for it. changeExactNotificationSetting() navigates the
+  // user away to a system settings screen, and Android's WebView can
+  // pause ALL JavaScript execution globally while backgrounded for
+  // that — not just the code that triggered it. Doing this silently on
+  // every login was very likely the actual cause of reminders appearing
+  // to hang across the board, not just this one permission check.
+  // Prompting for it is now a separate, explicit, user-initiated action
+  // — see requestExactAlarmPermission() below.
   try {
     if (typeof plugin.checkExactNotificationSetting === "function") {
       const exactPerm = await withTimeout(plugin.checkExactNotificationSetting(), 5000, "checkExactNotificationSetting()");
       debugLog(`Exact alarm permission status: ${exactPerm.exact_alarm}`);
-      if (exactPerm.exact_alarm !== "granted" && typeof plugin.changeExactNotificationSetting === "function") {
-        debugLog("Exact alarm permission not granted — prompting user via system settings");
-        const changed = await withTimeout(plugin.changeExactNotificationSetting(), 30000, "changeExactNotificationSetting()");
-        debugLog(`Exact alarm permission after prompt: ${changed.exact_alarm}`);
+      if (exactPerm.exact_alarm !== "granted") {
+        debugLog("⚠️ Exact alarm permission not granted — reminders will still schedule but may be delayed. Use the 'Grant Exact Alarm Permission' button in Settings to fix this (does NOT happen automatically, since it navigates away from the app).");
       }
     } else {
       debugLog("Plugin does not expose checkExactNotificationSetting — cannot verify exact alarm permission from here; check manually via Settings > Apps > Special app access > Alarms & reminders");
     }
   } catch (e) { debugLog(`Exact alarm permission check failed: ${e.message} — check manually via Settings > Apps > Special app access > Alarms & reminders`); }
+}
+
+// Explicit, user-initiated only — never called automatically. Opens a
+// system settings screen; the person needs to know that's about to
+// happen and choose to do it, rather than have the app silently
+// navigate away during a routine login.
+export async function requestExactAlarmPermission() {
+  const plugin = await getPlugin();
+  if (!plugin) { debugLog("requestExactAlarmPermission: no plugin available"); return { exact_alarm: "unknown" }; }
+  if (typeof plugin.changeExactNotificationSetting !== "function") { debugLog("requestExactAlarmPermission: plugin does not expose this method"); return { exact_alarm: "unknown" }; }
+  try {
+    debugLog("requestExactAlarmPermission: opening system settings screen (user-initiated)");
+    const changed = await withTimeout(plugin.changeExactNotificationSetting(), 60000, "changeExactNotificationSetting() [user-initiated]");
+    debugLog(`Exact alarm permission after user visited settings: ${changed.exact_alarm}`);
+    return changed;
+  } catch (e) { debugLog(`requestExactAlarmPermission failed: ${e.message}`); return { exact_alarm: "unknown" }; }
 }
 
 export async function scheduleDailyReminders(userId, prefs) {
