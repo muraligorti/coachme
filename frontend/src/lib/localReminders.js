@@ -38,6 +38,11 @@ function debugLog(message) {
   console.log("[localReminders]", message);
 }
 
+// Public alias — lets other modules (like AuthContext) log into the same
+// visible debug trail, e.g. to prove an effect actually started running
+// before anything else has a chance to fail.
+export const logDebugEvent = debugLog;
+
 export function getDebugLog() {
   return ls.get(DEBUG_LOG_KEY, []);
 }
@@ -63,19 +68,21 @@ const sessionId = (userId, bookingId) => hashToId(`${userId}:session:${bookingId
 
 let LocalNotificationsPlugin = null;
 async function getPlugin() {
-  if (!Capacitor.isNativePlatform()) { debugLog("Not a native platform — local reminders are a no-op on web"); return null; }
-  if (!LocalNotificationsPlugin) {
-    try {
+  try {
+    if (!Capacitor.isNativePlatform()) { debugLog("Not a native platform — local reminders are a no-op on web"); return null; }
+    if (!LocalNotificationsPlugin) {
       ({ LocalNotifications: LocalNotificationsPlugin } = await import("@capacitor/local-notifications"));
       debugLog("Plugin loaded successfully");
-    } catch (e) { debugLog(`Plugin failed to load: ${e.message}`); return null; }
-  }
-  return LocalNotificationsPlugin;
+    }
+    return LocalNotificationsPlugin;
+  } catch (e) { debugLog(`❌ getPlugin() internal failure: ${e.message}`); return null; }
 }
 
 export async function initLocalReminders() {
-  const plugin = await getPlugin();
-  if (!plugin) return;
+  debugLog("initLocalReminders: starting");
+  let plugin;
+  try { plugin = await getPlugin(); } catch (e) { debugLog(`❌ getPlugin() threw unexpectedly: ${e.message}`); return; }
+  if (!plugin) { debugLog("initLocalReminders: no plugin available, stopping here"); return; }
   try {
     const perm = await plugin.checkPermissions();
     debugLog(`Notification permission status: ${perm.display}`);
@@ -110,7 +117,7 @@ export async function initLocalReminders() {
 }
 
 export async function scheduleDailyReminders(userId, prefs) {
-  const plugin = await getPlugin();
+  let plugin; try { plugin = await getPlugin(); } catch (e) { debugLog(`❌ getPlugin() threw unexpectedly: ${e.message}`); return; }
   if (!plugin) { debugLog("scheduleDailyReminders: no plugin, aborting"); return; }
   if (!prefs) { debugLog("scheduleDailyReminders: no prefs provided, aborting"); return; }
   if (!userId) { debugLog("scheduleDailyReminders: no userId provided, aborting"); return; }
@@ -138,7 +145,7 @@ export async function scheduleDailyReminders(userId, prefs) {
 }
 
 export async function scheduleSessionReminders(userId, bookings, leadMinutes) {
-  const plugin = await getPlugin();
+  let plugin; try { plugin = await getPlugin(); } catch (e) { debugLog(`❌ getPlugin() threw unexpectedly: ${e.message}`); return; }
   if (!plugin) { debugLog("scheduleSessionReminders: no plugin, aborting"); return; }
   if (!userId) { debugLog("scheduleSessionReminders: no userId, aborting"); return; }
 
@@ -197,7 +204,7 @@ export async function refreshSessionReminders(userId, bookings) {
 }
 
 export async function getPendingLocalReminders() {
-  const plugin = await getPlugin();
+  let plugin; try { plugin = await getPlugin(); } catch (e) { debugLog(`❌ getPlugin() threw unexpectedly: ${e.message}`); return []; }
   if (!plugin) return [];
   try {
     const result = await plugin.getPending();
