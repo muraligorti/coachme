@@ -8,7 +8,7 @@ import { api } from "../lib/api.js";
 import { xToken, xUser, unwrap } from "../lib/utils.js";
 import { Splash } from "../components/Loading.jsx";
 import { initPushNotifications } from "../lib/pushNotifications.js";
-import { initLocalReminders, scheduleDailyReminders, scheduleSessionReminders } from "../lib/localReminders.js";
+import { initLocalReminders, scheduleDailyReminders, scheduleSessionReminders, logDebugEvent } from "../lib/localReminders.js";
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
@@ -31,15 +31,19 @@ export function AuthProvider({ children }) {
   // since the last time the app was opened.
   useEffect(() => {
     if (!user) return;
+    logDebugEvent(`AuthContext effect started for user ${user.id}`); // fires synchronously, before any async work — proves this code path was reached at all, regardless of what happens next
     (async () => {
-      await initLocalReminders();
       try {
+        await initLocalReminders();
         const prefs = await api.get("/notification-preferences/me");
         await scheduleDailyReminders(user.id, prefs);
         const bookingsRes = await api.get("/bookings");
         const bookings = unwrap(bookingsRes, "bookings", "sessions");
         await scheduleSessionReminders(user.id, bookings, prefs?.sessionReminderMinutes ?? 60);
-      } catch (e) { console.error("Local reminder scheduling failed:", e.message); }
+      } catch (e) {
+        console.error("Local reminder scheduling failed:", e.message);
+        logDebugEvent(`❌ AuthContext scheduling effect crashed: ${e.message}`);
+      }
     })();
   }, [user]);
 
