@@ -32,7 +32,7 @@ import { ls } from "./storage.js";
 // debug UI so there is ZERO ambiguity about whether a given device is
 // actually running current code. If this doesn't match what's expected,
 // the build itself is stale, full stop — no further guessing needed.
-export const BUILD_MARKER = "reminders-v22-2026-08-04";
+export const BUILD_MARKER = "reminders-v23-2026-08-04";
 
 const DEBUG_LOG_KEY = "local_reminders_debug_log";
 const MAX_LOG_ENTRIES = 50;
@@ -77,7 +77,8 @@ async function getPlugin() {
   try {
     if (!Capacitor.isNativePlatform()) { debugLog("Not a native platform — local reminders are a no-op on web"); return null; }
     if (!LocalNotificationsPlugin) {
-      ({ LocalNotifications: LocalNotificationsPlugin } = await import("@capacitor/local-notifications"));
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("plugin import timed out after 5s — likely not correctly linked into the native build")), 5000));
+      ({ LocalNotifications: LocalNotificationsPlugin } = await Promise.race([import("@capacitor/local-notifications"), timeout]));
       debugLog("Plugin loaded successfully");
     }
     return LocalNotificationsPlugin;

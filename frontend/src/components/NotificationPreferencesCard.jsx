@@ -33,9 +33,11 @@ export default function NotificationPreferencesCard({ showClientReminders = fals
 
   const loadDebugInfo = async () => {
     setDebugLoading(true);
-    const pending = await getPendingLocalReminders();
-    setPendingReminders(pending);
-    setDebugLog(getDebugLog());
+    setDebugLog(getDebugLog()); // reads synchronously from localStorage — always completes instantly, shown immediately regardless of what happens below
+    try {
+      const pending = await getPendingLocalReminders();
+      setPendingReminders(pending);
+    } catch (e) { setPendingReminders([]); }
     setDebugLoading(false);
   };
 
