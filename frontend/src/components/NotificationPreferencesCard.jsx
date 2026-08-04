@@ -10,7 +10,7 @@ import { useState, useEffect } from "react";
 import { C } from "../theme/theme.js";
 import { api } from "../lib/api.js";
 import { Card, Btn, Input } from "./ui.jsx";
-import { scheduleDailyReminders, getPendingLocalReminders, getDebugLog, BUILD_MARKER } from "../lib/localReminders.js";
+import { scheduleDailyReminders, getPendingLocalReminders, getDebugLog, BUILD_MARKER, requestExactAlarmPermission } from "../lib/localReminders.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const REMINDER_TYPES = [
@@ -30,6 +30,7 @@ export default function NotificationPreferencesCard({ showClientReminders = fals
   const [pendingReminders, setPendingReminders] = useState(null);
   const [debugLog, setDebugLog] = useState([]);
   const [debugLoading, setDebugLoading] = useState(false);
+  const [exactAlarmStatus, setExactAlarmStatus] = useState("");
 
   const loadDebugInfo = async () => {
     setDebugLoading(true);
@@ -109,6 +110,14 @@ export default function NotificationPreferencesCard({ showClientReminders = fals
 
       {error && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10, marginTop: 4 }}>{error}</div>}
       <Btn onClick={save} disabled={saving} style={{ width: "100%", marginTop: 12 }}>{saving ? "Saving…" : saved ? "✓ Saved!" : "Save Notification Settings"}</Btn>
+
+      <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.bd}` }}>
+        <div style={{ fontSize: 11, color: C.mt, marginBottom: 6 }}>For the most precisely-timed reminders, Android requires a separate "exact alarm" permission. This will take you to a system settings screen — tap only when you're ready for that.</div>
+        <button onClick={async () => { setExactAlarmStatus("Opening settings…"); const r = await requestExactAlarmPermission(); setExactAlarmStatus(`Status: ${r.exact_alarm}`); }} style={{ fontSize: 11, color: C.ac, background: "none", border: `1px solid ${C.ac}40`, borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>
+          ⏰ Grant Exact Alarm Permission
+        </button>
+        {exactAlarmStatus && <div style={{ fontSize: 10.5, color: C.mt, marginTop: 4 }}>{exactAlarmStatus}</div>}
+      </div>
 
       <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.bd}` }}>
         <button onClick={() => { const next = !showDebug; setShowDebug(next); if (next) loadDebugInfo(); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: C.mt, padding: 0 }}>
