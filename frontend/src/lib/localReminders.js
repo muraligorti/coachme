@@ -78,14 +78,35 @@ export async function initLocalReminders() {
   if (!plugin) return;
   try {
     const perm = await plugin.checkPermissions();
-    debugLog(`Permission status: ${perm.display}`);
+    debugLog(`Notification permission status: ${perm.display}`);
     if (perm.display === "prompt") {
       const result = await plugin.requestPermissions();
-      debugLog(`Permission requested, result: ${result.display}`);
+      debugLog(`Notification permission requested, result: ${result.display}`);
     } else if (perm.display === "denied") {
-      debugLog("⚠️ Permission is DENIED — reminders cannot fire until this is granted in Android system settings");
+      debugLog("⚠️ Notification permission is DENIED — reminders cannot fire until this is granted in Android system settings");
     }
-  } catch (e) { debugLog(`Permission check/request failed: ${e.message}`); }
+  } catch (e) { debugLog(`Notification permission check/request failed: ${e.message}`); }
+
+  // Separate from notification permission — Android 12+ requires this
+  // specifically for precisely-timed alarms, denied by default on
+  // Android 13+ fresh installs. Without it, scheduling still succeeds
+  // (shows up as "pending") but delivery silently falls back to inexact
+  // timing, which can be delayed arbitrarily by the OS. This is
+  // genuinely a different permission living in a different settings
+  // screen than regular notifications, easy to miss entirely.
+  try {
+    if (typeof plugin.checkExactNotificationSetting === "function") {
+      const exactPerm = await plugin.checkExactNotificationSetting();
+      debugLog(`Exact alarm permission status: ${exactPerm.exact_alarm}`);
+      if (exactPerm.exact_alarm !== "granted" && typeof plugin.changeExactNotificationSetting === "function") {
+        debugLog("Exact alarm permission not granted — prompting user via system settings");
+        const changed = await plugin.changeExactNotificationSetting();
+        debugLog(`Exact alarm permission after prompt: ${changed.exact_alarm}`);
+      }
+    } else {
+      debugLog("Plugin does not expose checkExactNotificationSetting — cannot verify exact alarm permission from here; check manually via Settings > Apps > Special app access > Alarms & reminders");
+    }
+  } catch (e) { debugLog(`Exact alarm permission check failed: ${e.message} — check manually via Settings > Apps > Special app access > Alarms & reminders`); }
 }
 
 export async function scheduleDailyReminders(userId, prefs) {

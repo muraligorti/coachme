@@ -33,4 +33,6 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" /> <!-- required on Android 13+ for push notifications; requested at runtime too, this just declares it -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" /> <!-- required on Android 12+ for precisely-timed local reminders; denied by default on Android 13+ fresh installs, must be granted via a special settings screen (Settings > Apps > Special app access > Alarms & reminders) -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" /> <!-- fallback declaration; actual grant still depends on the above on most devices -->
 </manifest>
