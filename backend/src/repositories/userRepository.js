@@ -13,6 +13,17 @@ import { prisma } from "../server.js";
 export const findByEmail = (email, client = prisma) =>
   client.user.findUnique({ where: { email } });
 
+export const findByUsername = (username, client = prisma) =>
+  client.user.findUnique({ where: { username } });
+
+// Login accepts either identifier — tries email first (the common case),
+// falls back to username only if the input doesn't match an email at all.
+export const findByEmailOrUsername = async (identifier, client = prisma) => {
+  const byEmail = await client.user.findUnique({ where: { email: identifier } });
+  if (byEmail) return byEmail;
+  return client.user.findUnique({ where: { username: identifier } });
+};
+
 export const findById = (id, client = prisma) =>
   client.user.findUnique({ where: { id } });
 

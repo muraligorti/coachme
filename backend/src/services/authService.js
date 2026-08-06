@@ -15,6 +15,7 @@ import { OAuth2Client } from "google-auth-library";
 import { AppError } from "../lib/AppError.js";
 import { encryptField } from "../lib/encryption.js";
 import { validateEmailDomain } from "../lib/emailValidation.js";
+import { sendVerificationCodeEmail } from "../lib/email.js";
 import * as userRepository from "../repositories/userRepository.js";
 import * as profileRepository from "../repositories/profileRepository.js";
 import * as sessionRepository from "../repositories/sessionRepository.js";
@@ -28,6 +29,10 @@ const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : nul
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
+const OTP_EXPIRY_MS = 10 * 60 * 1000;
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+
+const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000)); // 6 digits, never starts with 0 so it always displays as exactly 6 characters
 
 // ─── Register ──────────────────────────────────────────────────────────
 
@@ -47,6 +52,11 @@ export async function register(data, requestMeta) {
     throw new AppError(409, "Email already registered");
   }
 
+  if (data.username) {
+    const usernameTaken = await userRepository.findByUsername(data.username);
+    if (usernameTaken && usernameTaken.email !== data.email) throw new AppError(409, "Username already taken");
+  }
+
   const passwordHash = await bcrypt.hash(data.password, 12);
 
   const user = await runTransaction(async (tx) => {
@@ -62,7 +72,7 @@ export async function register(data, requestMeta) {
         else await profileRepository.updateClientProfile(existing.id, { displayName: data.profile.displayName }, tx);
       }
     } else {
-      newUser = await userRepository.create({ email: data.email, passwordHash, role: data.role }, tx);
+      newUser = await userRepository.create({ email: data.email, username: data.username || null, passwordHash, role: data.role }, tx);
     }
 
     const hasProfile = existing ? !!(data.role === "COACH"
@@ -128,11 +138,71 @@ export async function register(data, requestMeta) {
     return newUser;
   });
 
-  const tokens = tokenService.generateTokens(user);
-  await tokenService.createSession(user, tokens, requestMeta);
+  const code = generateOtp();
+  await userRepository.updateById(user.id, {
+    emailVerificationCode: code,
+    emailVerificationExpiresAt: new Date(Date.now() + OTP_EXPIRY_MS),
+    emailVerificationSentAt: new Date(),
+  });
+  try {
+    await sendVerificationCodeEmail(user.email, code);
+  } catch (err) {
+    // Registration itself succeeded (the account exists), but they can't
+    // verify without the email — surface this clearly rather than
+    // pretending everything's fine. resend-verification retries the send.
+    logger.error("Registration succeeded but verification email failed to send", { userId: user.id, error: err.message });
+    throw new AppError(500, "Account created, but we couldn't send the verification email. Try resending it from the verification screen.");
+  }
 
-  logger.info("User registered", { userId: user.id, role: data.role, email: data.email });
+  logger.info("User registered, awaiting email verification", { userId: user.id, role: data.role, email: data.email });
+  return { requiresVerification: true, email: user.email };
+}
+
+// ─── Email verification ────────────────────────────────────────────────
+
+export async function verifyEmail(email, code, requestMeta) {
+  const user = await userRepository.findByEmail(email);
+  if (!user) throw new AppError(404, "No account found for this email");
+  if (user.emailVerified) throw new AppError(400, "This email is already verified");
+  if (!user.emailVerificationCode || !user.emailVerificationExpiresAt) throw new AppError(400, "No verification code was requested — try resending it");
+  if (user.emailVerificationExpiresAt < new Date()) throw new AppError(400, "This code has expired — request a new one");
+  if (user.emailVerificationCode !== code) throw new AppError(400, "Incorrect code");
+
+  await userRepository.updateById(user.id, {
+    emailVerified: true, emailVerificationCode: null, emailVerificationExpiresAt: null,
+  });
+
+  const verifiedUser = { ...user, emailVerified: true };
+  const tokens = tokenService.generateTokens(verifiedUser);
+  await tokenService.createSession(verifiedUser, tokens, requestMeta);
+  logger.info("Email verified, registration complete", { userId: user.id });
   return { user: { id: user.id, email: user.email, role: user.role }, ...tokens };
+}
+
+export async function resendVerificationCode(email) {
+  const user = await userRepository.findByEmail(email);
+  if (!user) throw new AppError(404, "No account found for this email");
+  if (user.emailVerified) throw new AppError(400, "This email is already verified");
+  if (user.emailVerificationSentAt && Date.now() - user.emailVerificationSentAt.getTime() < OTP_RESEND_COOLDOWN_MS) {
+    const secondsLeft = Math.ceil((OTP_RESEND_COOLDOWN_MS - (Date.now() - user.emailVerificationSentAt.getTime())) / 1000);
+    throw new AppError(429, `Please wait ${secondsLeft}s before requesting another code`);
+  }
+
+  const code = generateOtp();
+  await userRepository.updateById(user.id, {
+    emailVerificationCode: code,
+    emailVerificationExpiresAt: new Date(Date.now() + OTP_EXPIRY_MS),
+    emailVerificationSentAt: new Date(),
+  });
+  await sendVerificationCodeEmail(user.email, code);
+  return { message: "Verification code sent" };
+}
+
+export async function setUsername(userId, username) {
+  const taken = await userRepository.findByUsername(username);
+  if (taken && taken.id !== userId) throw new AppError(409, "Username already taken");
+  await userRepository.updateById(userId, { username });
+  return { username };
 }
 
 // ─── Login with Google ─────────────────────────────────────────────────
@@ -202,8 +272,8 @@ export async function loginWithGoogle(credential, role, requestMeta) {
 // ─── Login (email/password) ─────────────────────────────────────────────
 
 export async function login(data, requestMeta) {
-  const user = await userRepository.findByEmail(data.email);
-  if (!user) throw new AppError(401, "Invalid email or password");
+  const user = await userRepository.findByEmailOrUsername(data.identifier);
+  if (!user) throw new AppError(401, "Invalid email/username or password");
 
   if (user.lockedUntil && user.lockedUntil > new Date()) {
     const minutesLeft = Math.ceil((user.lockedUntil - Date.now()) / 60000);
@@ -219,10 +289,11 @@ export async function login(data, requestMeta) {
     const attempts = user.loginAttempts + 1;
     const lockData = attempts >= MAX_LOGIN_ATTEMPTS ? { lockedUntil: new Date(Date.now() + LOCKOUT_MS) } : {};
     await userRepository.updateById(user.id, { loginAttempts: attempts, ...lockData });
-    logger.warn("Failed login attempt", { email: data.email, attempts });
-    throw new AppError(401, "Invalid email or password");
+    logger.warn("Failed login attempt", { identifier: data.identifier, attempts });
+    throw new AppError(401, "Invalid email/username or password");
   }
 
+  if (!user.emailVerified) throw new AppError(403, "Please verify your email before logging in", { requiresVerification: true, email: user.email });
   if (!user.isActive) throw new AppError(403, "Account disabled. Contact support.");
 
   await userRepository.updateById(user.id, { loginAttempts: 0, lockedUntil: null, lastLogin: new Date() });
