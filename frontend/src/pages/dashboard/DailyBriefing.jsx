@@ -11,9 +11,11 @@ import { api } from "../../lib/api.js";
 export default function DailyBriefing({ onNav }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(() => sessionStorage.getItem("cm_briefing_dismissed") === "1");
 
   useEffect(() => { api.get("/insights/briefing").then(setData).catch(() => setData(null)).finally(() => setLoading(false)); }, []);
+
+  const dismiss = () => { setDismissed(true); sessionStorage.setItem("cm_briefing_dismissed", "1"); };
 
   if (loading || !data || dismissed) return null;
   const allClear = !data.items || data.items.length === 0;
@@ -51,7 +53,7 @@ export default function DailyBriefing({ onNav }) {
         )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.bd}` }}>
           <span style={{ color: C.mt, fontSize: 9.5, opacity: .8 }}>Reviewed before it reaches you — nothing sends without your OK</span>
-          <button onClick={() => setDismissed(true)} style={{ background: "none", border: "none", color: C.mt, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
+          <button onClick={dismiss} style={{ background: "none", border: "none", color: C.mt, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
         </div>
       </div>
     </div>

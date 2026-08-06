@@ -17,6 +17,18 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Registered once, used by api.js whenever any request gets a 401 —
+  // without this, the token gets silently cleared but `user` stays set,
+  // so the app keeps showing authenticated screens (that then keep
+  // failing) instead of clearly dropping back to the login screen.
+  useEffect(() => {
+    api.onSessionExpired = () => {
+      setUser(null);
+      alert("Your session has expired. Please sign in again.");
+    };
+    return () => { api.onSessionExpired = null; };
+  }, []);
+
   // Fires once a user is authenticated, regardless of which path got
   // them there (session-restore, login, register, Google) — registers
   // this device for push and sends the token to the backend, now that

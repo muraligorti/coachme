@@ -7,13 +7,18 @@ import { API } from "./config.js";
 
 export const api = {
   token: localStorage.getItem("cm_token"),
+  onSessionExpired: null, // set by AuthContext on mount - lets a 401 anywhere actually surface to the user and clear app state, instead of silently failing wherever that particular API call happened to be made from
   setToken(t) { this.token = t; t ? localStorage.setItem("cm_token", t) : localStorage.removeItem("cm_token"); },
   async req(p, o = {}) {
     const h = { "Content-Type": "application/json", ...(o.headers || {}) };
     if (this.token) h["Authorization"] = `Bearer ${this.token}`;
     try {
       const r = await fetch(`${API}${p}`, { ...o, headers: h });
-      if (r.status === 401 && !p.includes("/auth/")) { this.setToken(null); throw new Error("Session expired"); }
+      if (r.status === 401 && !p.includes("/auth/")) {
+        this.setToken(null);
+        if (this.onSessionExpired) this.onSessionExpired();
+        throw new Error("Session expired");
+      }
       const t = await r.text(); let d; try { d = JSON.parse(t); } catch { d = { raw: t }; }
       if (!r.ok) {
         let msg = d.message || d.error || r.statusText;
