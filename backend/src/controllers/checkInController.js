@@ -13,6 +13,11 @@ export async function submit(req, res) {
   catch (err) { sendError(err, res, "Failed to submit check-in"); }
 }
 
+export async function submitForClient(req, res) {
+  try { res.status(201).json(await checkInService.submitCheckInForClient(req.user.id, req.params.clientId, req.body || {})); }
+  catch (err) { sendError(err, res, "Failed to submit check-in"); }
+}
+
 export async function listOwn(req, res) {
   try { res.json({ checkIns: await checkInService.getOwnCheckIns(req.user.id) }); }
   catch (err) { sendError(err, res, "Failed to load check-ins"); }
