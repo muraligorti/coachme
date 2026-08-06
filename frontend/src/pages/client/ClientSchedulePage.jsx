@@ -44,8 +44,14 @@ export default function ClientSchedulePage() {
   // theirs to withdraw or adjust, not just something to wait on silently.
   const canRequestChange = (st) => st === "confirmed" || st === "pending";
 
+  const greetingWord = (() => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; })();
+
   return (
     <div>
+      <div style={{ marginBottom: 4 }}>
+        <div style={{ fontSize: 13, color: C.mt, fontWeight: 500 }}>{greetingWord},</div>
+        <div style={{ fontSize: 20, fontWeight: 800, color: C.tx, marginBottom: 12 }}>{user?.name || "there"} 👋</div>
+      </div>
       <ST right={<Btn onClick={() => setShowRequest(true)} style={{ padding: "8px 16px", fontSize: 13 }}>+ Request Session</Btn>}>My Schedule</ST>
       {upcoming.length === 0 ? <Empty icon="📅" text="No upcoming sessions" /> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
