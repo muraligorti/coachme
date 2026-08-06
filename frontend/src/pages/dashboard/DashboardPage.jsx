@@ -64,7 +64,7 @@ export default function DashboardPage({ onNav }) {
               <div style={{ width: 40, height: 40, borderRadius: 10, background: C.ac + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📅</div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{cName(s.client) || s.type || "Session"}</div>
-                <div style={{ fontSize: 12, color: C.mt }}>{new Date(s.date || s.startTime || s.scheduledAt).toLocaleDateString()} · {s.duration || 60}min</div>
+                <div style={{ fontSize: 12, color: C.mt }}>{new Date(s.date || s.startTime || s.scheduledAt).toLocaleDateString()} · {new Date(s.date || s.startTime || s.scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {s.duration || 60}min</div>
               </div>
               <Badge color={(s.status || "").toLowerCase() === "confirmed" ? C.ok : C.wn}>{(s.status || "pending").toLowerCase()}</Badge>
             </div>
