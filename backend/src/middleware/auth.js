@@ -246,6 +246,18 @@ export const registerLimiter = rateLimit({
   },
 });
 
+// A 6-digit code has 900,000 possibilities (100000-999999) — without a
+// tight limiter, brute-forcing it is genuinely feasible. 10 attempts per
+// 15 minutes is generous for a real typo or two, nowhere near enough to
+// meaningfully guess a code.
+export const verifyEmailLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  handler: (req, res) => {
+    res.status(429).json({ error: "Too many verification attempts. Try again in 15 minutes." });
+  },
+});
+
 export const aiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10, // 10 AI requests per minute

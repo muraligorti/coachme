@@ -9,6 +9,9 @@ import { AppError } from "../lib/AppError.js";
 
 const registerSchema = z.object({
   email: z.string().email("Please enter a valid email").max(255).transform(v => v.trim().toLowerCase()),
+  username: z.string().min(3, "Username must be at least 3 characters").max(30)
+    .regex(/^[a-zA-Z0-9_]+$/, "Username can only contain letters, numbers, and underscores")
+    .transform(v => v.toLowerCase()).optional(),
   password: z.string().min(8, "Password must be at least 8 characters").max(128)
     .regex(/[A-Z]/, "Password must contain an uppercase letter")
     .regex(/[a-z]/, "Password must contain a lowercase letter")
@@ -41,8 +44,23 @@ const registerSchema = z.object({
 });
 
 const loginSchema = z.object({
-  email: z.string().email().max(255),
+  identifier: z.string().min(1, "Email or username is required").max(255).transform(v => v.trim().toLowerCase()),
   password: z.string().min(1).max(128),
+});
+
+const verifyEmailSchema = z.object({
+  email: z.string().email().max(255).transform(v => v.trim().toLowerCase()),
+  code: z.string().length(6, "Code must be 6 digits"),
+});
+
+const resendVerificationSchema = z.object({
+  email: z.string().email().max(255).transform(v => v.trim().toLowerCase()),
+});
+
+const setUsernameSchema = z.object({
+  username: z.string().min(3, "Username must be at least 3 characters").max(30)
+    .regex(/^[a-zA-Z0-9_]+$/, "Username can only contain letters, numbers, and underscores")
+    .transform(v => v.toLowerCase()),
 });
 
 function parseOrThrow(schema, data) {
@@ -56,3 +74,6 @@ function parseOrThrow(schema, data) {
 
 export const validateRegisterInput = (body) => parseOrThrow(registerSchema, body);
 export const validateLoginInput = (body) => parseOrThrow(loginSchema, body);
+export const validateVerifyEmailInput = (body) => parseOrThrow(verifyEmailSchema, body);
+export const validateResendVerificationInput = (body) => parseOrThrow(resendVerificationSchema, body);
+export const validateSetUsernameInput = (body) => parseOrThrow(setUsernameSchema, body);

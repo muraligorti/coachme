@@ -5,7 +5,7 @@
 // you're tempted to add an if-statement that isn't about status codes,
 // it belongs in authService.js instead.
 // ═══════════════════════════════════════════════════════════════════════
-import { validateRegisterInput, validateLoginInput } from "../validators/authValidators.js";
+import { validateRegisterInput, validateLoginInput, validateVerifyEmailInput, validateResendVerificationInput, validateSetUsernameInput } from "../validators/authValidators.js";
 import * as authService from "../services/authService.js";
 import { AppError } from "../lib/AppError.js";
 import { logger } from "../server.js";
@@ -29,6 +29,30 @@ export async function register(req, res) {
     const result = await authService.register(data, requestMeta(req));
     res.status(201).json(result);
   } catch (err) { sendError(err, res, "Registration failed"); }
+}
+
+export async function verifyEmail(req, res) {
+  try {
+    const data = validateVerifyEmailInput(req.body);
+    const result = await authService.verifyEmail(data.email, data.code, requestMeta(req));
+    res.json(result);
+  } catch (err) { sendError(err, res, "Verification failed"); }
+}
+
+export async function resendVerification(req, res) {
+  try {
+    const data = validateResendVerificationInput(req.body);
+    const result = await authService.resendVerificationCode(data.email);
+    res.json(result);
+  } catch (err) { sendError(err, res, "Failed to resend verification code"); }
+}
+
+export async function setUsername(req, res) {
+  try {
+    const data = validateSetUsernameInput(req.body);
+    const result = await authService.setUsername(req.user.id, data.username);
+    res.json(result);
+  } catch (err) { sendError(err, res, "Failed to set username"); }
 }
 
 export async function googleAuth(req, res) {

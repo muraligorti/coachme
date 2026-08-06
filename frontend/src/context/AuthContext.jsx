@@ -61,37 +61,52 @@ export function AuthProvider({ children }) {
     t(0);
   }, []);
 
-  const login = async (email, password) => {
-    const d = await api.post("/auth/login", { email, password });
+  const login = async (identifier, password) => {
+    const d = await api.post("/auth/login", { identifier, password });
+    const tk = xToken(d); if (!tk) throw new Error("No token"); api.setToken(tk);
+    const u = xUser(d);
+    if (u) setUser(u);
+    else { try { const m = await api.get("/auth/me"); setUser(xUser(m) || { email: identifier }); } catch { setUser({ email: identifier, name: identifier.split("@")[0] }); } }
+  };
+
+  const register = async (pl) => {
+    const phone = (pl.phone || "").trim();
+    const payload = {
+      email: pl.email, username: pl.username || undefined, password: pl.password, role: (pl.role || "CLIENT").toUpperCase(),
+      profile: { displayName: pl.name || pl.displayName || pl.email.split("@")[0], phone: phone || undefined, country: pl.country || undefined, city: pl.city || undefined, gymName: pl.gymName || undefined },
+    };
+    const d = await api.post("/auth/register", payload);
+    // New accounts require email verification before a session is
+    // issued — no token comes back here anymore. AuthScreen switches to
+    // an OTP-entry step and calls verifyEmail() to actually complete
+    // registration once the code is confirmed.
+    if (d?.requiresVerification) return { requiresVerification: true, email: d.email, pendingSpecializations: pl.specializations };
+
+    // Defensive fallback in case a token somehow does come back (e.g. an
+    // older server build) — keeps registration working either way.
+    const tk = xToken(d); if (!tk) throw new Error("No token");
+    api.setToken(tk);
+    const u = xUser(d);
+    if (u) { u.role = u.role || payload.role; u.name = u.name || payload.profile.displayName; setUser(u); }
+    else { setUser({ email: pl.email, name: payload.profile.displayName, role: payload.role }); }
+    return { requiresVerification: false };
+  };
+
+  // Completes registration: verifies the OTP and issues the actual
+  // session. Specialization/avatar follow-up calls (which need an
+  // authenticated session that doesn't exist until this succeeds) are
+  // the caller's (AuthScreen's) responsibility to fire afterward — kept
+  // out of here since this function's only job is "verify and log in."
+  const verifyEmail = async (email, code) => {
+    const d = await api.post("/auth/verify-email", { email, code });
     const tk = xToken(d); if (!tk) throw new Error("No token"); api.setToken(tk);
     const u = xUser(d);
     if (u) setUser(u);
     else { try { const m = await api.get("/auth/me"); setUser(xUser(m) || { email }); } catch { setUser({ email, name: email.split("@")[0] }); } }
   };
 
-  const register = async (pl) => {
-    const phone = (pl.phone || "").trim();
-    const payload = {
-      email: pl.email, password: pl.password, role: (pl.role || "CLIENT").toUpperCase(),
-      profile: { displayName: pl.name || pl.displayName || pl.email.split("@")[0], phone: phone || undefined, country: pl.country || undefined, city: pl.city || undefined },
-    };
-    const d = await api.post("/auth/register", payload);
-    const tk = xToken(d); if (!tk) throw new Error("No token"); api.setToken(tk);
-    const u = xUser(d);
-    if (u) { u.role = u.role || payload.role; u.name = u.name || payload.profile.displayName; setUser(u); }
-    else { setUser({ email: pl.email, name: payload.profile.displayName, role: payload.role }); }
-    // Specialization is set via a separate, safe follow-up call — deliberately
-    // not folded into the /auth/register payload itself, since that endpoint's
-    // exact accepted fields aren't something to guess at. Non-fatal if it
-    // fails: the coach can always set this later in Settings.
-    if (payload.role === "COACH" && Array.isArray(pl.specializations) && pl.specializations.length) {
-      try { await api.put("/coach-profile/specializations", { specializations: pl.specializations }); } catch { /* non-fatal, editable later in Settings */ }
-    }
-    // Same safe-follow-up pattern for an optional signup photo — works for
-    // either role via the real PUT /auth/profile endpoint.
-    if (pl.avatar) {
-      try { await api.put("/auth/profile", { avatar: pl.avatar }); } catch { /* non-fatal, editable later in Settings */ }
-    }
+  const resendVerificationCode = async (email) => {
+    return api.post("/auth/resend-verification", { email });
   };
 
   const googleLogin = async (credential, role) => {
@@ -103,5 +118,5 @@ export function AuthProvider({ children }) {
   const logout = () => { api.setToken(null); setUser(null); };
 
   if (loading) return <Splash />;
-  return <AuthCtx.Provider value={{ user, login, register, logout, googleLogin }}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{ user, login, register, logout, googleLogin, verifyEmail, resendVerificationCode }}>{children}</AuthCtx.Provider>;
 }

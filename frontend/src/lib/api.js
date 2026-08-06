@@ -20,7 +20,9 @@ export const api = {
         if (d.details && Array.isArray(d.details)) {
           msg = d.details.map(e => `${(e.path || []).join(".")}: ${e.message}`).join(". ") || msg;
         }
-        throw new Error(msg);
+        const err = new Error(msg);
+        if (d.details && !Array.isArray(d.details)) err.details = d.details; // structured error payloads (e.g. { requiresVerification, email }) stay accessible to callers, not just folded into the message string
+        throw err;
       }
       return d;
     } catch (e) { if (e.message.includes("Failed to fetch")) throw new Error(`Network error on ${p}`); throw e; }
