@@ -54,7 +54,7 @@ export function AuthProvider({ children }) {
       if (i >= eps.length) { api.setToken(null); setLoading(false); return; }
       api.get(eps[i]).then((d) => {
         const u = xUser(d);
-        if (u && (u.id || u.email)) { setUser(u); setLoading(false); }
+        if (u && (u.id || u.email)) { setUser({ ...u, name: u.name || d?.profile?.displayName }); setLoading(false); }
         else t(i + 1);
       }).catch(() => t(i + 1));
     };
@@ -65,8 +65,12 @@ export function AuthProvider({ children }) {
     const d = await api.post("/auth/login", { identifier, password });
     const tk = xToken(d); if (!tk) throw new Error("No token"); api.setToken(tk);
     const u = xUser(d);
-    if (u) setUser(u);
-    else { try { const m = await api.get("/auth/me"); setUser(xUser(m) || { email: identifier }); } catch { setUser({ email: identifier, name: identifier.split("@")[0] }); } }
+    // The backend's `user` object never includes a display name — it
+    // lives separately on the coach/client profile. Merge it in here so
+    // the dashboard greeting (and anywhere else showing user.name) isn't
+    // silently falling back to a generic placeholder.
+    if (u) setUser({ ...u, name: u.name || d?.profile?.displayName || u.email?.split("@")[0] });
+    else { try { const m = await api.get("/auth/me"); const mu = xUser(m); setUser(mu ? { ...mu, name: mu.name || m?.profile?.displayName } : { email: identifier }); } catch { setUser({ email: identifier, name: identifier.split("@")[0] }); } }
   };
 
   const register = async (pl) => {
@@ -100,9 +104,12 @@ export function AuthProvider({ children }) {
   const verifyEmail = async (email, code) => {
     const d = await api.post("/auth/verify-email", { email, code });
     const tk = xToken(d); if (!tk) throw new Error("No token"); api.setToken(tk);
-    const u = xUser(d);
-    if (u) setUser(u);
-    else { try { const m = await api.get("/auth/me"); setUser(xUser(m) || { email }); } catch { setUser({ email, name: email.split("@")[0] }); } }
+    // verify-email's response only ever carries the bare id/email/role,
+    // never the profile (which is where displayName actually lives) —
+    // always fetch /auth/me here rather than trying to patch this
+    // response shape further.
+    try { const m = await api.get("/auth/me"); const mu = xUser(m); setUser(mu ? { ...mu, name: mu.name || m?.profile?.displayName || email.split("@")[0] } : { email, name: email.split("@")[0] }); }
+    catch { setUser({ email, name: email.split("@")[0] }); }
   };
 
   const resendVerificationCode = async (email) => {
@@ -112,7 +119,9 @@ export function AuthProvider({ children }) {
   const googleLogin = async (credential, role) => {
     const d = await api.post("/auth/google", { credential, role: (role || "CLIENT").toUpperCase() });
     const tk = xToken(d); if (!tk) throw new Error("No token"); api.setToken(tk);
-    const u = xUser(d); if (u) setUser(u); else setUser({ email: d?.user?.email, role: d?.user?.role });
+    const u = xUser(d);
+    if (u) setUser({ ...u, name: u.name || d?.profile?.displayName || u.email?.split("@")[0] });
+    else setUser({ email: d?.user?.email, role: d?.user?.role, name: d?.profile?.displayName || d?.user?.email?.split("@")[0] });
   };
 
   const logout = () => { api.setToken(null); setUser(null); };

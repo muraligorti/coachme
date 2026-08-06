@@ -32,7 +32,7 @@ export const PhoneInput = ({ label, value, onChange, placeholder }) => {
         <select value={cc} onChange={handleCodeChange} style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: "12px 4px 12px 8px", color: C.tx, fontSize: 13, outline: "none", fontFamily: "inherit", minWidth: 90, cursor: "pointer" }}>
           {COUNTRY_CODES.map((c) => <option key={`${c.code}_${c.name}`} value={c.code}>{c.flag} {c.code}</option>)}
         </select>
-        <input value={numOnly} onChange={handleNumChange} placeholder={placeholder || "98765 43210"} style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: "12px 16px", color: C.tx, fontSize: 14, outline: "none", fontFamily: "inherit", flex: 1, width: "100%", boxSizing: "border-box" }} />
+        <input value={numOnly} onChange={handleNumChange} placeholder={placeholder || "98765 43210"} style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: "12px 16px", color: C.tx, fontSize: 14, outline: "none", fontFamily: "inherit", flex: 1, minWidth: 120, width: "100%", boxSizing: "border-box" }} />
       </div>
     </div>
   );
