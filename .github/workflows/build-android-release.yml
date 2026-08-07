@@ -1,0 +1,73 @@
+name: Build Android Release (AAB)
+
+# Manual-only trigger (Run workflow button) — unlike the debug APK build,
+# a release build should be an intentional action, not something that
+# fires on every push to main.
+#
+# REQUIRED SETUP before this works — see RELEASE_KEYSTORE_SETUP.txt:
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+#   ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD as GitHub Actions secrets.
+#
+# Produces a signed .aab (Android App Bundle) — the format Play Store
+# actually wants for new submissions, not a .apk.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --legacy-peer-deps
+
+      - name: Build web assets
+        working-directory: frontend
+        run: npm run build
+
+      - name: Sync Capacitor Android project
+        working-directory: frontend
+        run: npx cap sync android
+
+      - name: Decode release keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > /tmp/release.keystore
+
+      - name: Build signed release AAB
+        working-directory: frontend/android
+        env:
+          ANDROID_KEYSTORE_PATH: /tmp/release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease -PversionCode=${{ github.run_number }}
+
+      - name: Clean up decoded keystore
+        if: always()
+        run: rm -f /tmp/release.keystore
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: coachme-release-aab
+          path: frontend/android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 90
