@@ -34,6 +34,7 @@ export const api = {
   },
   get: p => api.req(p), post: (p, b) => api.req(p, { method: "POST", body: JSON.stringify(b) }),
   put: (p, b) => api.req(p, { method: "PUT", body: JSON.stringify(b) }), del: p => api.req(p, { method: "DELETE" }),
+  patch: (p, b) => api.req(p, { method: "PATCH", body: b !== undefined ? JSON.stringify(b) : undefined }),
   async upload(path, formData) {
     const headers = {};
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
