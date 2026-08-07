@@ -141,6 +141,8 @@ model CoachProfile {
   instagram         String?
   website           String?
   gymName           String?
+  razorpayKeyId     String?   // not sensitive alone (it's the public identifier), stored plain
+  razorpayKeySecretEnc String? // AES-256-GCM encrypted via lib/encryption.js — never stored or returned in plaintext
   verified          Boolean   @default(false)
   verifiedAt        DateTime?
   featured          Boolean   @default(false)
@@ -166,6 +168,7 @@ model CoachProfile {
   dataConsents    DataSharingConsent[]
   exercises          Exercise[]
   workoutTemplates   WorkoutTemplate[]
+  invoices           Invoice[]
 
   @@index([country, city])
   @@index([specializations])
@@ -214,6 +217,7 @@ model ClientProfile {
   checkIns        CheckIn[]
   habits          Habit[]
   workoutAssignments   WorkoutPlanAssignment[]
+  invoices        Invoice[]
   @@index([country, city])
   @@index([fitnessGoals])
 }
@@ -662,6 +666,30 @@ model CheckIn {
   createdAt DateTime      @default(now())
 
   @@unique([clientId, date])
+  @@index([clientId])
+}
+
+// ─── INVOICES (real backend records, Razorpay Payment Links for collection) ─────
+
+model Invoice {
+  id          String        @id @default(cuid())
+  coachId     String
+  coach       CoachProfile  @relation(fields: [coachId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  amount      Int           // smallest currency unit (paise for INR) - matches Razorpay's own convention directly, avoids float rounding
+  currency    String        @default("INR")
+  description String?       @db.Text
+  dueDate     DateTime?
+  status      String        @default("PENDING") // PENDING | PAID | CANCELLED - PAID can be set either manually or confirmed via Razorpay
+  razorpayPaymentLinkId String? // "plink_xxx"
+  razorpayShortUrl       String? // the actual shareable link, e.g. https://rzp.io/i/xxx
+  razorpayStatus         String? // raw status from Razorpay: created | partially_paid | expired | cancelled | paid
+  paidAt      DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([coachId])
   @@index([clientId])
 }
 
