@@ -14,6 +14,7 @@ import { useState, useEffect } from "react";
 import { C } from "../theme/theme.js";
 import { api } from "../lib/api.js";
 import { Card, Badge, Btn, Input, TextArea, Modal, Empty, Spin, ST } from "../components/ui.jsx";
+import CheckInForm, { MOODS } from "../components/CheckInForm.jsx";
 
 export default function CheckInsPage({ clientId }) {
   const isCoachView = !!clientId;
@@ -22,7 +23,6 @@ export default function CheckInsPage({ clientId }) {
   const [error, setError] = useState("");
   const [showF, setShowF] = useState(false);
   const [form, setForm] = useState({ energy: 7, sleep: 7, stress: 3, adherence: 80, weight: "", notes: "", mood: "good" });
-  const moods = [{ v: "great", e: "😄" }, { v: "good", e: "🙂" }, { v: "okay", e: "😐" }, { v: "tired", e: "😴" }, { v: "bad", e: "😞" }];
 
   useEffect(() => {
     const path = isCoachView ? `/checkins/client/${clientId}` : "/checkins";
@@ -79,7 +79,7 @@ export default function CheckInsPage({ clientId }) {
             <Card key={c.id} style={{ padding: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>{c.date}</div>
-                <span style={{ fontSize: 20 }}>{moods.find(m => m.v === c.mood)?.e || "🙂"}</span>
+                <span style={{ fontSize: 20 }}>{MOODS.find(m => m.v === c.mood)?.e || "🙂"}</span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, fontSize: 11 }}>
                 <div><span style={{ color: C.mt }}>Energy</span><br /><span style={{ color: C.tx, fontWeight: 600 }}>{c.energy ?? "—"}/10</span></div>
@@ -93,28 +93,8 @@ export default function CheckInsPage({ clientId }) {
         </div>
       )}
       <Modal open={showF} onClose={() => setShowF(false)} title={isCoachView ? "Log Check-in for Client" : "Weekly Check-in"}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div>
-              <label style={{ fontSize: 13, color: C.mt, fontWeight: 500, marginBottom: 8, display: "block" }}>How are you feeling?</label>
-              <div style={{ display: "flex", gap: 8 }}>
-                {moods.map(m => <button key={m.v} onClick={() => setForm({ ...form, mood: m.v })} style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: "none", cursor: "pointer", background: form.mood === m.v ? C.ac + "30" : C.s2, fontSize: 22, transition: "all .2s" }}>{m.e}</button>)}
-              </div>
-            </div>
-            {[{ k: "energy", l: "Energy", mx: 10 }, { k: "sleep", l: "Sleep Quality", mx: 10 }, { k: "stress", l: "Stress Level", mx: 10 }].map(s => (
-              <div key={s.k}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span style={{ color: C.mt }}>{s.l}</span><span style={{ color: C.tx, fontWeight: 600 }}>{form[s.k]}/{s.mx}</span></div>
-                <input type="range" min="1" max={s.mx} value={form[s.k]} onChange={e => setForm({ ...form, [s.k]: +e.target.value })} style={{ width: "100%", accentColor: C.ac }} />
-              </div>
-            ))}
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span style={{ color: C.mt }}>Plan Adherence</span><span style={{ color: C.tx, fontWeight: 600 }}>{form.adherence}%</span></div>
-              <input type="range" min="0" max="100" step="5" value={form.adherence} onChange={e => setForm({ ...form, adherence: +e.target.value })} style={{ width: "100%", accentColor: C.ok }} />
-            </div>
-            <Input label="Weight (kg)" type="number" value={form.weight} onChange={e => setForm({ ...form, weight: e.target.value })} />
-            <TextArea label="Notes / Wins / Struggles" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder={isCoachView ? "What came up during the session?" : "How was your week?"} />
-            <Btn onClick={submit} style={{ width: "100%" }}>Submit</Btn>
-          </div>
-        </Modal>
+        <CheckInForm form={form} setForm={setForm} onSubmit={submit} notesPlaceholder={isCoachView ? "What came up during the session?" : "How was your week?"} />
+      </Modal>
     </div>
   );
 }

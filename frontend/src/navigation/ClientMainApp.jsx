@@ -14,7 +14,6 @@ import ClientMediaPage from "../pages/client/ClientMediaPage.jsx";
 import ClientSettingsPage from "../pages/client/ClientSettingsPage.jsx";
 import FitnessDevicesPage from "../pages/FitnessDevicesPage.jsx";
 import NutritionTracker from "../pages/NutritionTracker.jsx";
-import CheckInsPage from "../pages/CheckInsPage.jsx";
 import HabitTracker from "../pages/HabitTracker.jsx";
 import { useDailyHealthSync } from "./useDailyHealthSync.js";
 
@@ -22,7 +21,6 @@ const ALL_CLIENT_TABS = [
   { id: "schedule", icon: "📅", label: "Schedule" }, // core — always visible, never admin-restrictable
   { id: "progress", icon: "💪", label: "Progress" }, // core — always visible
   { id: "nutrition", icon: "🥗", label: "Nutrition" },
-  { id: "checkins", icon: "📋", label: "Check-ins" },
   { id: "habits", icon: "✅", label: "Habits" },
   { id: "devices", icon: "⌚", label: "Devices" },
   { id: "photos", icon: "📸", label: "Photos" },
@@ -42,7 +40,7 @@ export default function ClientMainApp() {
     const pages = {
       schedule: <ClientSchedulePage key={K} />, progress: <ClientProgressPage key={K} />,
       devices: <FitnessDevicesPage key={K} />, nutrition: <NutritionTracker key={K} />,
-      checkins: <CheckInsPage key={K} />, habits: <HabitTracker key={K} />,
+      habits: <HabitTracker key={K} />,
       photos: <ClientMediaPage key={K} />, settings: <ClientSettingsPage key={K} />,
     };
     return pages[tab] || <ClientSchedulePage key={K} />;
