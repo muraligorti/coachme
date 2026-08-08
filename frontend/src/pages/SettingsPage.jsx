@@ -11,6 +11,7 @@ import { compressImage } from "../lib/utils.js";
 import { Card, Badge, Btn, Input, ST } from "../components/ui.jsx";
 import NotificationPreferencesCard from "../components/NotificationPreferencesCard.jsx";
 import RazorpayConnectCard from "../components/RazorpayConnectCard.jsx";
+import UsernameCard from "../components/UsernameCard.jsx";
 import { ALL_TABS, DEFAULT_BOTTOM, getBottomTabs } from "../navigation/BottomNav.jsx";
 
 const SPECIALIZATION_OPTIONS = [{ v: "strength", l: "💪 Strength" }, { v: "yoga", l: "🧘 Yoga" }, { v: "pilates", l: "🤸 Pilates" }, { v: "crossfit", l: "🏋️ CrossFit" }, { v: "general", l: "✨ General" }];
@@ -126,6 +127,7 @@ export default function SettingsPage() {
 
       <NotificationPreferencesCard showClientReminders={false} />
       <RazorpayConnectCard />
+      <UsernameCard />
 
       <Card style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 12 }}>Theme</div>

@@ -30,7 +30,7 @@ export const findById = (id, client = prisma) =>
 export const findByIdBasic = (id, client = prisma) =>
   client.user.findUnique({
     where: { id },
-    select: { id: true, email: true, role: true, createdAt: true },
+    select: { id: true, email: true, username: true, role: true, createdAt: true },
   });
 
 export const create = (data, client = prisma) =>

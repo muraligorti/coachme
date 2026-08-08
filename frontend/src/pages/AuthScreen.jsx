@@ -132,9 +132,21 @@ export default function AuthScreen() {
       // specific, actionable path instead of a dead-end error — jump
       // straight into the same verify screen registration would have.
       if (e.details?.requiresVerification && mode === "login") {
-        setVerifyEmailAddr(e.details.email || form.email);
+        const targetEmail = e.details.email || form.email;
+        setVerifyEmailAddr(targetEmail);
         setMode("verify");
-        setSuccess("Your email isn't verified yet — enter the code we sent, or resend a new one.");
+        // Unlike the registration flow (where the backend sends the code
+        // as part of /auth/register itself), landing here is triggered
+        // by a failed *login* attempt - no code has actually been sent
+        // yet. Previously this just claimed one had been, which is
+        // exactly why the email never arrived.
+        try {
+          await resendVerificationCode(targetEmail);
+          setSuccess("Your email isn't verified yet — we just sent a code to it.");
+          setResendCooldown(60);
+        } catch (sendErr) {
+          setError(`Your email isn't verified yet, and we couldn't send a new code: ${sendErr.message}`);
+        }
       } else {
         setError(e.message);
       }
