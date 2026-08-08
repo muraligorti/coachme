@@ -26,9 +26,9 @@ router.post("/chat", authenticate, aiLimiter, sanitizeBody, async (req, res) => 
       } catch (e) { logger.warn("Failed to ground AI context", { error: e.message }); }
     }
 
-    const body = { model: "claude-sonnet-4-20250514", max_tokens: groundedSystem ? 2048 : 1000, messages: [{ role: "user", content: message }] };
+    const body = { model: "claude-sonnet-5", max_tokens: 4096, messages: [{ role: "user", content: message }] };
     if (groundedSystem) body.system = groundedSystem;
-    if (search) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
+    if (search) body.tools = [{ type: "web_search_20260318", name: "web_search" }];
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
@@ -53,7 +53,7 @@ router.post("/match", authenticate, aiLimiter, sanitizeBody, async (req, res) =>
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, system: sys, messages: [{ role: "user", content: msg }] }),
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 1000, system: sys, messages: [{ role: "user", content: msg }] }),
     });
     const data = await r.json();
     const text = (data.content || []).filter(c => c.type === "text").map(c => c.text).join("");
@@ -71,7 +71,7 @@ router.post("/leads", authenticate, aiLimiter, sanitizeBody, async (req, res) =>
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, system: sys,
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 1000, system: sys,
         messages: [{ role: "user", content: `Coach: ${JSON.stringify(coachProfile)}\nSearch data: ${JSON.stringify(searchData)}` }],
         tools: [{ type: "web_search_20250305", name: "web_search" }] }),
     });
