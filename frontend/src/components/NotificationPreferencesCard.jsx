@@ -10,7 +10,7 @@ import { useState, useEffect } from "react";
 import { C } from "../theme/theme.js";
 import { api } from "../lib/api.js";
 import { Card, Btn, Input } from "./ui.jsx";
-import { scheduleDailyReminders, getPendingLocalReminders, getDebugLog, BUILD_MARKER, requestExactAlarmPermission } from "../lib/localReminders.js";
+import { scheduleDailyReminders, BUILD_MARKER, requestExactAlarmPermission } from "../lib/localReminders.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const REMINDER_TYPES = [
@@ -26,21 +26,7 @@ export default function NotificationPreferencesCard({ showClientReminders = fals
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [showDebug, setShowDebug] = useState(false);
-  const [pendingReminders, setPendingReminders] = useState(null);
-  const [debugLog, setDebugLog] = useState([]);
-  const [debugLoading, setDebugLoading] = useState(false);
   const [exactAlarmStatus, setExactAlarmStatus] = useState("");
-
-  const loadDebugInfo = async () => {
-    setDebugLoading(true);
-    setDebugLog(getDebugLog()); // reads synchronously from localStorage — always completes instantly, shown immediately regardless of what happens below
-    try {
-      const pending = await getPendingLocalReminders();
-      setPendingReminders(pending);
-    } catch (e) { setPendingReminders([]); }
-    setDebugLoading(false);
-  };
 
   useEffect(() => {
     api.get("/notification-preferences/me").then(setPrefs).catch(e => setError(e.message));
@@ -119,45 +105,6 @@ export default function NotificationPreferencesCard({ showClientReminders = fals
         {exactAlarmStatus && <div style={{ fontSize: 10.5, color: C.mt, marginTop: 4 }}>{exactAlarmStatus}</div>}
       </div>
 
-      <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.bd}` }}>
-        <button onClick={() => { const next = !showDebug; setShowDebug(next); if (next) loadDebugInfo(); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: C.mt, padding: 0 }}>
-          🔧 {showDebug ? "Hide" : "Show"} what's actually scheduled on this device
-        </button>
-        {showDebug && (
-          <div style={{ marginTop: 10 }}>
-            {debugLoading ? (
-              <div style={{ fontSize: 11, color: C.mt }}>Checking…</div>
-            ) : !pendingReminders || pendingReminders.length === 0 ? (
-              <div style={{ fontSize: 11, color: C.mt }}>Nothing currently scheduled on this device.</div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {pendingReminders.map(n => (
-                  <div key={n.id} style={{ fontSize: 11, color: C.tx, background: C.s2, borderRadius: 8, padding: "6px 8px" }}>
-                    <div style={{ fontWeight: 600 }}>{n.title}</div>
-                    <div style={{ color: C.mt }}>{typeof n.fireAt === "string" ? n.fireAt : new Date(n.fireAt).toLocaleString()}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-            <button onClick={loadDebugInfo} style={{ marginTop: 8, background: "none", border: "none", cursor: "pointer", fontSize: 10.5, color: C.ac, padding: 0 }}>↻ Refresh</button>
-
-            <div style={{ marginTop: 14, paddingTop: 10, borderTop: `1px solid ${C.bd}` }}>
-              <div style={{ fontSize: 10.5, color: C.mt, marginBottom: 6, fontWeight: 600 }}>Activity log (most recent first)</div>
-              {debugLog.length === 0 ? (
-                <div style={{ fontSize: 10.5, color: C.mt }}>No activity recorded yet.</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 3, maxHeight: 220, overflowY: "auto" }}>
-                  {debugLog.map((entry, i) => (
-                    <div key={i} style={{ fontSize: 10, color: entry.message.includes("❌") || entry.message.includes("⚠️") ? C.dg : C.mt, fontFamily: "monospace" }}>
-                      <span style={{ opacity: .6 }}>{new Date(entry.at).toLocaleTimeString()}</span> {entry.message}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
     </Card>
   );
 }

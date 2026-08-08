@@ -9,6 +9,7 @@ import { xToken, xUser, unwrap } from "../lib/utils.js";
 import { Splash } from "../components/Loading.jsx";
 import { initPushNotifications } from "../lib/pushNotifications.js";
 import { initLocalReminders, scheduleDailyReminders, scheduleSessionReminders, logDebugEvent } from "../lib/localReminders.js";
+import { promptSavePassword } from "../lib/savePassword.js";
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
@@ -83,6 +84,7 @@ export function AuthProvider({ children }) {
     // silently falling back to a generic placeholder.
     if (u) setUser({ ...u, name: u.name || d?.profile?.displayName || u.email?.split("@")[0] });
     else { try { const m = await api.get("/auth/me"); const mu = xUser(m); setUser(mu ? { ...mu, name: mu.name || m?.profile?.displayName } : { email: identifier }); } catch { setUser({ email: identifier, name: identifier.split("@")[0] }); } }
+    promptSavePassword(u?.email || identifier, password); // fire-and-forget — never blocks login on this
   };
 
   const register = async (pl) => {
