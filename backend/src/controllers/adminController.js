@@ -36,6 +36,16 @@ export async function updateUser(req, res) {
   } catch (err) { sendError(err, res, "Failed to update user"); }
 }
 
+export async function updatePhone(req, res) {
+  try { res.json(await adminService.updateUserPhone(req.user.id, req.params.id, req.body?.phone || "")); }
+  catch (err) { sendError(err, res, "Failed to update phone number"); }
+}
+
+export async function deleteUser(req, res) {
+  try { res.json(await adminService.deleteUser(req.user.id, req.params.id, req.body?.confirmDespiteActiveClients)); }
+  catch (err) { sendError(err, res, "Failed to delete user"); }
+}
+
 export async function setTier(req, res) {
   try { res.json(await adminService.setUserTier(req.user.id, req.params.id, req.body?.tier)); }
   catch (err) { sendError(err, res, "Failed to update tier"); }

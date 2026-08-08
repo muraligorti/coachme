@@ -60,6 +60,23 @@ export const findUserById = (id, client = prisma) => client.user.findUnique({
 
 export const updateUser = (id, data, client = prisma) => client.user.update({ where: { id }, data });
 
+// Phone lives on the coach/client profile, not the User table directly -
+// needs its own targeted update rather than going through the generic
+// EDITABLE_FIELDS path.
+export const updateCoachPhone = (coachProfileId, phone, client = prisma) =>
+  client.coachProfile.update({ where: { id: coachProfileId }, data: { phone } });
+export const updateClientPhone = (clientProfileId, phone, client = prisma) =>
+  client.clientProfile.update({ where: { id: clientProfileId }, data: { phone } });
+
+export const findByEmailExcluding = (email, excludeUserId, client = prisma) =>
+  client.user.findFirst({ where: { email, id: { not: excludeUserId } } });
+
+// Cascade relationships throughout the schema handle removing everything
+// tied to this user (profile, bookings, workouts, check-ins, sessions,
+// etc.) - this is the actual, real, irreversible delete, not a status
+// toggle.
+export const deleteUserById = (id, client = prisma) => client.user.delete({ where: { id } });
+
 export const updateSubscriptionTier = (userId, tier, maxClients, client = prisma) =>
   client.subscription.upsert({
     where: { userId },
