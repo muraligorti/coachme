@@ -11,12 +11,12 @@ import AuthScreen from "../pages/AuthScreen.jsx";
 import MainApp from "./MainApp.jsx";
 import ClientMainApp from "./ClientMainApp.jsx";
 import AdminMainApp from "./AdminMainApp.jsx";
+import ImpersonationBanner from "../components/ImpersonationBanner.jsx";
 
 export default function AuthGate() {
   const { user } = useAuth();
   if (!user) return <AuthScreen />;
   const role = (user.role || "").toUpperCase();
-  if (role === "CLIENT") return <ClientMainApp />;
-  if (role === "ADMIN") return <AdminMainApp />;
-  return <MainApp />;
+  const app = role === "CLIENT" ? <ClientMainApp /> : role === "ADMIN" ? <AdminMainApp /> : <MainApp />;
+  return <><ImpersonationBanner />{app}</>;
 }

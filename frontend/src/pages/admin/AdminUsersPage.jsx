@@ -15,7 +15,7 @@ import { Card, Badge, Btn, Input, Sel, Empty, Spin, ST, Tabs } from "../../compo
 const ROLE_COLORS = { ADMIN: "#E31937", COACH: "#f5a623", CLIENT: "#22d3a8" };
 
 export default function AdminUsersPage() {
-  const { user: me } = useAuth();
+  const { user: me, impersonate } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [roleFilter, setRoleFilter] = useState("");
@@ -88,6 +88,11 @@ export default function AdminUsersPage() {
     try { await api.req(`/admin/users/${sel.id}/tier`, { method: "PATCH", body: JSON.stringify({ tier }) }); const fresh = await api.get(`/admin/users/${sel.id}`); setDetail(fresh); }
     catch (e) { setError(e.message); }
     setSaving(false);
+  };
+
+  const impersonateAsUser = async () => {
+    if (!confirm(`View the app as ${detail.email}? You can return to your admin account anytime via the banner at the top.`)) return;
+    try { await impersonate(detail.id); } catch (e) { alert("Failed: " + e.message); }
   };
 
   const forceLogout = async () => {
@@ -165,6 +170,10 @@ export default function AdminUsersPage() {
                 <div>Active sessions: {detail._count?.sessions ?? 0}</div>
               </div>
             </Card>
+
+            {!isSelf && detail.role !== "ADMIN" && detail.isActive && (
+              <Btn onClick={impersonateAsUser} style={{ width: "100%", marginBottom: 12 }}>🎭 View App As This User</Btn>
+            )}
 
             <Card style={{ marginBottom: 12, padding: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: editingContact ? 12 : 0 }}>
