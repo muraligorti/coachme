@@ -16,8 +16,17 @@ export default function MealPlannerPage() {
   const gen = async () => {
     setLoading(true);
     try {
-      const r = await api.post("/ai/chat", { message: `Generate a detailed daily meal plan: Goal: ${form.goal.replace("_", " ")}, Calories: ${form.calories}kcal, Restrictions: ${form.restrictions || "none"}, Preferences: ${form.preferences || "none"}. Include breakfast, lunch, dinner, 2 snacks with calories, protein, carbs, fat for each.` });
-      setPlan(r.reply || r.message || r.response || "Could not generate");
+      const sysPrompt = `You are a nutrition planning assistant generating a real, usable daily meal plan for a fitness client.
+
+Give a genuinely expert-level plan: specific, real dishes and portion sizes (not vague placeholders like "protein source"), accurate macro/calorie math that actually adds up to the target, and food combinations a real dietitian would suggest — draw fully on your nutrition knowledge, and search the web if it would help with current guidelines or regional cuisine specifics for the requested preferences.
+
+The one thing to stay strict about: the stated restrictions are non-negotiable — never include an ingredient that violates them, and never invent dietary needs the person didn't mention. If their calorie target and stated preferences are in tension (e.g. very low calories with a preference that's hard to hit at that level), say so briefly rather than silently producing a plan that doesn't actually work.`;
+      const r = await api.post("/ai/chat", {
+        system: sysPrompt,
+        message: `Generate a detailed daily meal plan: Goal: ${form.goal.replace("_", " ")}, Calories: ${form.calories}kcal, Restrictions: ${form.restrictions || "none"}, Preferences: ${form.preferences || "none"}. Include breakfast, lunch, dinner, 2 snacks with calories, protein, carbs, fat for each, and a running daily total.`,
+        search: true,
+      });
+      setPlan(r.text || "Could not generate");
     } catch (e) { setPlan("Error: " + e.message); }
     setLoading(false);
   };
