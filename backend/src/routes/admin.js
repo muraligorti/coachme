@@ -18,6 +18,8 @@ const router = Router();
 router.get("/users", authenticate, authorize("ADMIN"), adminController.listUsers);
 router.get("/users/:id", authenticate, authorize("ADMIN"), adminController.getUser);
 router.patch("/users/:id", authenticate, authorize("ADMIN"), audit("admin_update_user", "user"), adminController.updateUser);
+router.patch("/users/:id/phone", authenticate, authorize("ADMIN"), audit("admin_update_phone", "user"), adminController.updatePhone);
+router.delete("/users/:id", authenticate, authorize("ADMIN"), audit("admin_delete_user", "user"), adminController.deleteUser);
 router.post("/users/:id/force-logout", authenticate, authorize("ADMIN"), audit("admin_force_logout", "user"), adminController.forceLogout);
 router.patch("/users/:id/tier", authenticate, authorize("ADMIN"), audit("admin_set_tier", "subscription"), adminController.setTier);
 router.get("/audit", authenticate, authorize("ADMIN"), adminController.getAuditLog);

@@ -17,11 +17,15 @@ function getClient() {
   return client;
 }
 
-// FROM_EMAIL must be a verified sender/domain in your Resend account —
-// Resend rejects sends from unverified domains. Falls back to their
-// shared sandbox address for early testing, which only delivers to the
-// account owner's own email.
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "CoachMe <onboarding@resend.dev>";
+// FROM_EMAIL must be a verified sender/domain in your Resend account.
+// Was defaulting to Resend's sandbox address (onboarding@resend.dev),
+// which only ever delivers to the Resend account owner's own inbox -
+// that's the actual, confirmed reason every verification email failed,
+// both the original send and every resend. The working forgot-password
+// path (notificationService.js) already uses noreply@coachme.life, which
+// only works because that domain is verified in Resend - matching it
+// here instead of a broken sandbox default.
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || process.env.EMAIL_FROM || "CoachMe <noreply@coachme.life>";
 
 export async function sendVerificationCodeEmail(toEmail, code) {
   const resend = getClient();

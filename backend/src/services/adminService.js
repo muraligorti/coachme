@@ -8,7 +8,7 @@ import { AppError } from "../lib/AppError.js";
 import * as adminRepository from "../repositories/adminRepository.js";
 
 const VALID_ROLES = ["ADMIN", "COACH", "CLIENT"];
-const EDITABLE_FIELDS = ["role", "isActive", "emailVerified"];
+const EDITABLE_FIELDS = ["role", "isActive", "emailVerified", "email"];
 const VALID_TIERS = ["FREE", "STARTER", "PRO", "ELITE", "PREMIUM"];
 // Matches the CoachMe Bible's TIER_FEATURES table (Volume 2, Module 15) —
 // kept here as the canonical source for admin-driven tier changes.
@@ -54,6 +54,14 @@ export async function updateUser(adminUserId, targetUserId, changes) {
 
   if (changes.role && !VALID_ROLES.includes(changes.role)) throw new AppError(400, `Invalid role: ${changes.role}`);
 
+  if (changes.email) {
+    const cleanEmail = changes.email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) throw new AppError(400, "Invalid email address");
+    const taken = await adminRepository.findByEmailExcluding(cleanEmail, targetUserId);
+    if (taken) throw new AppError(409, "Another account already uses this email");
+    changes.email = cleanEmail;
+  }
+
   // Warn-and-block (not silently orphan) if deactivating a coach who still has active clients.
   if (changes.isActive === false && target.role === "COACH" && target.coachProfile) {
     const activeClients = await adminRepository.countActiveClientsForCoach(target.coachProfile.id);
@@ -91,6 +99,51 @@ export async function setUserTier(adminUserId, targetUserId, tier) {
     details: { tier, targetEmail: target.email },
   });
   return updated;
+}
+
+export async function updateUserPhone(adminUserId, targetUserId, phone) {
+  const target = await adminRepository.findUserById(targetUserId);
+  if (!target) throw new AppError(404, "User not found");
+  if (target.role === "COACH" && target.coachProfile) {
+    await adminRepository.updateCoachPhone(target.coachProfile.id, phone);
+  } else if (target.role === "CLIENT" && target.clientProfile) {
+    await adminRepository.updateClientPhone(target.clientProfile.id, phone);
+  } else {
+    throw new AppError(400, "This account has no coach or client profile to attach a phone number to");
+  }
+  await adminRepository.createAuditEntry({
+    userId: adminUserId, action: "admin_update_phone", resource: "user", resourceId: targetUserId,
+    details: { targetEmail: target.email },
+  });
+  return adminRepository.findUserById(targetUserId);
+}
+
+// Genuinely destructive and irreversible - cascade relationships
+// throughout the schema mean this removes everything tied to the
+// account (profile, bookings, workouts, check-ins, sessions, invoices,
+// etc.), not just the login. Same safety guards as deactivation
+// (can't target yourself, warns before orphaning a coach's active
+// clients) plus an explicit confirmation requirement the frontend must
+// satisfy.
+export async function deleteUser(adminUserId, targetUserId, confirmDespiteActiveClients) {
+  if (targetUserId === adminUserId) throw new AppError(400, "You cannot delete your own account");
+
+  const target = await adminRepository.findUserById(targetUserId);
+  if (!target) throw new AppError(404, "User not found");
+
+  if (target.role === "COACH" && target.coachProfile) {
+    const activeClients = await adminRepository.countActiveClientsForCoach(target.coachProfile.id);
+    if (activeClients > 0 && !confirmDespiteActiveClients) {
+      throw new AppError(409, `This coach has ${activeClients} active client(s). Deleting permanently removes their bookings, workout plans, and history too. Confirm to proceed anyway.`, { activeClients, requiresConfirmation: true });
+    }
+  }
+
+  await adminRepository.createAuditEntry({
+    userId: adminUserId, action: "admin_delete_user", resource: "user", resourceId: targetUserId,
+    details: { targetEmail: target.email, targetRole: target.role },
+  });
+  await adminRepository.deleteUserById(targetUserId);
+  return { message: `${target.email} and all associated data have been permanently deleted.` };
 }
 
 export async function forceLogout(adminUserId, targetUserId) {
