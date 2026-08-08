@@ -14,7 +14,6 @@ import BookingsPage from "../pages/BookingsPage.jsx";
 import ClientsPage from "../pages/ClientsPage.jsx";
 import LeadsPage from "../pages/LeadsPage.jsx";
 import AIChatPage from "../pages/AIChatPage.jsx";
-import ReportsPage from "../pages/ReportsPage.jsx";
 import SettingsPage from "../pages/SettingsPage.jsx";
 import MealPlannerPage from "../pages/MealPlannerPage.jsx";
 import NutritionTracker from "../pages/NutritionTracker.jsx";
@@ -34,7 +33,7 @@ export default function MainApp() {
   const [deepLink, setDeepLink] = useState(null);
 
   const handleV = useCallback((cmd, speak) => {
-    const r = { dashboard: ["home", "dashboard"], workouts: ["workout", "exercise"], bookings: ["schedule", "booking", "calendar"], clients: ["client", "message", "chat"], leads: ["lead", "pipeline"], reports: ["report", "analytics"], ai: ["ai", "assistant"], mealplan: ["meal", "diet", "nutrition plan"], habits: ["habit"], invoices: ["invoice", "payment", "billing"], settings: ["setting", "profile"], tests: ["test", "testing", "suite"], devices: ["device", "fitbit", "garmin", "watch", "health", "wearable"] };
+    const r = { dashboard: ["home", "dashboard"], workouts: ["workout", "exercise"], bookings: ["schedule", "booking", "calendar"], clients: ["client", "message", "chat"], leads: ["lead", "pipeline"], ai: ["ai", "assistant"], mealplan: ["meal", "diet", "nutrition plan"], habits: ["habit"], invoices: ["invoice", "payment", "billing"], settings: ["setting", "profile"], tests: ["test", "testing", "suite"], devices: ["device", "fitbit", "garmin", "watch", "health", "wearable"] };
     for (const [rt, kw] of Object.entries(r)) {
       if (kw.some(k => cmd.includes(k))) {
         if (["dashboard", "workouts", "bookings", "clients"].includes(rt)) { setTab(rt); setSub(null); } else { setTab("more"); setSub(rt); }
@@ -59,10 +58,10 @@ export default function MainApp() {
     const btmIds = getBottomTabs();
     if ((tab === "more" && sub) || (!btmIds.includes(tab) && tab !== "more")) {
       const subKey = sub || tab;
-      const p = { clients: <ClientsPage key={K} deepLink={deepLink} onConsumeDeepLink={() => setDeepLink(null)} />, leads: <LeadsPage key={K} />, reports: <ReportsPage key={K} />, ai: <AIChatPage key={K} />, settings: <SettingsPage key={K} />, mealplan: <MealPlannerPage key={K} />, nutrition: <NutritionTracker key={K} />, habits: <HabitTracker key={K} />, invoices: <InvoicesPage key={K} />, devices: <FitnessDevicesPage key={K} />, tests: <TestSuitePage key={K} />, insightSettings: <InsightSettingsPage key={K} /> };
+      const p = { clients: <ClientsPage key={K} deepLink={deepLink} onConsumeDeepLink={() => setDeepLink(null)} />, leads: <LeadsPage key={K} />, ai: <AIChatPage key={K} />, settings: <SettingsPage key={K} />, mealplan: <MealPlannerPage key={K} />, nutrition: <NutritionTracker key={K} />, habits: <HabitTracker key={K} />, invoices: <InvoicesPage key={K} />, devices: <FitnessDevicesPage key={K} />, tests: <TestSuitePage key={K} />, insightSettings: <InsightSettingsPage key={K} /> };
       return p[subKey] || <MoreMenu onNav={setSub} />;
     }
-    const p = { dashboard: <DashboardPage key={K} onNav={nav} />, workouts: <WorkoutsPage key={K} />, bookings: <BookingsPage key={K} onNav={nav} />, clients: <ClientsPage key={K} deepLink={deepLink} onConsumeDeepLink={() => setDeepLink(null)} />, leads: <LeadsPage key={K} />, ai: <AIChatPage key={K} />, reports: <ReportsPage key={K} />, more: <MoreMenu onNav={setSub} /> };
+    const p = { dashboard: <DashboardPage key={K} onNav={nav} />, workouts: <WorkoutsPage key={K} />, bookings: <BookingsPage key={K} onNav={nav} />, clients: <ClientsPage key={K} deepLink={deepLink} onConsumeDeepLink={() => setDeepLink(null)} />, leads: <LeadsPage key={K} />, ai: <AIChatPage key={K} />, more: <MoreMenu onNav={setSub} /> };
     return p[tab] || <DashboardPage key={K} onNav={nav} />;
   };
 

@@ -16,7 +16,6 @@ export const ALL_TABS = [
   { id: "clients", icon: "👥", label: "Clients" },
   { id: "leads", icon: "🎯", label: "Leads" },
   { id: "ai", icon: "🤖", label: "AI Coach" },
-  { id: "reports", icon: "📊", label: "Analytics" },
   { id: "more", icon: "⚙️", label: "More" },
 ];
 export const DEFAULT_BOTTOM = ["dashboard", "workouts", "bookings", "clients"];
@@ -37,7 +36,6 @@ export function MoreMenu({ onNav }) {
     { id: "clients", icon: "👥", label: "Clients", desc: "Manage clients" },
     { id: "leads", icon: "🎯", label: "Leads Pipeline", desc: "Kanban board" },
     { id: "mealplan", icon: "🍎", label: "AI Meal Planner", desc: "AI-generated plans" },
-    { id: "reports", icon: "📊", label: "Analytics", desc: "Revenue & reports" },
     { id: "invoices", icon: "🧾", label: "Invoices", desc: "Billing & payments" },
     { id: "ai", icon: "🤖", label: "AI Coach", desc: "RAG-powered assistant" },
     { id: "insightSettings", icon: "🧠", label: "AI Insights Settings", desc: "Tune Daily Briefing thresholds" },

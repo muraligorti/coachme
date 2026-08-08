@@ -61,7 +61,6 @@ export default function FitnessDevicesPage() {
     { id: "fitbit", name: "Fitbit", icon: "⌚", color: "#00B0B9", desc: "Steps, heart rate, sleep, SpO2", type: "oauth" },
     { id: "strava", name: "Strava", icon: "🧡", color: "#FC4C02", desc: "Running, cycling, swimming activities", type: "oauth" },
     { id: "healthConnect", name: "Health Connect", icon: "💚", color: "#0F9D58", desc: "Android's unified health hub — covers OnePlus, Samsung & most Android trackers", type: "native-bridge", note: "Reads directly from the CoachMe Android app. Not available in this web version — install the app to connect." },
-    { id: "appleHealth", name: "Apple Health", icon: "🍎", color: "#FF3B30", desc: "All metrics synced to HealthKit", type: "native-bridge", note: "Reads directly from the CoachMe iOS app. Not available in this web version — install the app to connect." },
     { id: "huawei", name: "Huawei Health", icon: "🔴", color: "#CF0A2C", desc: "Steps, heart rate, sleep, SpO2, stress", type: "oauth", note: "Requires a Huawei Developer account with Health Kit scope approved — heavier setup than Fitbit/Strava." },
   ];
 

@@ -5,6 +5,7 @@
 import { useState, useRef, useEffect } from "react";
 import { C } from "../theme/theme.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import { promptSavePassword } from "../lib/savePassword.js";
 import { api } from "../lib/api.js";
 import { GOOGLE_CLIENT_ID } from "../lib/config.js";
 import { log, compressImage } from "../lib/utils.js";
@@ -98,6 +99,7 @@ export default function AuthScreen() {
       setBusy(true);
       try {
         await verifyEmail(verifyEmailAddr, verifyCode);
+        promptSavePassword(verifyEmailAddr, form.password); // fire-and-forget
         // Now that a real session exists, fire the same safe follow-up
         // calls the old single-step register() used to do directly —
         // non-fatal if either fails, both are editable later in Settings.
@@ -150,6 +152,7 @@ export default function AuthScreen() {
         </div>
         <form onSubmit={e => { e.preventDefault(); submit(); }} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {mode === "register" && <Sel label="I am a…" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} options={[{ value: "COACH", label: "Coach" }, { value: "CLIENT", label: "Client" }]} />}
+          {mode === "register" && form.role === "COACH" && <div style={{ fontSize: 11.5, color: C.mt, marginTop: -6 }}>You'll start on the <b style={{ color: C.ac }}>Starter</b> plan — up to 5 clients. Upgrades are handled by an admin.</div>}
           {mode === "register" && form.role === "COACH" && (
             <div>
               <label style={{ fontSize: 13, color: C.mt, fontWeight: 500, marginBottom: 8, display: "block" }}>What kind of coaching do you do? (pick any)</label>
