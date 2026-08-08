@@ -6,6 +6,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 import { AppError } from "../lib/AppError.js";
 import * as adminRepository from "../repositories/adminRepository.js";
+import * as tokenService from "./tokenService.js";
 
 const VALID_ROLES = ["ADMIN", "COACH", "CLIENT"];
 const EDITABLE_FIELDS = ["role", "isActive", "emailVerified", "email"];
@@ -144,6 +145,38 @@ export async function deleteUser(adminUserId, targetUserId, confirmDespiteActive
   });
   await adminRepository.deleteUserById(targetUserId);
   return { message: `${target.email} and all associated data have been permanently deleted.` };
+}
+
+// Rather than duplicating every coach/client feature into bespoke admin
+// UI (which would need to stay in sync with every future feature
+// forever), admin can generate a real, valid session for a specific
+// coach or client and use the actual app as they would - covering
+// everything, automatically, as features get added. Deliberately
+// restricted: never targets another admin (keeps the blast radius of a
+// compromised admin account bounded), always audit-logged clearly since
+// this is genuinely sensitive, and the admin's own session is untouched
+// server-side - the frontend is responsible for holding onto it so
+// "stop impersonating" can restore it without a fresh login.
+export async function impersonateUser(adminUserId, targetUserId, requestMeta) {
+  if (targetUserId === adminUserId) throw new AppError(400, "You cannot impersonate your own account");
+
+  const target = await adminRepository.findUserById(targetUserId);
+  if (!target) throw new AppError(404, "User not found");
+  if (target.role === "ADMIN") throw new AppError(403, "Cannot impersonate another admin account");
+  if (!target.isActive) throw new AppError(400, "Cannot impersonate a deactivated account");
+
+  const tokens = tokenService.generateTokens(target);
+  await tokenService.createSession(target, tokens, requestMeta);
+
+  await adminRepository.createAuditEntry({
+    userId: adminUserId, action: "admin_impersonate_start", resource: "user", resourceId: targetUserId,
+    details: { targetEmail: target.email, targetRole: target.role },
+  });
+
+  return {
+    user: { id: target.id, email: target.email, role: target.role },
+    accessToken: tokens.accessToken, refreshToken: tokens.refreshToken,
+  };
 }
 
 export async function forceLogout(adminUserId, targetUserId) {

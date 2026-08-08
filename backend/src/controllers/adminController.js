@@ -7,6 +7,8 @@ import * as adminService from "../services/adminService.js";
 import { AppError } from "../lib/AppError.js";
 import { logger } from "../server.js";
 
+const requestMeta = (req) => ({ userAgent: req.headers["user-agent"], ipAddress: req.ip });
+
 function sendError(err, res, fallbackMessage) {
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({ error: err.message, ...(err.details ? { details: err.details } : {}) });
@@ -49,6 +51,11 @@ export async function deleteUser(req, res) {
 export async function setTier(req, res) {
   try { res.json(await adminService.setUserTier(req.user.id, req.params.id, req.body?.tier)); }
   catch (err) { sendError(err, res, "Failed to update tier"); }
+}
+
+export async function impersonate(req, res) {
+  try { res.json(await adminService.impersonateUser(req.user.id, req.params.id, requestMeta(req))); }
+  catch (err) { sendError(err, res, "Failed to impersonate user"); }
 }
 
 export async function forceLogout(req, res) {

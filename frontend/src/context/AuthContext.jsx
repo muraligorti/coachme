@@ -138,8 +138,39 @@ export function AuthProvider({ children }) {
     else setUser({ email: d?.user?.email, role: d?.user?.role, name: d?.profile?.displayName || d?.user?.email?.split("@")[0] });
   };
 
-  const logout = () => { api.setToken(null); setUser(null); };
+  const logout = () => { api.setToken(null); setUser(null); localStorage.removeItem("cm_admin_original"); };
+
+  // Impersonation: stores the admin's own token+user in localStorage
+  // (same persistence model as the active session token itself) before
+  // swapping the active session to the target user's real, valid token.
+  // Deliberately NOT sessionStorage - if the app fully restarts (not
+  // just backgrounds) while impersonating, sessionStorage would be
+  // wiped, leaving the admin stuck as the impersonated user with no way
+  // back short of a manual logout. "Stop impersonating" restores exactly
+  // what was there before, rather than requiring a fresh admin login.
+  const [impersonating, setImpersonating] = useState(() => !!localStorage.getItem("cm_admin_original"));
+
+  const impersonate = async (userId) => {
+    const original = { token: api.token, user };
+    const r = await api.post(`/admin/users/${userId}/impersonate`);
+    const tk = xToken(r); if (!tk) throw new Error("No token");
+    localStorage.setItem("cm_admin_original", JSON.stringify(original));
+    api.setToken(tk);
+    const u = xUser(r);
+    setUser(u ? { ...u, name: u.email?.split("@")[0] } : { id: r.user?.id, email: r.user?.email, role: r.user?.role });
+    setImpersonating(true);
+  };
+
+  const stopImpersonating = () => {
+    const stored = localStorage.getItem("cm_admin_original");
+    if (!stored) return;
+    const original = JSON.parse(stored);
+    localStorage.removeItem("cm_admin_original");
+    api.setToken(original.token);
+    setUser(original.user);
+    setImpersonating(false);
+  };
 
   if (loading) return <Splash />;
-  return <AuthCtx.Provider value={{ user, login, register, logout, googleLogin, verifyEmail, resendVerificationCode }}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{ user, login, register, logout, googleLogin, verifyEmail, resendVerificationCode, impersonate, stopImpersonating, impersonating }}>{children}</AuthCtx.Provider>;
 }
