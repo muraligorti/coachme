@@ -671,6 +671,16 @@ model CheckIn {
 
 // ─── INVOICES (real backend records, Razorpay Payment Links for collection) ─────
 
+// ─── SYSTEM CONFIG (admin-editable, previously hardcoded) ───────────────
+
+model SystemConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique // e.g. "tierFeatures", "specializations"
+  value     Json     // shape depends on key - see lib/systemConfig.js for each key's expected shape and default
+  updatedAt DateTime @updatedAt
+  updatedBy String?  // admin userId who last changed it, for accountability - not a FK, just a reference, since we don't need to block deleting an admin over an old config edit
+}
+
 model Invoice {
   id          String        @id @default(cuid())
   coachId     String
