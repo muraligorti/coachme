@@ -20,6 +20,7 @@ import { api } from "../../lib/api.js";
 import { compressImage } from "../../lib/utils.js";
 import { Card, Btn, Input, ST } from "../../components/ui.jsx";
 import NotificationPreferencesCard from "../../components/NotificationPreferencesCard.jsx";
+import UsernameCard from "../../components/UsernameCard.jsx";
 
 export default function ClientSettingsPage() {
   const { user, logout } = useAuth();
@@ -77,6 +78,7 @@ export default function ClientSettingsPage() {
         </div>
       </Card>
       <NotificationPreferencesCard showClientReminders={true} />
+      <UsernameCard />
       <Card style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 12 }}>Theme</div>
         <div style={{ display: "flex", gap: 8 }}>
