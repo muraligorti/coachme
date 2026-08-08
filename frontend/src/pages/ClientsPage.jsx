@@ -146,6 +146,7 @@ export default function ClientsPage({ deepLink, onConsumeDeepLink }) {
   const [showEdit, setShowEdit] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [csvText, setCsvText] = useState("");
+  const [bulkResult, setBulkResult] = useState(null);
   const [form, setForm] = useState({ name: "", email: "", phone: "", sessionType: "offline", goals: "", notes: "", emergencyContact: "", address: "", dob: "", gender: "", injuries: "" });
   const emptyForm = { name: "", email: "", phone: "", sessionType: "offline", goals: "", notes: "", emergencyContact: "", address: "", dob: "", gender: "", injuries: "" };
 
@@ -199,13 +200,28 @@ export default function ClientsPage({ deepLink, onConsumeDeepLink }) {
   const deleteClient = async (id) => { if (!confirm("Delete this client? This cannot be undone.")) return; try { await api.del(`/clients/${id}`); setSel(null); load(); } catch (e) { alert(e.message); } };
 
   const bulkUpload = async () => {
+    setBulkResult(null);
     try {
       const rows = csvText.trim().split("\n").filter(r => r.trim());
       if (rows.length < 2) { alert("Need header row + data rows"); return; }
       const headers = rows[0].split(",").map(h => h.trim().toLowerCase());
       const data = rows.slice(1).map(r => { const vals = r.split(","); const obj = {}; headers.forEach((h, i) => { const key = h === "mobile" || h === "phone number" ? "phone" : h === "full name" ? "name" : h; obj[key] = vals[i]?.trim() || ""; }); return obj; });
-      try { await api.post("/clients/bulk", { clients: data }); } catch { for (const c of data) { try { await api.post("/clients", c); } catch {} } }
-      setCsvText(""); setShowBulk(false); load();
+      let result;
+      try {
+        result = await api.post("/clients/bulk", { clients: data });
+      } catch (e) {
+        // Fallback for older backends without /clients/bulk - still
+        // tracks real success/failure now instead of silently assuming
+        // everything worked.
+        result = { success: 0, failed: 0, errors: [] };
+        for (const c of data) {
+          try { await api.post("/clients", c); result.success++; }
+          catch (err) { result.failed++; result.errors.push(`${c.name || c.email || "row"}: ${err.message}`); }
+        }
+      }
+      setBulkResult(result);
+      if (result.success > 0) load();
+      if (result.failed === 0) { setCsvText(""); setShowBulk(false); }
     } catch (e) { alert("Upload error: " + e.message); }
   };
 
@@ -344,8 +360,20 @@ export default function ClientsPage({ deepLink, onConsumeDeepLink }) {
         </div>
       </Modal>
 
-      <Modal open={showBulk} onClose={() => setShowBulk(false)} title="Import Clients (CSV)" wide>
+      <Modal open={showBulk} onClose={() => { setShowBulk(false); setBulkResult(null); }} title="Import Clients (CSV)" wide>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {bulkResult && (
+            <Card style={{ padding: 12, background: bulkResult.failed > 0 ? C.wn + "10" : C.ok + "10", border: `1px solid ${bulkResult.failed > 0 ? C.wn : C.ok}40` }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.tx, marginBottom: bulkResult.errors?.length ? 8 : 0 }}>
+                ✅ {bulkResult.success} imported{bulkResult.failed > 0 ? ` · ❌ ${bulkResult.failed} failed` : ""}
+              </div>
+              {bulkResult.errors?.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 3, maxHeight: 150, overflowY: "auto" }}>
+                  {bulkResult.errors.map((err, i) => <div key={i} style={{ fontSize: 11, color: C.mt }}>• {err}</div>)}
+                </div>
+              )}
+            </Card>
+          )}
           <div style={{ padding: 12, background: C.s2, borderRadius: 10, fontSize: 12, color: C.mt, lineHeight: 1.6 }}>
             <strong style={{ color: C.tx }}>CSV Format:</strong><br />
             name, email, phone, sessionType<br />
