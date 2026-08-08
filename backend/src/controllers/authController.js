@@ -101,7 +101,7 @@ export async function updateProfile(req, res) {
 
 export async function forgotPassword(req, res) {
   try {
-    const result = await authService.forgotPassword(req.body.email, req.body.phone);
+    const result = await authService.forgotPassword(req.body.email);
     res.json(result);
   } catch (err) { sendError(err, res, "Failed to process request"); }
 }

@@ -394,21 +394,12 @@ export async function updateProfile(userId, data) {
 
 // ─── Forgot password ─────────────────────────────────────────────────
 
-export async function forgotPassword(email, phone) {
-  if (!email && !phone) throw new AppError(400, "Email or phone required");
+export async function forgotPassword(email) {
+  if (!email) throw new AppError(400, "Email is required");
 
-  let user;
-  if (email) user = await userRepository.findByEmail(email);
-  if (!user && phone) {
-    const cleanPhone = phone.replace(/[\s\-\(\)]/g, "").slice(-10);
-    const clientProfile = await profileRepository.findClientProfileByPhone(cleanPhone);
-    if (clientProfile) user = await userRepository.findById(clientProfile.userId);
-    if (!user) {
-      const coachProfile = await profileRepository.findCoachProfileByPhone(cleanPhone);
-      if (coachProfile) user = await userRepository.findById(coachProfile.userId);
-    }
-  }
-  // Always report success to prevent account enumeration
+  const user = await userRepository.findByEmail(email);
+  // Always report the same success message regardless of whether the
+  // account exists, to prevent account enumeration.
   if (!user) return { message: "If this account exists, a reset code has been sent." };
 
   const crypto = await import("crypto");
@@ -419,16 +410,21 @@ export async function forgotPassword(email, phone) {
     resetToken: resetToken + ":" + resetCode,
     resetExpires: new Date(Date.now() + 30 * 60 * 1000),
   });
-  logger.info("Password reset code generated", { email, resetCode });
 
-  if (email && await notificationService.sendPasswordResetEmail(email, resetCode)) {
-    return { message: "Reset code sent to your email." };
+  const sent = await notificationService.sendPasswordResetEmail(email, resetCode);
+  if (!sent) {
+    // Previously this fell back to returning the actual reset code
+    // directly in the API response — meaning anyone who could trigger
+    // this endpoint (no auth required, by design) would receive a
+    // working reset code the moment email delivery failed for any
+    // reason. Genuinely exploitable, not hypothetical - fails loudly
+    // instead now.
+    logger.error("Password reset email failed to send", { userId: user.id });
+    throw new AppError(500, "Could not send the reset email. Please try again in a few minutes.");
   }
-  if (phone && await notificationService.sendPasswordResetSms(phone, resetCode)) {
-    return { message: "Reset code sent via SMS." };
-  }
-  // No email/SMS service configured or both failed — return code directly (dev/demo mode)
-  return { message: "Reset code generated (no email/SMS service configured).", code: resetCode };
+
+  logger.info("Password reset code sent", { userId: user.id });
+  return { message: "Reset code sent to your email." };
 }
 
 // ─── Reset password ───────────────────────────────────────────────────
