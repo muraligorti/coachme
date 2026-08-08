@@ -1,8 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════════
-// FITNESS DEVICES — connect wearables (real OAuth for Fitbit/Strava/
-// Huawei; native bridge for Apple Health/Health Connect; manual-only for
-// everything else with no public API), per-metric sharing consent
-// (client side), and a coach-side view of shared client health data.
+// FITNESS DEVICES — connects wearables via Health Connect (Android's
+// native bridge), manual-only for everything else with no public API,
+// per-metric sharing consent (client side), and a coach-side view of
+// shared client health data.
+//
+// Fitbit/Strava/Huawei OAuth code exists and is real (see
+// backend/src/routes/health-data.js) but isn't offered here right now —
+// see the note above the `devices` list below for why.
 // ═══════════════════════════════════════════════════════════════════════
 import { useState, useEffect } from "react";
 import { C } from "../theme/theme.js";
@@ -57,11 +61,21 @@ export default function FitnessDevicesPage() {
   // (which just point at Health Connect) were removed — none of them let
   // a user actually configure or connect anything. Manual health-data
   // logging is still available via the "✏️ Manual" button in the header.
+  //
+  // Fitbit, Strava, and Huawei Health are deliberately NOT listed here,
+  // even though the backend OAuth code for all three is real and
+  // correctly built (see backend/src/routes/health-data.js) - as of
+  // August 2026: Fitbit's legacy Web API (which that code targets) is
+  // being shut down entirely by Google in September 2026, requiring a
+  // rebuild against the new Google Health API to actually work past
+  // that point; Strava now requires the developer to hold an ongoing
+  // paid Strava subscription just to keep API access; Huawei needs a
+  // heavier one-time Developer account + Health Kit scope approval.
+  // Decided to skip all three for now rather than show options that
+  // don't currently work - re-add here once any of them is worth
+  // pursuing.
   const devices = [
-    { id: "fitbit", name: "Fitbit", icon: "⌚", color: "#00B0B9", desc: "Steps, heart rate, sleep, SpO2", type: "oauth" },
-    { id: "strava", name: "Strava", icon: "🧡", color: "#FC4C02", desc: "Running, cycling, swimming activities", type: "oauth" },
     { id: "healthConnect", name: "Health Connect", icon: "💚", color: "#0F9D58", desc: "Android's unified health hub — covers OnePlus, Samsung & most Android trackers", type: "native-bridge", note: "Reads directly from the CoachMe Android app. Not available in this web version — install the app to connect." },
-    { id: "huawei", name: "Huawei Health", icon: "🔴", color: "#CF0A2C", desc: "Steps, heart rate, sleep, SpO2, stress", type: "oauth", note: "Requires a Huawei Developer account with Health Kit scope approved — heavier setup than Fitbit/Strava." },
   ];
 
   const toggleConnect = async (id) => {
