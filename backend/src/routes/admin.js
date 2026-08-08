@@ -22,6 +22,8 @@ router.patch("/users/:id/phone", authenticate, authorize("ADMIN"), audit("admin_
 router.delete("/users/:id", authenticate, authorize("ADMIN"), audit("admin_delete_user", "user"), adminController.deleteUser);
 router.post("/users/:id/force-logout", authenticate, authorize("ADMIN"), audit("admin_force_logout", "user"), adminController.forceLogout);
 router.post("/users/:id/impersonate", authenticate, authorize("ADMIN"), audit("admin_impersonate_start", "user"), adminController.impersonate);
+router.get("/config", authenticate, authorize("ADMIN"), adminController.getConfig);
+router.put("/config/:key", authenticate, authorize("ADMIN"), audit("admin_update_config", "system_config"), adminController.updateConfig);
 router.patch("/users/:id/tier", authenticate, authorize("ADMIN"), audit("admin_set_tier", "subscription"), adminController.setTier);
 router.get("/audit", authenticate, authorize("ADMIN"), adminController.getAuditLog);
 

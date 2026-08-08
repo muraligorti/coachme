@@ -26,6 +26,14 @@ export default function AuthScreen() {
   const [verifyCode, setVerifyCode] = useState("");
   const [verifyEmailAddr, setVerifyEmailAddr] = useState("");
   const [resendCooldown, setResendCooldown] = useState(0);
+  // Was hardcoded inline; now admin-configurable (see AdminConfigPage).
+  // Defaults match the previous hardcoded list so there's no empty
+  // flash while this loads.
+  const [specializationOptions, setSpecializationOptions] = useState([
+    { v: "strength", l: "💪 Strength" }, { v: "yoga", l: "🧘 Yoga" }, { v: "pilates", l: "🤸 Pilates" },
+    { v: "crossfit", l: "🏋️ CrossFit" }, { v: "general", l: "✨ General" },
+  ]);
+  useEffect(() => { api.get("/config/specializations").then(r => { if (r.specializations?.length) setSpecializationOptions(r.specializations); }).catch(() => {}); }, []);
   const googleBtnRef = useRef(null);
 
   // Ticks the resend-code cooldown down to 0 once a code has been sent —
@@ -169,7 +177,7 @@ export default function AuthScreen() {
             <div>
               <label style={{ fontSize: 13, color: C.mt, fontWeight: 500, marginBottom: 8, display: "block" }}>What kind of coaching do you do? (pick any)</label>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {[{ v: "strength", l: "💪 Strength" }, { v: "yoga", l: "🧘 Yoga" }, { v: "pilates", l: "🤸 Pilates" }, { v: "crossfit", l: "🏋️ CrossFit" }, { v: "general", l: "✨ General" }].map(s => {
+                {specializationOptions.map(s => {
                   const checked = form.specializations.includes(s.v);
                   return (
                     <button key={s.v} type="button" onClick={() => setForm(f => ({ ...f, specializations: checked ? f.specializations.filter(x => x !== s.v) : [...f.specializations, s.v] }))}

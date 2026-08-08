@@ -6,6 +6,7 @@
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import { prisma, redis, logger } from "../server.js";
+import { getConfig } from "../lib/systemConfig.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "CHANGE_ME";
 
@@ -164,15 +165,10 @@ export const ownsResource = (resourceType) => {
 };
 
 // ─── Package Feature Gate ────────────────────────────────────────────
-// Checks if user's subscription tier includes the required feature
-
-const TIER_FEATURES = {
-  FREE:    { maxClients: 5,   aiCoaching: false, leadScoring: false, bulkUpload: false, advancedAnalytics: false, brandedApp: false, apiAccess: false },
-  STARTER: { maxClients: 5,   aiCoaching: false, leadScoring: false, bulkUpload: false, advancedAnalytics: false, brandedApp: false, apiAccess: false },
-  PRO:     { maxClients: 50,  aiCoaching: true,  leadScoring: true,  bulkUpload: true,  advancedAnalytics: true,  brandedApp: false, apiAccess: false },
-  ELITE:   { maxClients: 999, aiCoaching: true,  leadScoring: true,  bulkUpload: true,  advancedAnalytics: true,  brandedApp: true,  apiAccess: true  },
-  PREMIUM: { maxClients: 999, aiCoaching: true,  leadScoring: false, bulkUpload: false, advancedAnalytics: true,  brandedApp: false, apiAccess: false },
-};
+// Checks if user's subscription tier includes the required feature.
+// Tier features/limits are admin-configurable now (see
+// lib/systemConfig.js) - the old hardcoded TIER_FEATURES constant is
+// still there as the fallback default, just no longer the only source.
 
 export const requireFeature = (feature) => {
   return async (req, res, next) => {
@@ -180,7 +176,8 @@ export const requireFeature = (feature) => {
 
     const sub = await prisma.subscription.findUnique({ where: { userId: req.user.id } });
     const tier = sub?.tier || "FREE";
-    const features = TIER_FEATURES[tier] || TIER_FEATURES.FREE;
+    const tierFeatures = await getConfig("tierFeatures");
+    const features = tierFeatures[tier] || tierFeatures.FREE;
 
     if (!features[feature]) {
       return res.status(403).json({
@@ -204,7 +201,8 @@ export const checkClientLimit = async (req, res, next) => {
 
   const sub = await prisma.subscription.findUnique({ where: { userId: req.user.id } });
   const tier = sub?.tier || "FREE";
-  const maxClients = TIER_FEATURES[tier]?.maxClients || 5;
+  const tierFeatures = await getConfig("tierFeatures");
+  const maxClients = tierFeatures[tier]?.maxClients || 5;
 
   const coachProfile = await prisma.coachProfile.findUnique({ where: { userId: req.user.id } });
   if (!coachProfile) return res.status(404).json({ error: "Coach profile not found" });

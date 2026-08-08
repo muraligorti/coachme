@@ -1,22 +1,23 @@
 // ═══════════════════════════════════════════════════════════════════════
-// ADMIN MAIN APP — the platform-admin shell. Simple 2-tab nav (Users,
-// Audit Log) — deliberately minimal for now; Reports/Bulk-upload/
-// Impersonation are scoped as next phases, not built here yet.
+// ADMIN MAIN APP — the platform-admin shell: Users, Audit Log, Config.
 // ═══════════════════════════════════════════════════════════════════════
 import { useState } from "react";
 import { C } from "../theme/theme.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import AdminUsersPage from "../pages/admin/AdminUsersPage.jsx";
 import AdminAuditLogPage from "../pages/admin/AdminAuditLogPage.jsx";
+import AdminConfigPage from "../pages/admin/AdminConfigPage.jsx";
 
 export default function AdminMainApp() {
   const { logout } = useAuth();
   const [tab, setTab] = useState("users"); const [rk, setRk] = useState(0);
-  const tabs = [{ id: "users", icon: "👤", label: "Users" }, { id: "audit", icon: "📜", label: "Audit Log" }];
+  const tabs = [{ id: "users", icon: "👤", label: "Users" }, { id: "audit", icon: "📜", label: "Audit Log" }, { id: "config", icon: "⚙️", label: "Config" }];
 
   const render = () => {
     const K = `${tab}_${rk}`;
-    return tab === "audit" ? <AdminAuditLogPage key={K} /> : <AdminUsersPage key={K} />;
+    if (tab === "audit") return <AdminAuditLogPage key={K} />;
+    if (tab === "config") return <AdminConfigPage key={K} />;
+    return <AdminUsersPage key={K} />;
   };
 
   return (

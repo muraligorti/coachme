@@ -14,7 +14,6 @@ import RazorpayConnectCard from "../components/RazorpayConnectCard.jsx";
 import UsernameCard from "../components/UsernameCard.jsx";
 import { ALL_TABS, DEFAULT_BOTTOM, getBottomTabs } from "../navigation/BottomNav.jsx";
 
-const SPECIALIZATION_OPTIONS = [{ v: "strength", l: "💪 Strength" }, { v: "yoga", l: "🧘 Yoga" }, { v: "pilates", l: "🤸 Pilates" }, { v: "crossfit", l: "🏋️ CrossFit" }, { v: "general", l: "✨ General" }];
 const TIER_COLORS = { FREE: "#8b96a8", STARTER: "#8b96a8", PRO: "#f5a623", ELITE: "#22d3a8", PREMIUM: "#22d3a8" };
 
 export default function SettingsPage() {
@@ -26,6 +25,14 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [bottomTabs, setBottomTabs] = useState(getBottomTabs());
+  // Was hardcoded inline; now admin-configurable (see AdminConfigPage).
+  // Defaults match the previous hardcoded list so there's no empty
+  // flash while this loads.
+  const [SPECIALIZATION_OPTIONS, setSpecializationOptions] = useState([
+    { v: "strength", l: "💪 Strength" }, { v: "yoga", l: "🧘 Yoga" }, { v: "pilates", l: "🤸 Pilates" },
+    { v: "crossfit", l: "🏋️ CrossFit" }, { v: "general", l: "✨ General" },
+  ]);
+  useEffect(() => { api.get("/config/specializations").then(r => { if (r.specializations?.length) setSpecializationOptions(r.specializations); }).catch(() => {}); }, []);
 
   useEffect(() => {
     api.get("/auth/me").then(r => { if (r.profile?.avatar) setAvatar(r.profile.avatar); }).catch(() => {});

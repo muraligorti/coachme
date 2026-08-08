@@ -58,6 +58,16 @@ export async function impersonate(req, res) {
   catch (err) { sendError(err, res, "Failed to impersonate user"); }
 }
 
+export async function getConfig(req, res) {
+  try { res.json(await adminService.getSystemConfig()); }
+  catch (err) { sendError(err, res, "Failed to load system config"); }
+}
+
+export async function updateConfig(req, res) {
+  try { res.json(await adminService.updateSystemConfig(req.user.id, req.params.key, req.body?.value)); }
+  catch (err) { sendError(err, res, "Failed to update system config"); }
+}
+
 export async function forceLogout(req, res) {
   try {
     const result = await adminService.forceLogout(req.user.id, req.params.id);

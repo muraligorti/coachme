@@ -7,13 +7,11 @@
 import { AppError } from "../lib/AppError.js";
 import * as adminRepository from "../repositories/adminRepository.js";
 import * as tokenService from "./tokenService.js";
+import { getConfig, setConfig, getAllConfig } from "../lib/systemConfig.js";
 
 const VALID_ROLES = ["ADMIN", "COACH", "CLIENT"];
 const EDITABLE_FIELDS = ["role", "isActive", "emailVerified", "email"];
 const VALID_TIERS = ["FREE", "STARTER", "PRO", "ELITE", "PREMIUM"];
-// Matches the CoachMe Bible's TIER_FEATURES table (Volume 2, Module 15) —
-// kept here as the canonical source for admin-driven tier changes.
-const TIER_MAX_CLIENTS = { FREE: 5, STARTER: 5, PRO: 50, ELITE: 999, PREMIUM: 999 };
 
 export async function listUsers({ role, search, isActive, page, pageSize }) {
   page = Math.max(1, parseInt(page) || 1);
@@ -94,7 +92,8 @@ export async function setUserTier(adminUserId, targetUserId, tier) {
   if (!target) throw new AppError(404, "User not found");
   if (target.role !== "COACH") throw new AppError(400, "Only coach accounts have a subscription tier");
 
-  const updated = await adminRepository.updateSubscriptionTier(targetUserId, tier, TIER_MAX_CLIENTS[tier]);
+  const tierFeatures = await getConfig("tierFeatures");
+  const updated = await adminRepository.updateSubscriptionTier(targetUserId, tier, tierFeatures[tier]?.maxClients ?? 5);
   await adminRepository.createAuditEntry({
     userId: adminUserId, action: "admin_set_tier", resource: "subscription", resourceId: targetUserId,
     details: { tier, targetEmail: target.email },
@@ -177,6 +176,30 @@ export async function impersonateUser(adminUserId, targetUserId, requestMeta) {
     user: { id: target.id, email: target.email, role: target.role },
     accessToken: tokens.accessToken, refreshToken: tokens.refreshToken,
   };
+}
+
+// ─── System Config (previously hardcoded, now admin-editable) ────────
+
+export async function getSystemConfig() {
+  return getAllConfig();
+}
+
+export async function updateSystemConfig(adminUserId, key, value) {
+  if (key === "tierFeatures") {
+    if (typeof value !== "object" || value === null) throw new AppError(400, "tierFeatures must be an object keyed by tier");
+    for (const [tier, features] of Object.entries(value)) {
+      if (!VALID_TIERS.includes(tier)) throw new AppError(400, `Invalid tier in tierFeatures: ${tier}`);
+      if (typeof features.maxClients !== "number" || features.maxClients < 1) throw new AppError(400, `${tier}.maxClients must be a positive number`);
+    }
+  } else if (key === "specializations") {
+    if (!Array.isArray(value) || value.some(s => !s.v || !s.l)) throw new AppError(400, "specializations must be an array of {v, l} objects");
+  }
+  const updated = await setConfig(key, value, adminUserId);
+  await adminRepository.createAuditEntry({
+    userId: adminUserId, action: "admin_update_config", resource: "system_config", resourceId: key,
+    details: { key },
+  });
+  return updated;
 }
 
 export async function forceLogout(adminUserId, targetUserId) {
