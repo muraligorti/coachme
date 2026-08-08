@@ -28,6 +28,11 @@ export default function AdminUsersPage() {
   const [rbac, setRbac] = useState(null);
   const [categoryDraft, setCategoryDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editingContact, setEditingContact] = useState(false);
+  const [emailValue, setEmailValue] = useState("");
+  const [phoneValue, setPhoneValue] = useState("");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [error, setError] = useState("");
 
   const load = () => {
@@ -90,6 +95,51 @@ export default function AdminUsersPage() {
     try { const r = await api.post(`/admin/users/${sel.id}/force-logout`); alert(r.message); } catch (e) { alert("Failed: " + e.message); }
   };
 
+  const updatePhone = async (phone) => {
+    setSaving(true); setError("");
+    try { const updated = await api.req(`/admin/users/${sel.id}/phone`, { method: "PATCH", body: JSON.stringify({ phone }) }); setDetail(updated); }
+    catch (e) { setError(e.message); }
+    setSaving(false);
+  };
+
+  const saveContact = async () => {
+    setSaving(true); setError("");
+    try {
+      const currentPhone = detail.coachProfile?.phone || detail.clientProfile?.phone || "";
+      if (emailValue !== detail.email) {
+        const updated = await api.req(`/admin/users/${sel.id}`, { method: "PATCH", body: JSON.stringify({ email: emailValue }) });
+        setDetail(d => ({ ...d, ...updated }));
+      }
+      if (phoneValue !== currentPhone) {
+        const updated = await api.req(`/admin/users/${sel.id}/phone`, { method: "PATCH", body: JSON.stringify({ phone: phoneValue }) });
+        setDetail(updated);
+      }
+      setEditingContact(false);
+    } catch (e) { setError(e.message); }
+    setSaving(false);
+  };
+
+  const deleteUserAccount = async () => {
+    if (detail.email !== deleteConfirmText) { setError("Type the exact email address to confirm deletion"); return; }
+    setSaving(true); setError("");
+    try {
+      await api.req(`/admin/users/${sel.id}`, { method: "DELETE" });
+      setSel(null); setDetail(null); setDeleteConfirmText(""); setShowDeleteConfirm(false);
+      load();
+    } catch (e) {
+      if (e.message.includes("active client")) {
+        if (confirm(e.message + "\n\nDelete anyway? This permanently removes their bookings, workout plans, and history too.")) {
+          try {
+            await api.req(`/admin/users/${sel.id}`, { method: "DELETE", body: JSON.stringify({ confirmDespiteActiveClients: true }) });
+            setSel(null); setDetail(null); setDeleteConfirmText(""); setShowDeleteConfirm(false);
+            load();
+          } catch (e2) { setError(e2.message); }
+        }
+      } else setError(e.message);
+    }
+    setSaving(false);
+  };
+
   if (sel) {
     const isSelf = detail?.id === me?.id;
     return (
@@ -114,6 +164,30 @@ export default function AdminUsersPage() {
                 {detail.subscription && <div>Tier: {detail.subscription.tier} ({detail.subscription.maxClients} max clients)</div>}
                 <div>Active sessions: {detail._count?.sessions ?? 0}</div>
               </div>
+            </Card>
+
+            <Card style={{ marginBottom: 12, padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: editingContact ? 12 : 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>Contact Info</div>
+                {!editingContact && (
+                  <button onClick={() => { setEmailValue(detail.email); setPhoneValue(detail.coachProfile?.phone || detail.clientProfile?.phone || ""); setEditingContact(true); setError(""); }} style={{ fontSize: 12, color: C.ac, background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>Edit</button>
+                )}
+              </div>
+              {!editingContact ? (
+                <div style={{ fontSize: 12, color: C.mt, display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div>Email: <span style={{ color: C.tx }}>{detail.email}</span></div>
+                  <div>Phone: <span style={{ color: C.tx }}>{detail.coachProfile?.phone || detail.clientProfile?.phone || "Not set"}</span></div>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <Input label="Email" type="email" value={emailValue} onChange={e => setEmailValue(e.target.value)} />
+                  <Input label="Phone" value={phoneValue} onChange={e => setPhoneValue(e.target.value)} placeholder="9876543210" />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn onClick={saveContact} disabled={saving} style={{ flex: 1 }}>{saving ? "Saving…" : "Save"}</Btn>
+                    <Btn variant="secondary" onClick={() => { setEditingContact(false); setError(""); }} style={{ flex: 1 }}>Cancel</Btn>
+                  </div>
+                </div>
+              )}
             </Card>
 
             {error && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10, marginBottom: 12 }}>{error}</div>}
@@ -176,6 +250,25 @@ export default function AdminUsersPage() {
               <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 10 }}>Session Control</div>
               <Btn variant="secondary" onClick={forceLogout} style={{ width: "100%" }}>🔒 Force logout everywhere ({detail._count?.sessions ?? 0} active)</Btn>
             </Card>
+
+            {!isSelf && (
+              <Card style={{ marginBottom: 12, padding: 16, border: `1px solid ${C.dg}40` }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: C.dg, marginBottom: 4 }}>⚠️ Danger Zone</div>
+                <div style={{ fontSize: 11, color: C.mt, marginBottom: 12 }}>Permanently deletes this account and everything tied to it — bookings, workout plans, check-ins, invoices, history. This cannot be undone.</div>
+                {!showDeleteConfirm ? (
+                  <Btn variant="danger" onClick={() => { setShowDeleteConfirm(true); setDeleteConfirmText(""); setError(""); }} style={{ width: "100%" }}>Delete This Account</Btn>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ fontSize: 12, color: C.tx }}>Type <b style={{ fontFamily: "monospace" }}>{detail.email}</b> to confirm:</div>
+                    <Input value={deleteConfirmText} onChange={e => setDeleteConfirmText(e.target.value)} placeholder={detail.email} />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Btn variant="danger" onClick={deleteUserAccount} disabled={saving || deleteConfirmText !== detail.email} style={{ flex: 1 }}>{saving ? "Deleting…" : "Permanently Delete"}</Btn>
+                      <Btn variant="secondary" onClick={() => setShowDeleteConfirm(false)} style={{ flex: 1 }}>Cancel</Btn>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            )}
           </div>
         )}
       </div>
