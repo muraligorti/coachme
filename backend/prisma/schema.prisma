@@ -84,6 +84,7 @@ model User {
   coachProfile    CoachProfile?
   clientProfile   ClientProfile?
   subscription    Subscription?
+  organizationMemberships OrganizationMembership[]
   sessions        Session[]
   auditLogs       AuditLog[]
   notifications   Notification[]
@@ -123,6 +124,8 @@ model CoachProfile {
   id                String    @id @default(cuid())
   userId            String    @unique
   user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId    String?   // null = independent solo coach (today's model, unaffected). Set = gym-employed; billing/limits come from the org, not a personal Subscription.
+  organization      Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   displayName       String
   phone             String?
   avatar            String?   // S3/R2 URL
@@ -183,6 +186,8 @@ model ClientProfile {
   id              String    @id @default(cuid())
   userId          String    @unique
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId  String?   // null = independent client of a solo coach. Set = gym client - habits/check-ins/data shared centrally with whichever coaches the gym admin maps them to.
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   displayName     String
   phone           String?
   age             Int?
@@ -223,6 +228,61 @@ model ClientProfile {
 }
 
 // â”€â”€â”€ CLIENT-COACH RELATIONSHIP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// ─── ORGANIZATIONS (gyms hiring multiple coaches) ────────────────────────
+//
+// A distinct business model from solo coaching, not a replacement for it -
+// CoachProfile.organizationId and ClientProfile.organizationId are both
+// nullable specifically so the existing independent-coach flow is
+// completely untouched. Billing is org-level (see tier/maxClients below),
+// shared across every coach in the gym, rather than each coach paying
+// individually. Client<->coach access reuses the existing ClientCoach
+// join table as-is - a client can now legitimately have multiple active
+// ClientCoach rows (one per mapped coach), and access is still gated by
+// having an active mapping, exactly like it already was for solo coaches.
+// Tenant segregation is enforced at the query layer everywhere org data
+// is read/written - every list/lookup filters by organizationId, and
+// cross-org access is explicitly checked, never assumed absent.
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  tier        SubscriptionTier @default(STARTER) // reuses the same tier concept as solo coaches, but shared across the whole gym
+  maxClients  Int      @default(25) // shared capacity across all coaches in the org, not per-coach
+  city        String?
+  country     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  coaches     CoachProfile[]
+  clients     ClientProfile[]
+  members     OrganizationMembership[]
+
+  @@index([isActive])
+}
+
+// A user's role within a specific gym. Deliberately separate from the
+// platform-wide User.role (COACH/CLIENT/ADMIN) - a gym ADMIN might also
+// practice as a coach (has both a CoachProfile AND an ADMIN membership),
+// or might be a dedicated non-practicing gym administrator (User.role
+// stays COACH for now, simplest path to reuse existing auth/permission
+// plumbing, but they hold no CoachProfile of their own... actually see
+// organizationService.js for how a non-practicing admin is represented -
+// kept flexible here at the schema level on purpose).
+model OrganizationMembership {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role           String   @default("COACH") // "ADMIN" | "COACH" - gym-level role, not the platform User.role
+  createdAt      DateTime @default(now())
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId])
+}
 
 model ClientCoach {
   id          String   @id @default(cuid())
