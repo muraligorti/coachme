@@ -83,6 +83,16 @@ export async function addMember(actorUserId, actorRole, orgId, { userId, role })
   const existing = await orgRepository.findMembership(userId, orgId);
   if (existing) throw new AppError(409, "This user is already a member of this gym");
 
+  // A gym-level COACH role only makes sense for a user who has actually
+  // completed coach registration (real CoachProfile, needed for
+  // assignment to work at all) - previously this was allowed silently,
+  // which meant a "COACH" member could exist that was never actually
+  // assignable, discovered only later via a confusing error.
+  const coachProfile = await orgRepository.findCoachProfileByUserId(userId);
+  if (role === "COACH" && !coachProfile) {
+    throw new AppError(400, "This user hasn't completed coach registration yet (no coach profile) - they need to finish signing up as a coach before they can be added here");
+  }
+
   const membership = await orgRepository.createMembership({ userId, organizationId: orgId, role });
 
   // If they have a CoachProfile, attach it to the org too, so
@@ -90,7 +100,6 @@ export async function addMember(actorUserId, actorRole, orgId, { userId, role })
   // membership alone isn't enough, the CoachProfile needs the
   // organizationId set directly (see schema comment on why it's
   // duplicated rather than always joined through membership).
-  const coachProfile = await orgRepository.findCoachProfileByUserId(userId);
   if (coachProfile) await orgRepository.setCoachOrganization(coachProfile.id, orgId);
 
   return membership;
