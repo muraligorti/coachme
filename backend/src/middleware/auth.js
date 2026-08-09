@@ -174,9 +174,22 @@ export const requireFeature = (feature) => {
   return async (req, res, next) => {
     if (req.user.role === "ADMIN") return next();
 
-    const sub = await prisma.subscription.findUnique({ where: { userId: req.user.id } });
-    const tier = sub?.tier || "FREE";
     const tierFeatures = await getConfig("tierFeatures");
+    let tier;
+
+    // Gym-affiliated coaches: billing comes from the org they belong to,
+    // not a personal subscription - a coach hired by a gym doesn't pay
+    // individually. Falls through to the personal-subscription path for
+    // independent solo coaches exactly as before.
+    const coachProfile = await prisma.coachProfile.findUnique({ where: { userId: req.user.id }, select: { organizationId: true } });
+    if (coachProfile?.organizationId) {
+      const org = await prisma.organization.findUnique({ where: { id: coachProfile.organizationId }, select: { tier: true } });
+      tier = org?.tier || "FREE";
+    } else {
+      const sub = await prisma.subscription.findUnique({ where: { userId: req.user.id } });
+      tier = sub?.tier || "FREE";
+    }
+
     const features = tierFeatures[tier] || tierFeatures.FREE;
 
     if (!features[feature]) {
@@ -199,15 +212,26 @@ export const requireFeature = (feature) => {
 export const checkClientLimit = async (req, res, next) => {
   if (req.user.role === "ADMIN") return next();
 
-  const sub = await prisma.subscription.findUnique({ where: { userId: req.user.id } });
-  const tier = sub?.tier || "FREE";
-  const tierFeatures = await getConfig("tierFeatures");
-  const maxClients = tierFeatures[tier]?.maxClients || 5;
-
   const coachProfile = await prisma.coachProfile.findUnique({ where: { userId: req.user.id } });
   if (!coachProfile) return res.status(404).json({ error: "Coach profile not found" });
 
-  const currentClients = await prisma.clientCoach.count({ where: { coachId: coachProfile.id, status: "active" } });
+  let tier, maxClients, currentClients;
+
+  if (coachProfile.organizationId) {
+    // Gym coach: capacity is shared across the whole org, not per-coach -
+    // counts every client in the org, not just this coach's own mapped
+    // roster, against the org's shared maxClients.
+    const org = await prisma.organization.findUnique({ where: { id: coachProfile.organizationId } });
+    tier = org?.tier || "FREE";
+    maxClients = org?.maxClients ?? 25;
+    currentClients = await prisma.clientProfile.count({ where: { organizationId: coachProfile.organizationId } });
+  } else {
+    const sub = await prisma.subscription.findUnique({ where: { userId: req.user.id } });
+    const tierFeatures = await getConfig("tierFeatures");
+    tier = sub?.tier || "FREE";
+    maxClients = tierFeatures[tier]?.maxClients || 5;
+    currentClients = await prisma.clientCoach.count({ where: { coachId: coachProfile.id, status: "active" } });
+  }
 
   if (currentClients >= maxClients) {
     return res.status(403).json({
@@ -215,7 +239,9 @@ export const checkClientLimit = async (req, res, next) => {
       current: currentClients,
       max: maxClients,
       tier,
-      message: `Your ${tier} plan allows ${maxClients} clients. Upgrade to add more.`,
+      message: coachProfile.organizationId
+        ? `Your gym's ${tier} plan allows ${maxClients} clients total. Contact your gym admin to upgrade.`
+        : `Your ${tier} plan allows ${maxClients} clients. Upgrade to add more.`,
     });
   }
 

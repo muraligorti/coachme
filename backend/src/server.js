@@ -37,6 +37,7 @@ import pushRoutes from "./routes/push.js";
 import notificationPreferenceRoutes from "./routes/notificationPreferences.js";
 import invoiceRoutes from "./routes/invoices.js";
 import configRoutes from "./routes/config.js";
+import organizationRoutes from "./routes/organizations.js";
 
 // ─── Initialize Services ────────────────────────────────────────────
 
@@ -187,6 +188,7 @@ app.use("/api/push", pushRoutes);
 app.use("/api/notification-preferences", notificationPreferenceRoutes);
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/config", configRoutes);
+app.use("/api/organizations", organizationRoutes);
 
 // Health check
 app.get("/api/health", async (req, res) => {
