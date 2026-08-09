@@ -12,9 +12,11 @@ export default function ImpersonationBanner() {
   if (!impersonating) return null;
 
   return (
-    <div style={{ position: "sticky", top: 0, zIndex: 9999, background: C.wn, color: "#1a1a1a", padding: "8px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12.5, fontWeight: 600 }}>
-      <span>🎭 Viewing as {user?.name || user?.email} ({user?.role})</span>
-      <button onClick={stopImpersonating} style={{ background: "#1a1a1a", color: C.wn, border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Stop Impersonating</button>
+    <div style={{ position: "sticky", top: 0, zIndex: 9999, background: C.wn, paddingTop: "env(safe-area-inset-top, 0px)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: 600, margin: "0 auto", padding: "8px 16px", color: "#1a1a1a", fontSize: 12.5, fontWeight: 600 }}>
+        <span>🎭 Viewing as {user?.name || user?.email} ({user?.role})</span>
+        <button onClick={stopImpersonating} style={{ background: "#1a1a1a", color: C.wn, border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Stop Impersonating</button>
+      </div>
     </div>
   );
 }
