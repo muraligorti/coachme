@@ -28,9 +28,9 @@ export async function update(req, res) {
   catch (err) { sendError(err, res, "Failed to update gym"); }
 }
 
-export async function addMember(req, res) {
-  try { res.status(201).json(await organizationService.addMember(req.user.id, req.user.role, req.params.id, req.body || {})); }
-  catch (err) { sendError(err, res, "Failed to add member"); }
+export async function createCoach(req, res) {
+  try { res.status(201).json(await organizationService.createGymCoach(req.user.id, req.user.role, req.params.id, req.body || {})); }
+  catch (err) { sendError(err, res, "Failed to create coach"); }
 }
 
 export async function removeMember(req, res) {
@@ -53,9 +53,9 @@ export async function listClients(req, res) {
   catch (err) { sendError(err, res, "Failed to load clients"); }
 }
 
-export async function attachClient(req, res) {
-  try { res.json(await organizationService.addExistingClientToOrg(req.user.id, req.user.role, req.params.id, req.params.clientId)); }
-  catch (err) { sendError(err, res, "Failed to add client to gym"); }
+export async function createClient(req, res) {
+  try { res.status(201).json(await organizationService.createGymClient(req.user.id, req.user.role, req.params.id, req.body || {})); }
+  catch (err) { sendError(err, res, "Failed to create client"); }
 }
 
 export async function assignCoach(req, res) {

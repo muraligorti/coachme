@@ -1,21 +1,28 @@
 // ═══════════════════════════════════════════════════════════════════════
-// ADMIN GYMS — create gyms, add/remove coach members, and assign coaches
-// to clients within a gym. All the actual tenant-isolation logic lives
-// server-side (organizationService.js) - this is just the UI for it.
+// ADMIN GYMS — create gyms, add coaches as employees, create clients
+// tagged to the gym, and assign coaches to clients. Deliberately NOT a
+// "search for an existing user and attach them" flow - every coach and
+// client here is created fresh, directly for this gym, so they're never
+// a half-complete state discovered later. All the actual tenant
+// isolation logic lives server-side (organizationService.js) - this is
+// just the UI for it.
 // ═══════════════════════════════════════════════════════════════════════
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { C } from "../../theme/theme.js";
 import { api } from "../../lib/api.js";
-import { Card, Badge, Btn, Input, Sel, Empty, Spin, ST, Modal } from "../../components/ui.jsx";
+import { Card, Btn, Input, Sel, Empty, Spin, ST, Modal } from "../../components/ui.jsx";
 
 export default function AdminGymsPage() {
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ name: "", tier: "STARTER", maxClients: 25, city: "", country: "" });
   const [sel, setSel] = useState(null); // selected gym id
   const [detail, setDetail] = useState(null); // { org, members, coaches, clients }
   const [detailLoading, setDetailLoading] = useState(false);
+  const [showAddCoach, setShowAddCoach] = useState(false);
+  const [showAddClient, setShowAddClient] = useState(false);
+  const [coachForm, setCoachForm] = useState({ name: "", email: "", phone: "", city: "", country: "" });
+  const [clientForm, setClientForm] = useState({ name: "", email: "", phone: "", age: "", gender: "" });
 
   const createGym = async () => {
     if (!form.name.trim()) { setError("Gym name is required"); return; }
@@ -44,42 +51,30 @@ export default function AdminGymsPage() {
 
   const refreshDetail = () => { if (sel) openGym(sel); };
 
-  const [memberEmail, setMemberEmail] = useState("");
-  const [memberRole, setMemberRole] = useState("COACH");
-  const addMember = async () => {
-    setError("");
-    try {
-      // Looking up a user by email isn't a dedicated endpoint yet -
-      // reusing admin's user search, which already exists.
-      const search = await api.get(`/admin/users?search=${encodeURIComponent(memberEmail)}`);
-      const match = search.users?.find(u => u.email === memberEmail.trim().toLowerCase());
-      if (!match) { setError("No user found with that exact email"); return; }
-      await api.post(`/organizations/${sel}/members`, { userId: match.id, role: memberRole });
-      setMemberEmail("");
-      refreshDetail();
-    } catch (e) { setError(e.message); }
-  };
-
   const removeMember = async (userId) => {
-    if (!confirm("Remove this member from the gym?")) return;
+    if (!confirm("Remove this member from the gym? Their account isn't deleted, just detached.")) return;
     try { await api.del(`/organizations/${sel}/members/${userId}`); refreshDetail(); }
     catch (e) { setError(e.message); }
   };
 
-  const [clientEmail, setClientEmail] = useState("");
-  const attachClient = async () => {
+  const createCoach = async () => {
+    if (!coachForm.name.trim() || !coachForm.email.trim()) { setError("Coach name and email are required"); return; }
     setError("");
     try {
-      const search = await api.get(`/admin/users?search=${encodeURIComponent(clientEmail)}`);
-      const match = search.users?.find(u => u.email === clientEmail.trim().toLowerCase() && u.role === "CLIENT");
-      if (!match) { setError("No client found with that exact email"); return; }
-      // The attach endpoint needs the ClientProfile id, not the User id -
-      // the search result only gives us the user, so fetch full detail
-      // to get clientProfile.id.
-      const full = await api.get(`/admin/users/${match.id}`);
-      if (!full.clientProfile?.id) { setError("This user has no client profile yet"); return; }
-      await api.post(`/organizations/${sel}/clients/${full.clientProfile.id}/attach`);
-      setClientEmail("");
+      await api.post(`/organizations/${sel}/coaches`, coachForm);
+      setShowAddCoach(false);
+      setCoachForm({ name: "", email: "", phone: "", city: "", country: "" });
+      refreshDetail();
+    } catch (e) { setError(e.message); }
+  };
+
+  const createClient = async () => {
+    if (!clientForm.name.trim() || !clientForm.email.trim()) { setError("Client name and email are required"); return; }
+    setError("");
+    try {
+      await api.post(`/organizations/${sel}/clients`, clientForm);
+      setShowAddClient(false);
+      setClientForm({ name: "", email: "", phone: "", age: "", gender: "" });
       refreshDetail();
     } catch (e) { setError(e.message); }
   };
@@ -90,6 +85,7 @@ export default function AdminGymsPage() {
     if (!assignClientId || !assignCoachId) return;
     try {
       await api.post(`/organizations/${sel}/clients/${assignClientId}/assign`, { coachId: assignCoachId });
+      setAssignClientId(""); setAssignCoachId("");
       refreshDetail();
     } catch (e) { setError(e.message); }
   };
@@ -108,33 +104,16 @@ export default function AdminGymsPage() {
             {error && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10, marginBottom: 12 }}>{error}</div>}
 
             <Card style={{ marginBottom: 12, padding: 16 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 10 }}>Members</div>
-              {detail.members.map(m => {
-                // A "COACH" membership doesn't mean they've actually
-                // completed their coach profile yet (displayName, city,
-                // etc.) - and only a completed CoachProfile can be
-                // assigned to a client. Cross-referencing here so this is
-                // visible up front, instead of a confusing "coach not
-                // found" error only surfacing later when assignment is
-                // attempted.
-                const hasProfile = m.role !== "COACH" || detail.coaches.some(c => c.userId === m.userId);
-                return (
-                  <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${C.bd}` }}>
-                    <div>
-                      <div style={{ fontSize: 13, color: C.tx }}>{m.user.email}</div>
-                      <div style={{ fontSize: 11, color: hasProfile ? C.mt : C.wn }}>
-                        {m.role}{!hasProfile && " · ⚠ Hasn't completed their coach profile yet — can't be assigned to clients until they do"}
-                      </div>
-                    </div>
-                    <button onClick={() => removeMember(m.userId)} style={{ background: "none", border: "none", color: C.dg, cursor: "pointer", fontSize: 12, fontWeight: 600, flexShrink: 0, marginLeft: 12 }}>Remove</button>
-                  </div>
-                );
-              })}
-              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <Input value={memberEmail} onChange={e => setMemberEmail(e.target.value)} placeholder="coach's email" style={{ flex: 1 }} />
-                <Sel value={memberRole} onChange={e => setMemberRole(e.target.value)} options={[{ value: "COACH", label: "Coach" }, { value: "ADMIN", label: "Gym Admin" }]} style={{ width: 110 }} />
-                <Btn onClick={addMember} style={{ padding: "10px 14px", fontSize: 12 }}>Add</Btn>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>Coaches ({detail.coaches.length})</div>
+                <button onClick={() => setShowAddCoach(true)} style={{ fontSize: 12, color: C.ac, background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>+ Add Coach</button>
               </div>
+              {detail.coaches.length === 0 ? <div style={{ fontSize: 12, color: C.mt }}>No coaches yet.</div> : detail.members.filter(m => m.role === "COACH").map(m => (
+                <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${C.bd}` }}>
+                  <div style={{ fontSize: 13, color: C.tx }}>{m.user.email}</div>
+                  <button onClick={() => removeMember(m.userId)} style={{ background: "none", border: "none", color: C.dg, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Remove</button>
+                </div>
+              ))}
             </Card>
 
             <Card style={{ marginBottom: 12, padding: 16 }}>
@@ -151,15 +130,38 @@ export default function AdminGymsPage() {
             </Card>
 
             <Card style={{ padding: 16 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 10 }}>Clients ({detail.clients.length})</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>Clients ({detail.clients.length})</div>
+                <button onClick={() => setShowAddClient(true)} style={{ fontSize: 12, color: C.ac, background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>+ Add Client</button>
+              </div>
               {detail.clients.length === 0 ? <Empty icon="👥" text="No clients in this gym yet" /> : detail.clients.map(c => (
                 <div key={c.id} style={{ fontSize: 13, color: C.tx, padding: "8px 0", borderBottom: `1px solid ${C.bd}` }}>{c.displayName}</div>
               ))}
-              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <Input value={clientEmail} onChange={e => setClientEmail(e.target.value)} placeholder="client's email" style={{ flex: 1 }} />
-                <Btn onClick={attachClient} style={{ padding: "10px 14px", fontSize: 12 }}>+ Attach Client</Btn>
-              </div>
             </Card>
+
+            <Modal open={showAddCoach} onClose={() => setShowAddCoach(false)} title="Add Coach">
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ fontSize: 12, color: C.mt }}>Creates a new coach account directly for this gym — not a search for an existing user. They'll set their own password via the forgot-password flow using this email.</div>
+                <Input label="Full Name" value={coachForm.name} onChange={e => setCoachForm({ ...coachForm, name: e.target.value })} placeholder="Priya Sharma" />
+                <Input label="Email" type="email" value={coachForm.email} onChange={e => setCoachForm({ ...coachForm, email: e.target.value })} placeholder="priya@email.com" />
+                <Input label="Phone" value={coachForm.phone} onChange={e => setCoachForm({ ...coachForm, phone: e.target.value })} placeholder="9876543210" />
+                <Input label="City" value={coachForm.city} onChange={e => setCoachForm({ ...coachForm, city: e.target.value })} placeholder={detail.org.city || "Hyderabad"} />
+                {error && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10 }}>{error}</div>}
+                <Btn onClick={createCoach} style={{ width: "100%" }}>Create Coach</Btn>
+              </div>
+            </Modal>
+
+            <Modal open={showAddClient} onClose={() => setShowAddClient(false)} title="Add Client">
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ fontSize: 12, color: C.mt }}>Creates a new client account directly for this gym.</div>
+                <Input label="Full Name" value={clientForm.name} onChange={e => setClientForm({ ...clientForm, name: e.target.value })} placeholder="Rohan Mehta" />
+                <Input label="Email" type="email" value={clientForm.email} onChange={e => setClientForm({ ...clientForm, email: e.target.value })} placeholder="rohan@email.com" />
+                <Input label="Phone" value={clientForm.phone} onChange={e => setClientForm({ ...clientForm, phone: e.target.value })} placeholder="9876543210" />
+                <Input label="Age" type="number" value={clientForm.age} onChange={e => setClientForm({ ...clientForm, age: e.target.value })} />
+                {error && <div style={{ color: C.dg, fontSize: 13, padding: "10px 14px", background: C.dg + "15", borderRadius: 10 }}>{error}</div>}
+                <Btn onClick={createClient} style={{ width: "100%" }}>Create Client</Btn>
+              </div>
+            </Modal>
           </>
         )}
       </div>
