@@ -109,12 +109,27 @@ export default function AdminGymsPage() {
 
             <Card style={{ marginBottom: 12, padding: 16 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 10 }}>Members</div>
-              {detail.members.map(m => (
-                <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${C.bd}` }}>
-                  <div><div style={{ fontSize: 13, color: C.tx }}>{m.user.email}</div><div style={{ fontSize: 11, color: C.mt }}>{m.role}</div></div>
-                  <button onClick={() => removeMember(m.userId)} style={{ background: "none", border: "none", color: C.dg, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Remove</button>
-                </div>
-              ))}
+              {detail.members.map(m => {
+                // A "COACH" membership doesn't mean they've actually
+                // completed their coach profile yet (displayName, city,
+                // etc.) - and only a completed CoachProfile can be
+                // assigned to a client. Cross-referencing here so this is
+                // visible up front, instead of a confusing "coach not
+                // found" error only surfacing later when assignment is
+                // attempted.
+                const hasProfile = m.role !== "COACH" || detail.coaches.some(c => c.userId === m.userId);
+                return (
+                  <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${C.bd}` }}>
+                    <div>
+                      <div style={{ fontSize: 13, color: C.tx }}>{m.user.email}</div>
+                      <div style={{ fontSize: 11, color: hasProfile ? C.mt : C.wn }}>
+                        {m.role}{!hasProfile && " · ⚠ Hasn't completed their coach profile yet — can't be assigned to clients until they do"}
+                      </div>
+                    </div>
+                    <button onClick={() => removeMember(m.userId)} style={{ background: "none", border: "none", color: C.dg, cursor: "pointer", fontSize: 12, fontWeight: 600, flexShrink: 0, marginLeft: 12 }}>Remove</button>
+                  </div>
+                );
+              })}
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                 <Input value={memberEmail} onChange={e => setMemberEmail(e.target.value)} placeholder="coach's email" style={{ flex: 1 }} />
                 <Sel value={memberRole} onChange={e => setMemberRole(e.target.value)} options={[{ value: "COACH", label: "Coach" }, { value: "ADMIN", label: "Gym Admin" }]} style={{ width: 110 }} />
