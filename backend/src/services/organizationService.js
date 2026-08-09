@@ -9,6 +9,8 @@
 import { AppError } from "../lib/AppError.js";
 import * as orgRepository from "../repositories/organizationRepository.js";
 import * as userRepository from "../repositories/userRepository.js";
+import * as profileRepository from "../repositories/profileRepository.js";
+import { runTransaction } from "../repositories/transactionManager.js";
 
 const VALID_TIERS = ["FREE", "STARTER", "PRO", "ELITE", "PREMIUM"];
 
@@ -74,35 +76,67 @@ export async function getMyOrganizations(userId) {
 
 // ── Membership ──────────────────────────────────────────────────────────
 
-export async function addMember(actorUserId, actorRole, orgId, { userId, role }) {
+// Creates a genuinely new coach account as a gym employee - not a
+// search-and-attach of some existing user. This is the actual fix for
+// the mess the previous search-based addMember caused: a gym coach
+// created this way is complete (real CoachProfile, real membership,
+// organizationId set) from the moment they exist, never a half-state
+// discovered later via a confusing error. Uses the same PENDING_INVITE
+// pattern the existing solo-coach "add client" flow already relies on -
+// the account exists and can be used to log in once they set a password
+// via the normal forgot-password flow, or a dedicated invite flow later.
+export async function createGymCoach(actorUserId, actorRole, orgId, { name, email, phone, city, country, specializations }) {
   await requireOrgAdmin(actorUserId, actorRole, orgId);
-  if (!["ADMIN", "COACH"].includes(role)) throw new AppError(400, "role must be ADMIN or COACH");
-  const targetUser = await userRepository.findByIdBasic(userId);
-  if (!targetUser) throw new AppError(404, "User not found");
+  if (!name?.trim()) throw new AppError(400, "Coach name is required");
+  if (!email?.trim()) throw new AppError(400, "Coach email is required");
 
-  const existing = await orgRepository.findMembership(userId, orgId);
-  if (existing) throw new AppError(409, "This user is already a member of this gym");
+  const org = await orgRepository.findById(orgId);
+  if (!org) throw new AppError(404, "Gym not found");
 
-  // A gym-level COACH role only makes sense for a user who has actually
-  // completed coach registration (real CoachProfile, needed for
-  // assignment to work at all) - previously this was allowed silently,
-  // which meant a "COACH" member could exist that was never actually
-  // assignable, discovered only later via a confusing error.
-  const coachProfile = await orgRepository.findCoachProfileByUserId(userId);
-  if (role === "COACH" && !coachProfile) {
-    throw new AppError(400, "This user hasn't completed coach registration yet (no coach profile) - they need to finish signing up as a coach before they can be added here");
-  }
+  const cleanEmail = email.trim().toLowerCase();
+  const existingUser = await userRepository.findByEmail(cleanEmail);
+  if (existingUser) throw new AppError(409, "An account with this email already exists - this flow is only for genuinely new gym coaches");
 
-  const membership = await orgRepository.createMembership({ userId, organizationId: orgId, role });
+  return runTransaction(async (tx) => {
+    const user = await userRepository.create({ email: cleanEmail, passwordHash: "PENDING_INVITE", role: "COACH" }, tx);
+    const coachProfile = await profileRepository.createCoachProfile({
+      userId: user.id, organizationId: orgId, displayName: name.trim(), phone: phone || null,
+      city: city || org.city || "", country: country || org.country || "",
+      specializations: specializations || [], certifications: [], languages: [],
+    }, tx);
+    const membership = await orgRepository.createMembership({ userId: user.id, organizationId: orgId, role: "COACH" }, tx);
+    return { user: { id: user.id, email: user.email }, coachProfile, membership };
+  });
+}
 
-  // If they have a CoachProfile, attach it to the org too, so
-  // org-scoped client/billing queries pick them up automatically -
-  // membership alone isn't enough, the CoachProfile needs the
-  // organizationId set directly (see schema comment on why it's
-  // duplicated rather than always joined through membership).
-  if (coachProfile) await orgRepository.setCoachOrganization(coachProfile.id, orgId);
+// Same principle for clients - created directly for the gym, never a
+// pre-existing account being pulled in. Mirrors the solo-coach
+// "POST /clients" invite pattern exactly, with organizationId set from
+// the start instead of requiring a separate attach step.
+export async function createGymClient(actorUserId, actorRole, orgId, { name, email, phone, age, gender, goals, notes }) {
+  await requireOrgAdmin(actorUserId, actorRole, orgId);
+  if (!name?.trim()) throw new AppError(400, "Client name is required");
+  if (!email?.trim()) throw new AppError(400, "Client email is required");
 
-  return membership;
+  const org = await orgRepository.findById(orgId);
+  if (!org) throw new AppError(404, "Gym not found");
+  const currentCount = await orgRepository.countClientsForOrg(orgId);
+  if (currentCount >= org.maxClients) throw new AppError(403, `This gym's plan allows ${org.maxClients} clients. Upgrade to add more.`);
+
+  const cleanEmail = email.trim().toLowerCase();
+  const existingUser = await userRepository.findByEmail(cleanEmail);
+  if (existingUser) throw new AppError(409, "An account with this email already exists - this flow is only for genuinely new gym clients");
+
+  return runTransaction(async (tx) => {
+    const user = await userRepository.create({ email: cleanEmail, passwordHash: "PENDING_INVITE", role: "CLIENT" }, tx);
+    const clientProfile = await profileRepository.createClientProfile({
+      userId: user.id, organizationId: orgId, displayName: name.trim(), phone: phone || null,
+      age: age ? parseInt(age) : null, gender: gender || null, notes: notes || null,
+      fitnessGoals: goals ? (Array.isArray(goals) ? goals : [goals]) : [],
+    }, tx);
+    await profileRepository.createSubscription({ userId: user.id, tier: "FREE" }, tx);
+    return { user: { id: user.id, email: user.email }, clientProfile };
+  });
 }
 
 export async function removeMember(actorUserId, actorRole, orgId, targetUserId) {
@@ -177,18 +211,3 @@ export async function listClientCoaches(actorUserId, actorRole, orgId, clientId)
   return orgRepository.findMappingsForClient(clientId);
 }
 
-// Moves an existing independent client into a gym - assigning them a
-// coach still requires the separate assignCoachToClient call above,
-// this just establishes tenant ownership.
-export async function addExistingClientToOrg(actorUserId, actorRole, orgId, clientId) {
-  await requireOrgAdmin(actorUserId, actorRole, orgId);
-  const client = await orgRepository.findClientProfileById(clientId);
-  if (!client) throw new AppError(404, "Client not found");
-  if (client.organizationId && client.organizationId !== orgId) throw new AppError(409, "This client already belongs to a different gym");
-
-  const org = await orgRepository.findById(orgId);
-  const currentCount = await orgRepository.countClientsForOrg(orgId);
-  if (currentCount >= org.maxClients) throw new AppError(403, `This gym's plan allows ${org.maxClients} clients. Upgrade to add more.`);
-
-  return orgRepository.setClientOrganization(client.id, orgId);
-}
