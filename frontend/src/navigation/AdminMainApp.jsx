@@ -1,18 +1,20 @@
 // ═══════════════════════════════════════════════════════════════════════
-// ADMIN MAIN APP — the platform-admin shell: Users, Audit Log, Config.
+// ADMIN MAIN APP — the platform-admin shell: Users, Gyms, Audit Log, Config.
 // ═══════════════════════════════════════════════════════════════════════
 import { useState } from "react";
 import { C } from "../theme/theme.js";
 import AdminUsersPage from "../pages/admin/AdminUsersPage.jsx";
+import AdminGymsPage from "../pages/admin/AdminGymsPage.jsx";
 import AdminAuditLogPage from "../pages/admin/AdminAuditLogPage.jsx";
 import AdminConfigPage from "../pages/admin/AdminConfigPage.jsx";
 
 export default function AdminMainApp() {
   const [tab, setTab] = useState("users"); const [rk, setRk] = useState(0);
-  const tabs = [{ id: "users", icon: "👤", label: "Users" }, { id: "audit", icon: "📜", label: "Audit Log" }, { id: "config", icon: "⚙️", label: "Config" }];
+  const tabs = [{ id: "users", icon: "👤", label: "Users" }, { id: "gyms", icon: "🏋️", label: "Gyms" }, { id: "audit", icon: "📜", label: "Audit Log" }, { id: "config", icon: "⚙️", label: "Config" }];
 
   const render = () => {
     const K = `${tab}_${rk}`;
+    if (tab === "gyms") return <AdminGymsPage key={K} />;
     if (tab === "audit") return <AdminAuditLogPage key={K} />;
     if (tab === "config") return <AdminConfigPage key={K} />;
     return <AdminUsersPage key={K} />;
