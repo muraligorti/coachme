@@ -243,10 +243,15 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
 // ─── Start Server ────────────────────────────────────────────────────
+// Guarded: test files import `app` directly (via supertest) without
+// wanting a real port bound - vitest sets NODE_ENV=test (see
+// vitest.config.js), which skips this.
 
-app.listen(PORT, () => {
-  logger.info(`FIT:OS NEXUS API running on port ${PORT}`);
-  logger.info(`Environment: ${process.env.NODE_ENV || "development"}`);
-});
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, () => {
+    logger.info(`FIT:OS NEXUS API running on port ${PORT}`);
+    logger.info(`Environment: ${process.env.NODE_ENV || "development"}`);
+  });
+}
 
 export default app;
