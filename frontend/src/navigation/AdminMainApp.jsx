@@ -3,13 +3,11 @@
 // ═══════════════════════════════════════════════════════════════════════
 import { useState } from "react";
 import { C } from "../theme/theme.js";
-import { useAuth } from "../context/AuthContext.jsx";
 import AdminUsersPage from "../pages/admin/AdminUsersPage.jsx";
 import AdminAuditLogPage from "../pages/admin/AdminAuditLogPage.jsx";
 import AdminConfigPage from "../pages/admin/AdminConfigPage.jsx";
 
 export default function AdminMainApp() {
-  const { logout } = useAuth();
   const [tab, setTab] = useState("users"); const [rk, setRk] = useState(0);
   const tabs = [{ id: "users", icon: "👤", label: "Users" }, { id: "audit", icon: "📜", label: "Audit Log" }, { id: "config", icon: "⚙️", label: "Config" }];
 
@@ -24,12 +22,9 @@ export default function AdminMainApp() {
     <div style={{ minHeight: "100dvh", background: C.bg, color: C.tx, fontFamily: "'DM Sans','SF Pro Display',-apple-system,system-ui,sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{background:${C.bg};overflow-x:hidden}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:${C.bd};border-radius:4px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}input::placeholder,textarea::placeholder{color:${C.mt}}select option{background:${C.sf};color:${C.tx}}.jz-press{transition:transform .15s ease}.jz-press:active{transform:scale(.96)}`}</style>
       <div style={{ padding: "calc(16px + env(safe-area-inset-top,0px)) 16px 104px", maxWidth: 680, margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: .5, background: "#E31937", color: "#fff", padding: "3px 8px", borderRadius: 20 }}>ADMIN</span>
-            <span style={{ fontSize: 13, color: C.mt, fontWeight: 500 }}>CoachMe.life Platform</span>
-          </div>
-          <button onClick={() => { if (confirm("Sign out?")) logout(); }} style={{ width: 32, height: 32, borderRadius: 16, border: `1px solid ${C.bd}`, cursor: "pointer", background: C.sf, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }} title="Sign Out">🚪</button>
+        <div style={{ marginBottom: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: .5, background: "#E31937", color: "#fff", padding: "3px 8px", borderRadius: 20 }}>ADMIN</span>
+          <span style={{ fontSize: 13, color: C.mt, fontWeight: 500, marginLeft: 8 }}>CoachMe.life Platform</span>
         </div>
         {render()}
       </div>
