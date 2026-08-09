@@ -66,6 +66,24 @@ export default function AdminGymsPage() {
     catch (e) { setError(e.message); }
   };
 
+  const [clientEmail, setClientEmail] = useState("");
+  const attachClient = async () => {
+    setError("");
+    try {
+      const search = await api.get(`/admin/users?search=${encodeURIComponent(clientEmail)}`);
+      const match = search.users?.find(u => u.email === clientEmail.trim().toLowerCase() && u.role === "CLIENT");
+      if (!match) { setError("No client found with that exact email"); return; }
+      // The attach endpoint needs the ClientProfile id, not the User id -
+      // the search result only gives us the user, so fetch full detail
+      // to get clientProfile.id.
+      const full = await api.get(`/admin/users/${match.id}`);
+      if (!full.clientProfile?.id) { setError("This user has no client profile yet"); return; }
+      await api.post(`/organizations/${sel}/clients/${full.clientProfile.id}/attach`);
+      setClientEmail("");
+      refreshDetail();
+    } catch (e) { setError(e.message); }
+  };
+
   const [assignClientId, setAssignClientId] = useState("");
   const [assignCoachId, setAssignCoachId] = useState("");
   const assignCoach = async () => {
@@ -122,6 +140,10 @@ export default function AdminGymsPage() {
               {detail.clients.length === 0 ? <Empty icon="👥" text="No clients in this gym yet" /> : detail.clients.map(c => (
                 <div key={c.id} style={{ fontSize: 13, color: C.tx, padding: "8px 0", borderBottom: `1px solid ${C.bd}` }}>{c.displayName}</div>
               ))}
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <Input value={clientEmail} onChange={e => setClientEmail(e.target.value)} placeholder="client's email" style={{ flex: 1 }} />
+                <Btn onClick={attachClient} style={{ padding: "10px 14px", fontSize: 12 }}>+ Attach Client</Btn>
+              </div>
             </Card>
           </>
         )}
