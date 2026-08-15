@@ -17,7 +17,7 @@ Real integration tests against real routes, a real (dedicated) test database, an
    export TEST_DATABASE_URL="postgresql://user:password@host:5432/coachme_test"
    ```
 
-3. Push the schema to the test database (one-time, or after any schema change):
+3. Push the schema to the test database (one-time, or after any schema change) — `db push` is the right tool specifically here, since this is a disposable test database with no real data to protect (see `prisma/BASELINE.md` for why production uses real migrations instead):
    ```bash
    DATABASE_URL="$TEST_DATABASE_URL" npx prisma db push
    ```
